@@ -1,6 +1,11 @@
-# Private exact-head owned CI
+# Private exact-head focused and owned CI
 
-This repository includes a manual-only workflow that checks out one exact commit from the private TrainingOS repository and runs its repository-owned CI script.
+This repository includes a manual-only workflow that checks out one exact commit from the private TrainingOS repository and runs two independent validations:
+
+```text
+W4-3 focused Python contract: 19/19 required
+canonical repository ci:owned: complete required
+```
 
 ## Required secret
 
@@ -15,21 +20,30 @@ Use a fine-grained token restricted to `moseszhu999/training-learning-rails` wit
 ## Run procedure
 
 1. Open **Actions**.
-2. Select **Private exact-head owned CI**.
+2. Select **Private exact-head focused and owned CI**.
 3. Choose **Run workflow**.
 4. Paste the exact lowercase 40-character private commit SHA.
 5. Leave browser acceptance disabled unless it is explicitly required.
 
+The focused command is fixed in the workflow:
+
+```text
+python -m unittest -v tests/test_trainingos_wave4_deliverable_evidence_contract.py
+```
+
+The focused result is accepted only when the process exits successfully, unittest reports `OK`, and exactly 19 tests ran.
+
 ## Public-log boundary
 
-The private test command writes its complete output only to the ephemeral runner. The public workflow exposes only:
+Both private commands write their complete output only to ephemeral runner files. The public workflow exposes only:
 
 - requested exact SHA;
-- PASS or FAIL;
-- last completed or failed step;
-- timestamps, exit code, and runtime summary.
+- focused PASS or FAIL and the sanitized count out of 19;
+- `ci:owned` PASS or FAIL;
+- last completed or failed owned step;
+- timestamps, exit codes, and runtime summary.
 
-The workflow does not upload the private checkout, raw logs, reports, build output, or test artifacts. It removes the checkout and sealed log before completing.
+The workflow does not upload the private checkout, raw logs, reports, build output, or test artifacts. It removes the checkout and both sealed logs before completing.
 
 ## Trigger boundary
 
