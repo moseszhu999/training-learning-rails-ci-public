@@ -26,4 +26,8 @@ Every change runs a public-boundary scan before unit tests. Files should enter t
 npm run check
 ```
 
+## CI lifecycle
+
+Pull requests run the boundary gate and synthetic unit tests. The same checks run again after approved changes reach `main`.
+
 The private TrainingOS repository remains the system of record. This repository is not a deployment source and must not be connected to production services.
