@@ -1,0 +1,278 @@
+name: Validate private TrainingOS W3A-4 exact head
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/validate-private-w3a4.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-w3a4-1f97078b8263c1bfa74e0046fad6b13f040f582c
+  cancel-in-progress: false
+
+jobs:
+  exact-head-validation:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'ci/verify-private-pr272-w3a4'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: 1f97078b8263c1bfa74e0046fad6b13f040f582c
+
+    steps:
+      - name: Validate fixed exact head and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::PRIVATE_SHA must be an exact lowercase 40-character commit SHA"
+            exit 2
+          fi
+          if [[ -z "$PRIVATE_TOKEN" ]]; then
+            echo "::error::PRIVATE_REPO_READ_TOKEN is not configured"
+            exit 2
+          fi
+
+      - name: Check out private W3A-4 exact head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: 1f97078b8263c1bfa74e0046fad6b13f040f582c
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head and clean checkout
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$PRIVATE_SHA" ]]; then
+            echo "::error::Checked-out commit does not match the fixed W3A-4 exact head"
+            exit 3
+          fi
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "::error::Private checkout is not clean before validation"
+            exit 3
+          fi
+          printf 'Verified private exact head: `%s`\n' "$actual_sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run W3A-4 Python focused contract with sealed output
+        id: python_focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest -v tests.test_trainingos_wave3_assessment_grading_result_contract \
+            > "$RUNNER_TEMP/private-w3a4-python.log" 2>&1
+          exit_code=$?
+          python - "$RUNNER_TEMP/private-w3a4-python.log" "$exit_code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          log_path = pathlib.Path(sys.argv[1])
+          exit_code = int(sys.argv[2])
+          output_path = pathlib.Path(sys.argv[3])
+          text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+          match = re.search(r"Ran\s+(\d+)\s+tests?", text)
+          test_count = int(match.group(1)) if match else 0
+          ok = exit_code == 0 and test_count == 20 and re.search(r"(?:^|\n)OK(?:\s|\n|$)", text) is not None
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"exit_code={exit_code}\n")
+              handle.write(f"test_count={test_count}\n")
+              handle.write(f"status={'PASS' if ok else 'FAIL'}\n")
+          PY
+          exit 0
+
+      - name: Run assessment confirmation Node contract with sealed output
+        id: node_focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/test/assessment-human-confirmation.test.mjs \
+            > "$RUNNER_TEMP/private-w3a4-node.log" 2>&1
+          exit_code=$?
+          python - "$RUNNER_TEMP/private-w3a4-node.log" "$exit_code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          log_path = pathlib.Path(sys.argv[1])
+          exit_code = int(sys.argv[2])
+          output_path = pathlib.Path(sys.argv[3])
+          text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+
+          def metric(name):
+              match = re.search(rf"^#\s+{name}\s+(\d+)\s*$", text, re.MULTILINE)
+              return int(match.group(1)) if match else 0
+
+          test_count = metric("tests")
+          pass_count = metric("pass")
+          fail_count = metric("fail")
+          ok = exit_code == 0 and test_count == 8 and pass_count == 8 and fail_count == 0
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"exit_code={exit_code}\n")
+              handle.write(f"test_count={test_count}\n")
+              handle.write(f"pass_count={pass_count}\n")
+              handle.write(f"fail_count={fail_count}\n")
+              handle.write(f"status={'PASS' if ok else 'FAIL'}\n")
+          PY
+          exit 0
+
+      - name: Run private ci:owned with sealed output
+        id: owned
+        working-directory: private-repo
+        shell: bash
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/private-w3a4-owned-ci.log" 2>&1
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized W3A-4 result
+        if: always()
+        shell: bash
+        env:
+          PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
+          PYTHON_TEST_COUNT: ${{ steps.python_focused.outputs.test_count }}
+          PYTHON_EXIT_CODE: ${{ steps.python_focused.outputs.exit_code }}
+          NODE_STATUS: ${{ steps.node_focused.outputs.status }}
+          NODE_TEST_COUNT: ${{ steps.node_focused.outputs.test_count }}
+          NODE_PASS_COUNT: ${{ steps.node_focused.outputs.pass_count }}
+          NODE_FAIL_COUNT: ${{ steps.node_focused.outputs.fail_count }}
+          NODE_EXIT_CODE: ${{ steps.node_focused.outputs.exit_code }}
+          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+          REPORT_FILE: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const number = (value, fallback = 0) => /^\d+$/.test(value || '') ? Number(value) : fallback;
+          const pythonStatus = process.env.PYTHON_STATUS === 'PASS' ? 'PASS' : 'FAIL';
+          const pythonCount = number(process.env.PYTHON_TEST_COUNT);
+          const pythonExit = number(process.env.PYTHON_EXIT_CODE, 1);
+          const nodeStatus = process.env.NODE_STATUS === 'PASS' ? 'PASS' : 'FAIL';
+          const nodeCount = number(process.env.NODE_TEST_COUNT);
+          const nodePass = number(process.env.NODE_PASS_COUNT);
+          const nodeFail = number(process.env.NODE_FAIL_COUNT, 1);
+          const nodeExit = number(process.env.NODE_EXIT_CODE, 1);
+          const ownedExitCode = number(process.env.OWNED_EXIT_CODE, 1);
+          let owned = {
+            status: ownedExitCode === 0 ? 'PASS' : 'FAIL',
+            failedOrLastStep: 'report-unavailable',
+            startedAt: null,
+            finishedAt: null,
+            exitCode: ownedExitCode,
+            runtime: null,
+          };
+
+          try {
+            if (fs.existsSync(process.env.REPORT_FILE)) {
+              const source = JSON.parse(fs.readFileSync(process.env.REPORT_FILE, 'utf8'));
+              owned = {
+                status: source.status === 'PASS' ? 'PASS' : 'FAIL',
+                failedOrLastStep: String(source.failedOrLastStep || 'unknown'),
+                startedAt: source.startedAt || null,
+                finishedAt: source.finishedAt || null,
+                exitCode: Number.isInteger(source.exitCode) ? source.exitCode : ownedExitCode,
+                runtime: source.runtime && typeof source.runtime === 'object'
+                  ? {
+                      node: String(source.runtime.node || ''),
+                      platform: String(source.runtime.platform || ''),
+                      arch: String(source.runtime.arch || ''),
+                    }
+                  : null,
+              };
+            }
+          } catch {
+            owned.status = 'FAIL';
+            owned.failedOrLastStep = 'invalid-sanitized-report';
+            owned.exitCode = ownedExitCode || 1;
+          }
+
+          const summary = [
+            '## TrainingOS W3A-4 exact-head validation',
+            '',
+            `- Exact SHA: \`${process.env.PRIVATE_SHA}\``,
+            `- Python focused contract: **${pythonStatus} ${pythonCount}/20**`,
+            `- Python exit code: \`${pythonExit}\``,
+            `- Node gateway contract: **${nodeStatus} ${nodePass}/${nodeCount}**, fail \`${nodeFail}\``,
+            `- Node exit code: \`${nodeExit}\``,
+            `- ci:owned: **${owned.status}**`,
+            `- Owned last step: \`${owned.failedOrLastStep}\``,
+            `- Owned exit code: \`${owned.exitCode}\``,
+            `- Started: \`${owned.startedAt || 'not-reported'}\``,
+            `- Finished: \`${owned.finishedAt || 'not-reported'}\``,
+          ];
+          if (owned.runtime) {
+            summary.push(`- Runtime: \`${owned.runtime.node} / ${owned.runtime.platform} / ${owned.runtime.arch}\``);
+          }
+          summary.push('', 'Raw private output is sealed and is not published or uploaded.');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
+          console.log(
+            `PRIVATE_W3A4_EXACT python=${pythonStatus}:${pythonCount}/20 node=${nodeStatus}:${nodePass}/${nodeCount} owned=${owned.status} step=${owned.failedOrLastStep} sha=${process.env.PRIVATE_SHA}`,
+          );
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/private-w3a4-python.log" \
+            "$RUNNER_TEMP/private-w3a4-node.log" \
+            "$RUNNER_TEMP/private-w3a4-owned-ci.log"
+
+      - name: Enforce W3A-4 focused and owned results
+        if: always()
+        shell: bash
+        env:
+          PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
+          PYTHON_TEST_COUNT: ${{ steps.python_focused.outputs.test_count }}
+          NODE_STATUS: ${{ steps.node_focused.outputs.status }}
+          NODE_TEST_COUNT: ${{ steps.node_focused.outputs.test_count }}
+          NODE_PASS_COUNT: ${{ steps.node_focused.outputs.pass_count }}
+          NODE_FAIL_COUNT: ${{ steps.node_focused.outputs.fail_count }}
+          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+        run: |
+          failed=0
+          if [[ "${PYTHON_STATUS:-FAIL}" != "PASS" || "${PYTHON_TEST_COUNT:-0}" != "20" ]]; then
+            echo "::error::Private exact-head W3A-4 Python contract did not pass 20/20. Raw output remained sealed."
+            failed=1
+          fi
+          if [[ "${NODE_STATUS:-FAIL}" != "PASS" || "${NODE_TEST_COUNT:-0}" != "8" || "${NODE_PASS_COUNT:-0}" != "8" || "${NODE_FAIL_COUNT:-1}" != "0" ]]; then
+            echo "::error::Private exact-head assessment confirmation Node contract did not pass 8/8. Raw output remained sealed."
+            failed=1
+          fi
+          if [[ "${OWNED_EXIT_CODE:-1}" != "0" ]]; then
+            echo "::error::Private exact-head ci:owned failed. Raw output remained sealed in the ephemeral runner."
+            failed=1
+          fi
+          exit "$failed"
