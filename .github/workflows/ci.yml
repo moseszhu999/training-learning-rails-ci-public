@@ -35,3 +35,68 @@ jobs:
 
       - name: Run PR 265 sanitized focused validation
         run: npm run test:pr265
+
+  w4-3-exact-head-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out TrainingOS W4-3 exact head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: 44a46026eae1c3a5ab68f5e0647cafbcf691e7b0
+          path: trainingos-private
+          token: ${{ github.token }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Verify exact head and clean checkout
+        working-directory: trainingos-private
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "44a46026eae1c3a5ab68f5e0647cafbcf691e7b0"
+          test -z "$(git status --porcelain)"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+          echo "NODE_VERSION=$(node --version)"
+          echo "NPM_VERSION=$(npm --version)"
+          echo "PYTHON_VERSION=$(python --version 2>&1)"
+
+      - name: Run W4-3 focused contract
+        working-directory: trainingos-private
+        run: |
+          set -Eeuo pipefail
+          python -m unittest tests.test_trainingos_wave4_deliverable_evidence_contract -v
+
+      - name: Run owned repository CI without Playwright
+        working-directory: trainingos-private
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+        run: |
+          set -Eeuo pipefail
+          npm run ci:owned
+
+      - name: Emit deterministic report
+        if: always()
+        working-directory: trainingos-private
+        run: |
+          set +e
+          REPORT=.trainingos-ci/owned-container-ci-report.json
+          LOG=.trainingos-ci/owned-container-ci.log
+          if [ -f "$REPORT" ]; then cat "$REPORT"; fi
+          if [ -f "$LOG" ]; then
+            echo FAILURE_LOG_TAIL_BEGIN
+            tail -n 100 "$LOG"
+            echo FAILURE_LOG_TAIL_END
+          fi
+          echo "TEMPORARY_LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null || true)"
+          echo "TRACKED_DIFF=$(if git diff --quiet && git diff --cached --quiet; then echo false; else echo true; fi)"
