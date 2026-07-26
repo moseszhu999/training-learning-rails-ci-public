@@ -1,0 +1,13 @@
+# Paths that may be exported from the private source after review.
+# Every path is relative to this public repository.
+
+.github/workflows/ci.yml
+.gitignore
+README.md
+SECURITY.md
+package.json
+scripts/public-boundary-gate.mjs
+src/preclass-assessment.mjs
+tests/unit/preclass-assessment.test.mjs
+
+# Default rule: anything not explicitly listed above is excluded.
