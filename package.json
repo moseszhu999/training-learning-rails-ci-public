@@ -1,0 +1,14 @@
+{
+  "name": "training-learning-rails-ci-public",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/**/*.test.mjs",
+    "security:gate": "node scripts/public-boundary-gate.mjs",
+    "check": "npm run security:gate && npm test"
+  }
+}
