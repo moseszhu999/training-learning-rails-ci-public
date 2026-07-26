@@ -1,0 +1,175 @@
+name: Private exact-head owned CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      private_sha:
+        description: Exact 40-character commit SHA from the private repository
+        required: true
+        type: string
+      include_playwright:
+        description: Include the browser acceptance suite
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-owned-${{ inputs.private_sha }}
+  cancel-in-progress: false
+
+jobs:
+  owned-ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_SHA: ${{ inputs.private_sha }}
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::private_sha must be an exact lowercase 40-character commit SHA"
+            exit 2
+          fi
+          if [[ -z "$PRIVATE_TOKEN" ]]; then
+            echo "::error::PRIVATE_REPO_READ_TOKEN is not configured"
+            exit 2
+          fi
+
+      - name: Check out the exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ inputs.private_sha }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify the checked-out exact head
+        working-directory: private-repo
+        shell: bash
+        env:
+          PRIVATE_SHA: ${{ inputs.private_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$PRIVATE_SHA" ]]; then
+            echo "::error::Checked-out commit does not match the requested exact SHA"
+            exit 3
+          fi
+          printf 'Verified private exact head: `%s`\n' "$actual_sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run private ci:owned with sealed output
+        id: owned
+        working-directory: private-repo
+        shell: bash
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: ${{ inputs.include_playwright && '1' || '0' }}
+          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/private-owned-ci.log" 2>&1
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized result
+        if: always()
+        shell: bash
+        env:
+          PRIVATE_SHA: ${{ inputs.private_sha }}
+          EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+          REPORT_FILE: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const requestedSha = process.env.PRIVATE_SHA || 'unknown';
+          const rawExitCode = process.env.EXIT_CODE;
+          const exitCode = /^\d+$/.test(rawExitCode || '') ? Number(rawExitCode) : 1;
+          let result = {
+            status: exitCode === 0 ? 'PASS' : 'FAIL',
+            failedOrLastStep: 'report-unavailable',
+            startedAt: null,
+            finishedAt: null,
+            exitCode,
+            runtime: null,
+          };
+
+          try {
+            if (fs.existsSync(process.env.REPORT_FILE)) {
+              const source = JSON.parse(fs.readFileSync(process.env.REPORT_FILE, 'utf8'));
+              result = {
+                status: source.status === 'PASS' ? 'PASS' : 'FAIL',
+                failedOrLastStep: String(source.failedOrLastStep || 'unknown'),
+                startedAt: source.startedAt || null,
+                finishedAt: source.finishedAt || null,
+                exitCode: Number.isInteger(source.exitCode) ? source.exitCode : exitCode,
+                runtime: source.runtime && typeof source.runtime === 'object'
+                  ? {
+                      node: String(source.runtime.node || ''),
+                      platform: String(source.runtime.platform || ''),
+                      arch: String(source.runtime.arch || ''),
+                    }
+                  : null,
+              };
+            }
+          } catch {
+            result.status = 'FAIL';
+            result.failedOrLastStep = 'invalid-sanitized-report';
+            result.exitCode = exitCode || 1;
+          }
+
+          const summary = [
+            '## Private exact-head owned CI',
+            '',
+            `- Exact SHA: \`${requestedSha}\``,
+            `- Status: **${result.status}**`,
+            `- Last step: \`${result.failedOrLastStep}\``,
+            `- Exit code: \`${result.exitCode}\``,
+            `- Started: \`${result.startedAt || 'not-reported'}\``,
+            `- Finished: \`${result.finishedAt || 'not-reported'}\``,
+          ];
+          if (result.runtime) {
+            summary.push(`- Runtime: \`${result.runtime.node} / ${result.runtime.platform} / ${result.runtime.arch}\``);
+          }
+          summary.push('', 'Raw private test output is intentionally not published or uploaded.');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
+          console.log(`PRIVATE_OWNED_CI status=${result.status} step=${result.failedOrLastStep} sha=${requestedSha}`);
+          NODE
+
+      - name: Remove private checkout and sealed log
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP/private-owned-ci.log"
+
+      - name: Enforce owned CI result
+        if: always()
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+        run: |
+          if [[ "${EXIT_CODE:-1}" != "0" ]]; then
+            echo "::error::Private exact-head ci:owned failed. Raw output remained sealed in the ephemeral runner."
+            exit 1
+          fi
