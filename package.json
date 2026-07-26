@@ -1,6 +1,6 @@
 {
   "name": "training-learning-rails-ci-public",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,7 +9,8 @@
   "scripts": {
     "test": "node --test tests/**/*.test.mjs",
     "test:pr265": "node cases/pr-265/run-validation-v2.mjs",
+    "test:pr266": "node cases/pr-266/run-validation.mjs",
     "security:gate": "node scripts/public-boundary-gate.mjs",
-    "check": "npm run security:gate && npm test && npm run test:pr265"
+    "check": "npm run security:gate && npm test && npm run test:pr265 && npm run test:pr266"
   }
 }
