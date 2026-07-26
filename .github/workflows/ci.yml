@@ -35,3 +35,6 @@ jobs:
 
       - name: Run PR 265 sanitized focused validation
         run: npm run test:pr265
+
+      - name: Run PR 266 sanitized W4-3 validation
+        run: npm run test:pr266
