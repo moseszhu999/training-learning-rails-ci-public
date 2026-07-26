@@ -27,5 +27,11 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Run public boundary gate and tests
-        run: npm run check
+      - name: Run public boundary gate
+        run: npm run security:gate
+
+      - name: Run baseline synthetic unit tests
+        run: npm test
+
+      - name: Run PR 265 sanitized focused validation
+        run: npm run test:pr265
