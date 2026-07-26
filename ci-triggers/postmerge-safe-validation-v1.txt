@@ -1,0 +1,1 @@
+Run the existing public-safe validation workflow using only approved synthetic and sanitized assets.
