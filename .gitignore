@@ -1,0 +1,22 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+coverage/
+.playwright/
+test-results/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+service-account*.json
+
+# Local tooling
+.DS_Store
+*.log
+.cache/
+.tmp/
