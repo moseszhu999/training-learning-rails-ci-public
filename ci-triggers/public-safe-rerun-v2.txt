@@ -1,0 +1,3 @@
+Trigger the existing public-safe validation workflow.
+
+This file contains no private source, customer data, personal information, organization details, live configuration, credentials, or external-system identifiers.
