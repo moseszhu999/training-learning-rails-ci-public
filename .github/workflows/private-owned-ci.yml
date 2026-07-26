@@ -1,4 +1,4 @@
-name: Private exact-head owned CI
+name: Private exact-head focused and owned CI
 
 on:
   workflow_dispatch:
@@ -17,11 +17,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-owned-${{ inputs.private_sha }}
+  group: private-focused-owned-${{ inputs.private_sha }}
   cancel-in-progress: false
 
 jobs:
-  owned-ci:
+  focused-and-owned-ci:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -77,6 +77,34 @@ jobs:
           fi
           printf 'Verified private exact head: `%s`\n' "$actual_sha" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Run W4-3 focused contract with sealed output
+        id: focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest -v tests/test_trainingos_wave4_deliverable_evidence_contract.py \
+            > "$RUNNER_TEMP/private-w43-focused.log" 2>&1
+          exit_code=$?
+          python - "$RUNNER_TEMP/private-w43-focused.log" "$exit_code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          log_path = pathlib.Path(sys.argv[1])
+          exit_code = int(sys.argv[2])
+          output_path = pathlib.Path(sys.argv[3])
+          text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+          match = re.search(r"Ran\s+(\d+)\s+tests?", text)
+          test_count = int(match.group(1)) if match else 0
+          ok = exit_code == 0 and test_count == 19 and re.search(r"(?:^|\n)OK(?:\s|\n|$)", text) is not None
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"exit_code={exit_code}\n")
+              handle.write(f"test_count={test_count}\n")
+              handle.write(f"status={'PASS' if ok else 'FAIL'}\n")
+          PY
+          exit 0
+
       - name: Run private ci:owned with sealed output
         id: owned
         working-directory: private-repo
@@ -97,33 +125,43 @@ jobs:
         shell: bash
         env:
           PRIVATE_SHA: ${{ inputs.private_sha }}
-          EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+          FOCUSED_STATUS: ${{ steps.focused.outputs.status }}
+          FOCUSED_TEST_COUNT: ${{ steps.focused.outputs.test_count }}
+          FOCUSED_EXIT_CODE: ${{ steps.focused.outputs.exit_code }}
+          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
           REPORT_FILE: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
         run: |
           node <<'NODE'
           const fs = require('node:fs');
 
           const requestedSha = process.env.PRIVATE_SHA || 'unknown';
-          const rawExitCode = process.env.EXIT_CODE;
-          const exitCode = /^\d+$/.test(rawExitCode || '') ? Number(rawExitCode) : 1;
-          let result = {
-            status: exitCode === 0 ? 'PASS' : 'FAIL',
+          const focusedStatus = process.env.FOCUSED_STATUS === 'PASS' ? 'PASS' : 'FAIL';
+          const focusedTestCount = /^\d+$/.test(process.env.FOCUSED_TEST_COUNT || '')
+            ? Number(process.env.FOCUSED_TEST_COUNT)
+            : 0;
+          const focusedExitCode = /^\d+$/.test(process.env.FOCUSED_EXIT_CODE || '')
+            ? Number(process.env.FOCUSED_EXIT_CODE)
+            : 1;
+          const rawOwnedExitCode = process.env.OWNED_EXIT_CODE;
+          const ownedExitCode = /^\d+$/.test(rawOwnedExitCode || '') ? Number(rawOwnedExitCode) : 1;
+          let owned = {
+            status: ownedExitCode === 0 ? 'PASS' : 'FAIL',
             failedOrLastStep: 'report-unavailable',
             startedAt: null,
             finishedAt: null,
-            exitCode,
+            exitCode: ownedExitCode,
             runtime: null,
           };
 
           try {
             if (fs.existsSync(process.env.REPORT_FILE)) {
               const source = JSON.parse(fs.readFileSync(process.env.REPORT_FILE, 'utf8'));
-              result = {
+              owned = {
                 status: source.status === 'PASS' ? 'PASS' : 'FAIL',
                 failedOrLastStep: String(source.failedOrLastStep || 'unknown'),
                 startedAt: source.startedAt || null,
                 finishedAt: source.finishedAt || null,
-                exitCode: Number.isInteger(source.exitCode) ? source.exitCode : exitCode,
+                exitCode: Number.isInteger(source.exitCode) ? source.exitCode : ownedExitCode,
                 runtime: source.runtime && typeof source.runtime === 'object'
                   ? {
                       node: String(source.runtime.node || ''),
@@ -134,42 +172,56 @@ jobs:
               };
             }
           } catch {
-            result.status = 'FAIL';
-            result.failedOrLastStep = 'invalid-sanitized-report';
-            result.exitCode = exitCode || 1;
+            owned.status = 'FAIL';
+            owned.failedOrLastStep = 'invalid-sanitized-report';
+            owned.exitCode = ownedExitCode || 1;
           }
 
           const summary = [
-            '## Private exact-head owned CI',
+            '## Private exact-head focused and owned CI',
             '',
             `- Exact SHA: \`${requestedSha}\``,
-            `- Status: **${result.status}**`,
-            `- Last step: \`${result.failedOrLastStep}\``,
-            `- Exit code: \`${result.exitCode}\``,
-            `- Started: \`${result.startedAt || 'not-reported'}\``,
-            `- Finished: \`${result.finishedAt || 'not-reported'}\``,
+            `- W4-3 focused contract: **${focusedStatus} ${focusedTestCount}/19**`,
+            `- Focused exit code: \`${focusedExitCode}\``,
+            `- ci:owned: **${owned.status}**`,
+            `- Owned last step: \`${owned.failedOrLastStep}\``,
+            `- Owned exit code: \`${owned.exitCode}\``,
+            `- Started: \`${owned.startedAt || 'not-reported'}\``,
+            `- Finished: \`${owned.finishedAt || 'not-reported'}\``,
           ];
-          if (result.runtime) {
-            summary.push(`- Runtime: \`${result.runtime.node} / ${result.runtime.platform} / ${result.runtime.arch}\``);
+          if (owned.runtime) {
+            summary.push(`- Runtime: \`${owned.runtime.node} / ${owned.runtime.platform} / ${owned.runtime.arch}\``);
           }
           summary.push('', 'Raw private test output is intentionally not published or uploaded.');
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
-          console.log(`PRIVATE_OWNED_CI status=${result.status} step=${result.failedOrLastStep} sha=${requestedSha}`);
+          console.log(
+            `PRIVATE_EXACT_CI focused=${focusedStatus}:${focusedTestCount}/19 owned=${owned.status} step=${owned.failedOrLastStep} sha=${requestedSha}`,
+          );
           NODE
 
-      - name: Remove private checkout and sealed log
+      - name: Remove private checkout and sealed logs
         if: always()
         shell: bash
         run: |
-          rm -rf private-repo "$RUNNER_TEMP/private-owned-ci.log"
+          rm -rf private-repo \
+            "$RUNNER_TEMP/private-w43-focused.log" \
+            "$RUNNER_TEMP/private-owned-ci.log"
 
-      - name: Enforce owned CI result
+      - name: Enforce focused and owned CI results
         if: always()
         shell: bash
         env:
-          EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+          FOCUSED_STATUS: ${{ steps.focused.outputs.status }}
+          FOCUSED_TEST_COUNT: ${{ steps.focused.outputs.test_count }}
+          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
         run: |
-          if [[ "${EXIT_CODE:-1}" != "0" ]]; then
-            echo "::error::Private exact-head ci:owned failed. Raw output remained sealed in the ephemeral runner."
-            exit 1
+          failed=0
+          if [[ "${FOCUSED_STATUS:-FAIL}" != "PASS" || "${FOCUSED_TEST_COUNT:-0}" != "19" ]]; then
+            echo "::error::Private exact-head W4-3 focused contract did not pass 19/19. Raw output remained sealed."
+            failed=1
           fi
+          if [[ "${OWNED_EXIT_CODE:-1}" != "0" ]]; then
+            echo "::error::Private exact-head ci:owned failed. Raw output remained sealed in the ephemeral runner."
+            failed=1
+          fi
+          exit "$failed"
