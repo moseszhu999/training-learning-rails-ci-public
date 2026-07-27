@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-w3b-w3c-e8be6fcfc3b0cf922df8e5604b1f8d1aac7e1d1c
+  group: private-w3b-w3c-a6efe14b3f8d89072002f082f4bab9397e9ff6c4
   cancel-in-progress: false
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_SHA: e8be6fcfc3b0cf922df8e5604b1f8d1aac7e1d1c
+      PRIVATE_SHA: a6efe14b3f8d89072002f082f4bab9397e9ff6c4
     outputs:
       python_status: ${{ steps.python.outputs.status }}
       python_count: ${{ steps.python.outputs.count }}
@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: moseszhu999/training-learning-rails
-          ref: e8be6fcfc3b0cf922df8e5604b1f8d1aac7e1d1c
+          ref: a6efe14b3f8d89072002f082f4bab9397e9ff6c4
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           path: private-repo
           persist-credentials: false
