@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_SHA: 465d3c77aacd32c46a93936f63f1242668b58a19
+      PRIVATE_SHA: b556643189087463c559d2ede8483eb9ce2cb1fb
 
     steps:
       - name: Validate exact SHA and private read credential
