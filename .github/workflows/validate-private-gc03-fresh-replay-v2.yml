@@ -1,0 +1,205 @@
+name: Validate private TrainingOS GC-03 fresh replay
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/validate-private-gc03-fresh-replay-v2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-gc03-fresh-replay-d5f528b689f6f748426384cb81770b605ab298f3
+  cancel-in-progress: false
+
+jobs:
+  fresh-replay:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'ci/verify-private-gc03-fresh-replay-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: d5f528b689f6f748426384cb81770b605ab298f3
+      SUPABASE_CLI_VERSION: 2.109.1
+      SUPABASE_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+    outputs:
+      init_status: ${{ steps.replay.outputs.init_status }}
+      start_status: ${{ steps.replay.outputs.start_status }}
+      reset_status: ${{ steps.replay.outputs.reset_status }}
+      last_migration: ${{ steps.replay.outputs.last_migration }}
+      failure_stage: ${{ steps.replay.outputs.failure_stage }}
+
+    steps:
+      - name: Validate exact head and private read credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SUPABASE_CLI_VERSION" == 2.109.1 ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+          docker version >/dev/null
+
+      - name: Check out private GC-03 correction exact head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: d5f528b689f6f748426384cb81770b605ab298f3
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify exact SHA and clean checkout
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          [[ -d supabase/migrations ]]
+          [[ ! -f supabase/config.toml ]]
+
+      - name: Fresh local Supabase replay
+        id: replay
+        working-directory: private-repo
+        run: |
+          set +e
+          init_status=FAIL
+          start_status=NOT_RUN
+          reset_status=NOT_RUN
+          failure_stage=init
+          last_migration=none
+
+          npx --yes "supabase@$SUPABASE_CLI_VERSION" --version \
+            > "$RUNNER_TEMP/gc03-supabase-version.log" 2>&1
+          version_code=$?
+          if [[ $version_code -eq 0 ]]; then
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" init \
+              > "$RUNNER_TEMP/gc03-supabase-init.log" 2>&1
+            init_code=$?
+          else
+            init_code=$version_code
+          fi
+
+          if [[ $init_code -eq 0 && -f supabase/config.toml ]]; then
+            init_status=PASS
+            failure_stage=start
+            timeout 35m npx --yes "supabase@$SUPABASE_CLI_VERSION" start \
+              > "$RUNNER_TEMP/gc03-supabase-start.log" 2>&1
+            start_code=$?
+            if [[ $start_code -eq 0 ]]; then
+              start_status=PASS
+              failure_stage=reset
+              timeout 15m npx --yes "supabase@$SUPABASE_CLI_VERSION" db reset --local --no-seed \
+                > "$RUNNER_TEMP/gc03-supabase-reset.log" 2>&1
+              reset_code=$?
+              if [[ $reset_code -eq 0 ]]; then
+                reset_status=PASS
+                failure_stage=none
+              else
+                reset_status=FAIL
+              fi
+            else
+              start_status=FAIL
+              reset_code=1
+            fi
+          else
+            start_code=1
+            reset_code=1
+          fi
+
+          for log in \
+            "$RUNNER_TEMP/gc03-supabase-start.log" \
+            "$RUNNER_TEMP/gc03-supabase-reset.log"; do
+            if [[ -f "$log" ]]; then
+              candidate=$(grep -oE 'Applying migration [^[:space:]]+\.sql' "$log" | tail -1 | sed 's/^Applying migration //' || true)
+              if [[ -n "$candidate" ]]; then
+                last_migration=$(basename "$candidate" | tr -cd 'A-Za-z0-9_.-')
+              fi
+            fi
+          done
+
+          {
+            echo "init_status=$init_status"
+            echo "start_status=$start_status"
+            echo "reset_status=$reset_status"
+            echo "last_migration=$last_migration"
+            echo "failure_stage=$failure_stage"
+          } >> "$GITHUB_OUTPUT"
+
+          exit 0
+
+      - name: Publish sanitized replay result
+        if: always()
+        env:
+          INIT_STATUS: ${{ steps.replay.outputs.init_status }}
+          START_STATUS: ${{ steps.replay.outputs.start_status }}
+          RESET_STATUS: ${{ steps.replay.outputs.reset_status }}
+          LAST_MIGRATION: ${{ steps.replay.outputs.last_migration }}
+          FAILURE_STAGE: ${{ steps.replay.outputs.failure_stage }}
+        run: |
+          {
+            echo '## TrainingOS GC-03 clean local migration replay'
+            echo
+            echo "- Private SHA: \`$PRIVATE_SHA\`"
+            echo "- Supabase CLI: \`$SUPABASE_CLI_VERSION\`"
+            echo "- init: **${INIT_STATUS:-FAIL}**"
+            echo "- first clean start replay: **${START_STATUS:-NOT_RUN}**"
+            echo "- destructive local reset replay: **${RESET_STATUS:-NOT_RUN}**"
+            echo "- last sanitized migration marker: \`${LAST_MIGRATION:-none}\`"
+            echo "- failure stage: \`${FAILURE_STAGE:-unknown}\`"
+            echo
+            echo 'No remote Supabase project, Production system, Vercel deployment, private raw log, or artifact was used.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop and destroy local Supabase stack
+        if: always()
+        working-directory: private-repo
+        run: |
+          set +e
+          if [[ -f supabase/config.toml ]]; then
+            npx --yes "supabase@$SUPABASE_CLI_VERSION" stop --no-backup \
+              > "$RUNNER_TEMP/gc03-supabase-stop.log" 2>&1
+          fi
+          docker ps -aq --filter 'label=com.supabase.cli.project' | xargs -r docker rm -f >/dev/null 2>&1
+          docker volume ls -q --filter 'label=com.supabase.cli.project' | xargs -r docker volume rm -f >/dev/null 2>&1
+          exit 0
+
+      - name: Cleanup private checkout and sealed logs
+        if: always()
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/gc03-supabase-version.log" \
+            "$RUNNER_TEMP/gc03-supabase-init.log" \
+            "$RUNNER_TEMP/gc03-supabase-start.log" \
+            "$RUNNER_TEMP/gc03-supabase-reset.log" \
+            "$RUNNER_TEMP/gc03-supabase-stop.log"
+
+  enforce-results:
+    needs: fresh-replay
+    if: always()
+    name: >-
+      result init-${{ needs.fresh-replay.outputs.init_status }}
+      start-${{ needs.fresh-replay.outputs.start_status }}
+      reset-${{ needs.fresh-replay.outputs.reset_status }}
+      stage-${{ needs.fresh-replay.outputs.failure_stage }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Enforce fresh replay
+        env:
+          INIT_STATUS: ${{ needs.fresh-replay.outputs.init_status }}
+          START_STATUS: ${{ needs.fresh-replay.outputs.start_status }}
+          RESET_STATUS: ${{ needs.fresh-replay.outputs.reset_status }}
+        run: |
+          [[ "$INIT_STATUS" == PASS ]]
+          [[ "$START_STATUS" == PASS ]]
+          [[ "$RESET_STATUS" == PASS ]]
