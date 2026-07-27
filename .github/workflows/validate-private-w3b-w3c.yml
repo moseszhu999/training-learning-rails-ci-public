@@ -1,0 +1,144 @@
+name: Validate private W3B to W3C exact head
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/validate-private-w3b-w3c.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-w3b-w3c-e8be6fcfc3b0cf922df8e5604b1f8d1aac7e1d1c
+  cancel-in-progress: false
+
+jobs:
+  exact-head-validation:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'ci/verify-private-w3b-w3c-final'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: e8be6fcfc3b0cf922df8e5604b1f8d1aac7e1d1c
+    outputs:
+      python_status: ${{ steps.python.outputs.status }}
+      python_count: ${{ steps.python.outputs.count }}
+      node_status: ${{ steps.node.outputs.status }}
+      node_count: ${{ steps.node.outputs.count }}
+      node_pass: ${{ steps.node.outputs.pass }}
+      node_fail: ${{ steps.node.outputs.fail }}
+      owned_status: ${{ steps.sanitize.outputs.owned_status }}
+      owned_step: ${{ steps.sanitize.outputs.owned_step }}
+      owned_exit: ${{ steps.owned.outputs.exit_code }}
+    steps:
+      - name: Validate inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - name: Check out private exact head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: e8be6fcfc3b0cf922df8e5604b1f8d1aac7e1d1c
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact SHA
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+      - name: Focused Python
+        id: python
+        working-directory: private-repo
+        run: |
+          set +e
+          python -m unittest -v tests.test_trainingos_wave3_enterprise_report_w3b_integration_contract > "$RUNNER_TEMP/w3b-w3c-python.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/w3b-w3c-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace'); code=int(sys.argv[2])
+          m=re.search(r'Ran\s+(\d+)\s+tests?',text); count=int(m.group(1)) if m else 0
+          ok=code==0 and count==13 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text)
+          with open(sys.argv[3],'a') as f: f.write(f'status={"PASS" if ok else "FAIL"}\ncount={count}\n')
+          PY
+          exit 0
+      - name: Focused Node
+        id: node
+        working-directory: private-repo
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/test/enterprise-report-w3b-integration.test.mjs > "$RUNNER_TEMP/w3b-w3c-node.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/w3b-w3c-node.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace'); code=int(sys.argv[2])
+          def n(k):
+            m=re.search(rf'^#\s+{k}\s+(\d+)\s*$',text,re.M); return int(m.group(1)) if m else 0
+          count,passed,failed=n('tests'),n('pass'),n('fail'); ok=code==0 and (count,passed,failed)==(3,3,0)
+          with open(sys.argv[3],'a') as f: f.write(f'status={"PASS" if ok else "FAIL"}\ncount={count}\npass={passed}\nfail={failed}\n')
+          PY
+          exit 0
+      - name: Full owned CI
+        id: owned
+        working-directory: private-repo
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/w3b-w3c-owned.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Sanitized result
+        id: sanitize
+        if: always()
+        env:
+          REPORT: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
+          OWNED_EXIT: ${{ steps.owned.outputs.exit_code }}
+          PY_STATUS: ${{ steps.python.outputs.status }}
+          PY_COUNT: ${{ steps.python.outputs.count }}
+          NODE_STATUS: ${{ steps.node.outputs.status }}
+          NODE_COUNT: ${{ steps.node.outputs.count }}
+          NODE_PASS: ${{ steps.node.outputs.pass }}
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'); let owned={status:process.env.OWNED_EXIT==='0'?'PASS':'FAIL',failedOrLastStep:'report-unavailable'};
+          try { if(fs.existsSync(process.env.REPORT)){const r=JSON.parse(fs.readFileSync(process.env.REPORT,'utf8'));owned={status:r.status==='PASS'?'PASS':'FAIL',failedOrLastStep:String(r.failedOrLastStep||'unknown')}} } catch {owned={status:'FAIL',failedOrLastStep:'invalid-report'}}
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`owned_status=${owned.status}\nowned_step=${owned.failedOrLastStep}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## W3B → W3C exact-head validation\n- SHA: \`${process.env.PRIVATE_SHA}\`\n- Python: **${process.env.PY_STATUS} ${process.env.PY_COUNT}/13**\n- Node: **${process.env.NODE_STATUS} ${process.env.NODE_PASS}/${process.env.NODE_COUNT}**\n- ci:owned: **${owned.status}** (${owned.failedOrLastStep})\n`);
+          NODE
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP/w3b-w3c-python.log" "$RUNNER_TEMP/w3b-w3c-node.log" "$RUNNER_TEMP/w3b-w3c-owned.log"
+
+  enforce-results:
+    needs: exact-head-validation
+    if: always()
+    name: result python-${{ needs.exact-head-validation.outputs.python_status }}-${{ needs.exact-head-validation.outputs.python_count }} node-${{ needs.exact-head-validation.outputs.node_status }}-${{ needs.exact-head-validation.outputs.node_pass }} owned-${{ needs.exact-head-validation.outputs.owned_status }}-${{ needs.exact-head-validation.outputs.owned_step }}
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          PS: ${{ needs.exact-head-validation.outputs.python_status }}
+          PC: ${{ needs.exact-head-validation.outputs.python_count }}
+          NS: ${{ needs.exact-head-validation.outputs.node_status }}
+          NC: ${{ needs.exact-head-validation.outputs.node_count }}
+          NP: ${{ needs.exact-head-validation.outputs.node_pass }}
+          NF: ${{ needs.exact-head-validation.outputs.node_fail }}
+          OS: ${{ needs.exact-head-validation.outputs.owned_status }}
+          OE: ${{ needs.exact-head-validation.outputs.owned_exit }}
+        run: |
+          [[ "$PS" == PASS && "$PC" == 13 ]]
+          [[ "$NS" == PASS && "$NC" == 3 && "$NP" == 3 && "$NF" == 0 ]]
+          [[ "$OS" == PASS && "$OE" == 0 ]]
