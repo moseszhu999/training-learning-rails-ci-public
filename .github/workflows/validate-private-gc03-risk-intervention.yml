@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-gc03-b4caeaf0097727af06fd07aa9b0d7b483ca377ed
+  group: private-gc03-3872fa76e95730b57e783a452f319b161482d1b5
   cancel-in-progress: false
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_SHA: b4caeaf0097727af06fd07aa9b0d7b483ca377ed
+      PRIVATE_SHA: 3872fa76e95730b57e783a452f319b161482d1b5
     outputs:
       python_status: ${{ steps.python.outputs.status }}
       python_count: ${{ steps.python.outputs.count }}
@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: moseszhu999/training-learning-rails
-          ref: b4caeaf0097727af06fd07aa9b0d7b483ca377ed
+          ref: 3872fa76e95730b57e783a452f319b161482d1b5
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           path: private-repo
           persist-credentials: false
@@ -68,12 +68,14 @@ jobs:
           [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
           [[ -z "$(git status --porcelain)" ]]
 
-      - name: Focused GC-03 Python contract
+      - name: Focused GC-03 Python contracts
         id: python
         working-directory: private-repo
         run: |
           set +e
-          python -m unittest -v tests.test_trainingos_risk_intervention_contract \
+          python -m unittest -v \
+            tests.test_trainingos_risk_intervention_contract \
+            tests.test_trainingos_risk_intervention_e2e_contract \
             > "$RUNNER_TEMP/gc03-python.log" 2>&1
           code=$?
           python - "$RUNNER_TEMP/gc03-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
@@ -86,7 +88,7 @@ jobs:
           if not failures:
               failures = sorted(set(re.findall(r'^(test_[^(\s]+).*\.\.\.\s+(?:FAIL|ERROR)$', text, flags=re.MULTILINE)))
           failure_label = ','.join(failures) if failures else 'none'
-          ok = code == 0 and count == 13 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
+          ok = code == 0 and count == 19 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
           with open(sys.argv[3], 'a', encoding='utf-8') as out:
               out.write(f'status={"PASS" if ok else "FAIL"}\n')
               out.write(f'count={count}\n')
@@ -163,7 +165,7 @@ jobs:
               '## TrainingOS GC-03 exact-head validation',
               '',
               `- SHA: \`${process.env.PRIVATE_SHA}\``,
-              `- Focused Python contract: **${process.env.PY_STATUS || 'FAIL'} ${process.env.PY_COUNT || '0'}/13**`,
+              `- Focused Python contracts: **${process.env.PY_STATUS || 'FAIL'} ${process.env.PY_COUNT || '0'}/19**`,
               `- Sanitized failing test names: \`${process.env.PY_FAILURES || 'none'}\``,
               `- Focused Node gateway tests: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_COUNT || '0'}/11**`,
               `- ci:owned: **${owned.status}** (${owned.failedOrLastStep})`,
@@ -200,6 +202,6 @@ jobs:
           OWNED_STATUS: ${{ needs.exact-head-validation.outputs.owned_status }}
           OWNED_EXIT: ${{ needs.exact-head-validation.outputs.owned_exit }}
         run: |
-          [[ "$PY_STATUS" == PASS && "$PY_COUNT" == 13 ]]
+          [[ "$PY_STATUS" == PASS && "$PY_COUNT" == 19 ]]
           [[ "$NODE_STATUS" == PASS && "$NODE_COUNT" == 11 ]]
           [[ "$OWNED_STATUS" == PASS && "$OWNED_EXIT" == 0 ]]
