@@ -26,6 +26,7 @@ jobs:
     outputs:
       python_status: ${{ steps.python.outputs.status }}
       python_count: ${{ steps.python.outputs.count }}
+      python_failures: ${{ steps.python.outputs.failures }}
       node_status: ${{ steps.node.outputs.status }}
       node_count: ${{ steps.node.outputs.count }}
       owned_status: ${{ steps.sanitize.outputs.owned_status }}
@@ -81,10 +82,15 @@ jobs:
           code = int(sys.argv[2])
           match = re.search(r'Ran\s+(\d+)\s+tests?', text)
           count = int(match.group(1)) if match else 0
+          failures = sorted(set(re.findall(r'^(?:FAIL|ERROR):\s+(test_[^(\s]+)', text, flags=re.MULTILINE)))
+          if not failures:
+              failures = sorted(set(re.findall(r'^(test_[^(\s]+).*\.\.\.\s+(?:FAIL|ERROR)$', text, flags=re.MULTILINE)))
+          failure_label = ','.join(failures) if failures else 'none'
           ok = code == 0 and count == 13 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
           with open(sys.argv[3], 'a', encoding='utf-8') as out:
               out.write(f'status={"PASS" if ok else "FAIL"}\n')
               out.write(f'count={count}\n')
+              out.write(f'failures={failure_label}\n')
           PY
           exit 0
 
@@ -129,6 +135,7 @@ jobs:
           OWNED_EXIT: ${{ steps.owned.outputs.exit_code }}
           PY_STATUS: ${{ steps.python.outputs.status }}
           PY_COUNT: ${{ steps.python.outputs.count }}
+          PY_FAILURES: ${{ steps.python.outputs.failures }}
           NODE_STATUS: ${{ steps.node.outputs.status }}
           NODE_COUNT: ${{ steps.node.outputs.count }}
         run: |
@@ -157,6 +164,7 @@ jobs:
               '',
               `- SHA: \`${process.env.PRIVATE_SHA}\``,
               `- Focused Python contract: **${process.env.PY_STATUS || 'FAIL'} ${process.env.PY_COUNT || '0'}/13**`,
+              `- Sanitized failing test names: \`${process.env.PY_FAILURES || 'none'}\``,
               `- Focused Node gateway tests: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_COUNT || '0'}/11**`,
               `- ci:owned: **${owned.status}** (${owned.failedOrLastStep})`,
               '',
@@ -178,6 +186,7 @@ jobs:
     if: always()
     name: >-
       result python-${{ needs.exact-head-validation.outputs.python_status }}-${{ needs.exact-head-validation.outputs.python_count }}
+      pyfail-${{ needs.exact-head-validation.outputs.python_failures }}
       node-${{ needs.exact-head-validation.outputs.node_status }}-${{ needs.exact-head-validation.outputs.node_count }}
       owned-${{ needs.exact-head-validation.outputs.owned_status }}-${{ needs.exact-head-validation.outputs.owned_step }}
     runs-on: ubuntu-24.04
