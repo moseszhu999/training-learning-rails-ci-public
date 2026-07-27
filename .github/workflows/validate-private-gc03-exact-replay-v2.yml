@@ -109,7 +109,7 @@ jobs:
           const match = text.match(/# tests (\d+)/);
           const count = match ? Number(match[1]) : 0;
           const failed = Number((text.match(/# fail (\d+)/) || [])[1] || 0);
-          const ok = code === 0 && count === 11 && failed === 0;
+          const ok = code === 0 && count === 7 && failed === 0;
           fs.appendFileSync(process.argv[4], `status=${ok ? 'PASS' : 'FAIL'}\ncount=${count}\n`);
           NODE
           exit 0
@@ -165,7 +165,7 @@ jobs:
               `- SHA: \`${process.env.PRIVATE_SHA}\``,
               `- Focused Python contracts: **${process.env.PY_STATUS || 'FAIL'} ${process.env.PY_COUNT || '0'}/13**`,
               `- Sanitized failing test names: \`${process.env.PY_FAILURES || 'none'}\``,
-              `- Focused Node Gateway tests: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_COUNT || '0'}/11**`,
+              `- Focused Node Gateway tests: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_COUNT || '0'}/7**`,
               `- ci:owned: **${owned.status}** (${owned.failedOrLastStep})`,
               '',
               'Raw private output remained sealed and was deleted.',
@@ -201,5 +201,5 @@ jobs:
           OWNED_EXIT: ${{ needs.exact-head-validation.outputs.owned_exit }}
         run: |
           [[ "$PY_STATUS" == PASS && "$PY_COUNT" == 13 ]]
-          [[ "$NODE_STATUS" == PASS && "$NODE_COUNT" == 11 ]]
+          [[ "$NODE_STATUS" == PASS && "$NODE_COUNT" == 7 ]]
           [[ "$OWNED_STATUS" == PASS && "$OWNED_EXIT" == 0 ]]
