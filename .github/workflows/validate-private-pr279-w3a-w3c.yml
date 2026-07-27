@@ -23,6 +23,16 @@ jobs:
     timeout-minutes: 45
     env:
       PRIVATE_SHA: cc5f5931dd9d87a09a4f54af8007df5871f79468
+    outputs:
+      python_status: ${{ steps.python_focused.outputs.status }}
+      python_count: ${{ steps.python_focused.outputs.test_count }}
+      node_status: ${{ steps.node_focused.outputs.status }}
+      node_count: ${{ steps.node_focused.outputs.test_count }}
+      node_pass: ${{ steps.node_focused.outputs.pass_count }}
+      node_fail: ${{ steps.node_focused.outputs.fail_count }}
+      owned_status: ${{ steps.sanitized.outputs.owned_status }}
+      owned_step: ${{ steps.sanitized.outputs.owned_step }}
+      owned_exit: ${{ steps.owned.outputs.exit_code }}
 
     steps:
       - name: Validate exact head and private read credential
@@ -31,14 +41,8 @@ jobs:
           PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ ! "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::PRIVATE_SHA must be an exact lowercase 40-character commit SHA"
-            exit 2
-          fi
-          if [[ -z "$PRIVATE_TOKEN" ]]; then
-            echo "::error::PRIVATE_REPO_READ_TOKEN is not configured"
-            exit 2
-          fi
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
 
       - name: Check out private PR 279 exact head
         uses: actions/checkout@v4
@@ -51,13 +55,11 @@ jobs:
           fetch-depth: 1
           clean: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -66,18 +68,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          actual_sha="$(git rev-parse HEAD)"
-          if [[ "$actual_sha" != "$PRIVATE_SHA" ]]; then
-            echo "::error::Checked-out commit does not match PR 279 exact head"
-            exit 3
-          fi
-          if [[ -n "$(git status --porcelain)" ]]; then
-            echo "::error::Private checkout is not clean before validation"
-            exit 3
-          fi
-          printf 'Verified private exact head: `%s`\n' "$actual_sha" >> "$GITHUB_STEP_SUMMARY"
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
+          [[ -z "$(git status --porcelain)" ]] || exit 3
+          printf 'Verified private exact head: `%s`\n' "$PRIVATE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run PR 279 focused Python contract with sealed output
+      - name: Run focused Python with sealed output
         id: python_focused
         working-directory: private-repo
         shell: bash
@@ -85,27 +80,22 @@ jobs:
           set +e
           python -m pytest -q tests/test_trainingos_wave3_enterprise_report_w3a_integration_contract.py \
             > "$RUNNER_TEMP/private-pr279-python.log" 2>&1
-          exit_code=$?
-          python - "$RUNNER_TEMP/private-pr279-python.log" "$exit_code" "$GITHUB_OUTPUT" <<'PY'
-          import pathlib
-          import re
-          import sys
-
-          log_path = pathlib.Path(sys.argv[1])
-          exit_code = int(sys.argv[2])
-          output_path = pathlib.Path(sys.argv[3])
-          text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-          match = re.search(r"(?:^|\s)(\d+)\s+passed(?:\s|,|$)", text)
-          test_count = int(match.group(1)) if match else 0
-          ok = exit_code == 0 and test_count == 12
-          with output_path.open("a", encoding="utf-8") as handle:
-              handle.write(f"exit_code={exit_code}\n")
-              handle.write(f"test_count={test_count}\n")
-              handle.write(f"status={'PASS' if ok else 'FAIL'}\n")
+          code=$?
+          python - "$RUNNER_TEMP/private-pr279-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          match = re.search(r'(?:^|\s)(\d+)\s+passed(?:\s|,|$)', text)
+          count = int(match.group(1)) if match else 0
+          ok = code == 0 and count == 12
+          with open(sys.argv[3], 'a', encoding='utf-8') as out:
+              out.write(f'exit_code={code}\n')
+              out.write(f'test_count={count}\n')
+              out.write(f'status={"PASS" if ok else "FAIL"}\n')
           PY
           exit 0
 
-      - name: Run PR 279 focused Node contract with sealed output
+      - name: Run focused Node with sealed output
         id: node_focused
         working-directory: private-repo
         shell: bash
@@ -113,31 +103,24 @@ jobs:
           set +e
           node --test prototypes/trainingos-agent-mvp-v1/test/enterprise-report-w3a-integration.test.mjs \
             > "$RUNNER_TEMP/private-pr279-node.log" 2>&1
-          exit_code=$?
-          python - "$RUNNER_TEMP/private-pr279-node.log" "$exit_code" "$GITHUB_OUTPUT" <<'PY'
-          import pathlib
-          import re
-          import sys
-
-          log_path = pathlib.Path(sys.argv[1])
-          exit_code = int(sys.argv[2])
-          output_path = pathlib.Path(sys.argv[3])
-          text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
-
+          code=$?
+          python - "$RUNNER_TEMP/private-pr279-node.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
           def metric(name):
-              match = re.search(rf"^#\s+{name}\s+(\d+)\s*$", text, re.MULTILINE)
+              match = re.search(rf'^#\s+{name}\s+(\d+)\s*$', text, re.MULTILINE)
               return int(match.group(1)) if match else 0
-
-          test_count = metric("tests")
-          pass_count = metric("pass")
-          fail_count = metric("fail")
-          ok = exit_code == 0 and test_count == 3 and pass_count == 3 and fail_count == 0
-          with output_path.open("a", encoding="utf-8") as handle:
-              handle.write(f"exit_code={exit_code}\n")
-              handle.write(f"test_count={test_count}\n")
-              handle.write(f"pass_count={pass_count}\n")
-              handle.write(f"fail_count={fail_count}\n")
-              handle.write(f"status={'PASS' if ok else 'FAIL'}\n")
+          count = metric('tests')
+          passed = metric('pass')
+          failed = metric('fail')
+          ok = code == 0 and count == 3 and passed == 3 and failed == 0
+          with open(sys.argv[3], 'a', encoding='utf-8') as out:
+              out.write(f'exit_code={code}\n')
+              out.write(f'test_count={count}\n')
+              out.write(f'pass_count={passed}\n')
+              out.write(f'fail_count={failed}\n')
+              out.write(f'status={"PASS" if ok else "FAIL"}\n')
           PY
           exit 0
 
@@ -152,90 +135,54 @@ jobs:
         run: |
           set +e
           npm run ci:owned > "$RUNNER_TEMP/private-pr279-owned.log" 2>&1
-          exit_code=$?
-          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Publish sanitized PR 279 result
+      - name: Publish sanitized result
+        id: sanitized
         if: always()
         shell: bash
         env:
           PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
-          PYTHON_TEST_COUNT: ${{ steps.python_focused.outputs.test_count }}
-          PYTHON_EXIT_CODE: ${{ steps.python_focused.outputs.exit_code }}
+          PYTHON_COUNT: ${{ steps.python_focused.outputs.test_count }}
           NODE_STATUS: ${{ steps.node_focused.outputs.status }}
-          NODE_TEST_COUNT: ${{ steps.node_focused.outputs.test_count }}
-          NODE_PASS_COUNT: ${{ steps.node_focused.outputs.pass_count }}
-          NODE_FAIL_COUNT: ${{ steps.node_focused.outputs.fail_count }}
-          NODE_EXIT_CODE: ${{ steps.node_focused.outputs.exit_code }}
-          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
-          REPORT_FILE: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
+          NODE_COUNT: ${{ steps.node_focused.outputs.test_count }}
+          NODE_PASS: ${{ steps.node_focused.outputs.pass_count }}
+          OWNED_EXIT: ${{ steps.owned.outputs.exit_code }}
+          REPORT: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
         run: |
           node <<'NODE'
           const fs = require('node:fs');
-          const number = (value, fallback = 0) => /^\d+$/.test(value || '') ? Number(value) : fallback;
-          const pythonStatus = process.env.PYTHON_STATUS === 'PASS' ? 'PASS' : 'FAIL';
-          const pythonCount = number(process.env.PYTHON_TEST_COUNT);
-          const pythonExit = number(process.env.PYTHON_EXIT_CODE, 1);
-          const nodeStatus = process.env.NODE_STATUS === 'PASS' ? 'PASS' : 'FAIL';
-          const nodeCount = number(process.env.NODE_TEST_COUNT);
-          const nodePass = number(process.env.NODE_PASS_COUNT);
-          const nodeFail = number(process.env.NODE_FAIL_COUNT, 1);
-          const nodeExit = number(process.env.NODE_EXIT_CODE, 1);
-          const ownedExitCode = number(process.env.OWNED_EXIT_CODE, 1);
           let owned = {
-            status: ownedExitCode === 0 ? 'PASS' : 'FAIL',
+            status: process.env.OWNED_EXIT === '0' ? 'PASS' : 'FAIL',
             failedOrLastStep: 'report-unavailable',
-            exitCode: ownedExitCode,
-            startedAt: null,
-            finishedAt: null,
-            runtime: null,
+            exitCode: /^\d+$/.test(process.env.OWNED_EXIT || '') ? Number(process.env.OWNED_EXIT) : 1,
           };
           try {
-            if (fs.existsSync(process.env.REPORT_FILE)) {
-              const source = JSON.parse(fs.readFileSync(process.env.REPORT_FILE, 'utf8'));
+            if (fs.existsSync(process.env.REPORT)) {
+              const r = JSON.parse(fs.readFileSync(process.env.REPORT, 'utf8'));
               owned = {
-                status: source.status === 'PASS' ? 'PASS' : 'FAIL',
-                failedOrLastStep: String(source.failedOrLastStep || 'unknown'),
-                exitCode: Number.isInteger(source.exitCode) ? source.exitCode : ownedExitCode,
-                startedAt: source.startedAt || null,
-                finishedAt: source.finishedAt || null,
-                runtime: source.runtime && typeof source.runtime === 'object'
-                  ? {
-                      node: String(source.runtime.node || ''),
-                      platform: String(source.runtime.platform || ''),
-                      arch: String(source.runtime.arch || ''),
-                    }
-                  : null,
+                status: r.status === 'PASS' ? 'PASS' : 'FAIL',
+                failedOrLastStep: String(r.failedOrLastStep || 'unknown'),
+                exitCode: Number.isInteger(r.exitCode) ? r.exitCode : owned.exitCode,
               };
             }
           } catch {
-            owned.status = 'FAIL';
-            owned.failedOrLastStep = 'invalid-sanitized-report';
-            owned.exitCode = ownedExitCode || 1;
+            owned = { status: 'FAIL', failedOrLastStep: 'invalid-sanitized-report', exitCode: 1 };
           }
-          const summary = [
-            '## TrainingOS PR 279 exact-head validation',
-            '',
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `owned_status=${owned.status}\nowned_step=${owned.failedOrLastStep}\n`);
+          const lines = [
+            '## TrainingOS PR 279 exact-head validation', '',
             `- Exact SHA: \`${process.env.PRIVATE_SHA}\``,
-            `- Focused Python: **${pythonStatus} ${pythonCount}/12**`,
-            `- Python exit code: \`${pythonExit}\``,
-            `- Focused Node: **${nodeStatus} ${nodePass}/${nodeCount}**, fail \`${nodeFail}\``,
-            `- Node exit code: \`${nodeExit}\``,
+            `- Focused Python: **${process.env.PYTHON_STATUS || 'FAIL'} ${process.env.PYTHON_COUNT || '0'}/12**`,
+            `- Focused Node: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_PASS || '0'}/${process.env.NODE_COUNT || '0'}**`,
             `- ci:owned: **${owned.status}**`,
             `- Owned last step: \`${owned.failedOrLastStep}\``,
-            `- Owned exit code: \`${owned.exitCode}\``,
-            `- Started: \`${owned.startedAt || 'not-reported'}\``,
-            `- Finished: \`${owned.finishedAt || 'not-reported'}\``,
+            `- Owned exit code: \`${owned.exitCode}\``, '',
+            'Raw private output is sealed and deleted; no private source or logs are published.'
           ];
-          if (owned.runtime) {
-            summary.push(`- Runtime: \`${owned.runtime.node} / ${owned.runtime.platform} / ${owned.runtime.arch}\``);
-          }
-          summary.push('', 'Raw private output is sealed and is not published or uploaded.');
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
-          console.log(
-            `PRIVATE_PR279_EXACT python=${pythonStatus}:${pythonCount}/12 node=${nodeStatus}:${nodePass}/${nodeCount} owned=${owned.status} step=${owned.failedOrLastStep} sha=${process.env.PRIVATE_SHA}`,
-          );
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`PR279_SANITIZED python=${process.env.PYTHON_STATUS}:${process.env.PYTHON_COUNT}/12 node=${process.env.NODE_STATUS}:${process.env.NODE_PASS}/${process.env.NODE_COUNT} owned=${owned.status} step=${owned.failedOrLastStep}`);
           NODE
 
       - name: Remove private checkout and sealed logs
@@ -247,29 +194,30 @@ jobs:
             "$RUNNER_TEMP/private-pr279-node.log" \
             "$RUNNER_TEMP/private-pr279-owned.log"
 
-      - name: Enforce PR 279 focused and owned results
-        if: always()
+  enforce-results:
+    needs: exact-head-validation
+    if: always()
+    name: >-
+      result python-${{ needs.exact-head-validation.outputs.python_status }}-${{ needs.exact-head-validation.outputs.python_count }}
+      node-${{ needs.exact-head-validation.outputs.node_status }}-${{ needs.exact-head-validation.outputs.node_pass }}
+      owned-${{ needs.exact-head-validation.outputs.owned_status }}-${{ needs.exact-head-validation.outputs.owned_step }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce sanitized results
         shell: bash
         env:
-          PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
-          PYTHON_TEST_COUNT: ${{ steps.python_focused.outputs.test_count }}
-          NODE_STATUS: ${{ steps.node_focused.outputs.status }}
-          NODE_TEST_COUNT: ${{ steps.node_focused.outputs.test_count }}
-          NODE_PASS_COUNT: ${{ steps.node_focused.outputs.pass_count }}
-          NODE_FAIL_COUNT: ${{ steps.node_focused.outputs.fail_count }}
-          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+          PYTHON_STATUS: ${{ needs.exact-head-validation.outputs.python_status }}
+          PYTHON_COUNT: ${{ needs.exact-head-validation.outputs.python_count }}
+          NODE_STATUS: ${{ needs.exact-head-validation.outputs.node_status }}
+          NODE_COUNT: ${{ needs.exact-head-validation.outputs.node_count }}
+          NODE_PASS: ${{ needs.exact-head-validation.outputs.node_pass }}
+          NODE_FAIL: ${{ needs.exact-head-validation.outputs.node_fail }}
+          OWNED_STATUS: ${{ needs.exact-head-validation.outputs.owned_status }}
+          OWNED_EXIT: ${{ needs.exact-head-validation.outputs.owned_exit }}
         run: |
           failed=0
-          if [[ "${PYTHON_STATUS:-FAIL}" != "PASS" || "${PYTHON_TEST_COUNT:-0}" != "12" ]]; then
-            echo "::error::Private PR 279 focused Python contract did not pass 12/12. Raw output remained sealed."
-            failed=1
-          fi
-          if [[ "${NODE_STATUS:-FAIL}" != "PASS" || "${NODE_TEST_COUNT:-0}" != "3" || "${NODE_PASS_COUNT:-0}" != "3" || "${NODE_FAIL_COUNT:-1}" != "0" ]]; then
-            echo "::error::Private PR 279 focused Node contract did not pass 3/3. Raw output remained sealed."
-            failed=1
-          fi
-          if [[ "${OWNED_EXIT_CODE:-1}" != "0" ]]; then
-            echo "::error::Private PR 279 exact-head ci:owned failed. Raw output remained sealed in the ephemeral runner."
-            failed=1
-          fi
+          [[ "$PYTHON_STATUS" == PASS && "$PYTHON_COUNT" == 12 ]] || failed=1
+          [[ "$NODE_STATUS" == PASS && "$NODE_COUNT" == 3 && "$NODE_PASS" == 3 && "$NODE_FAIL" == 0 ]] || failed=1
+          [[ "$OWNED_STATUS" == PASS && "$OWNED_EXIT" == 0 ]] || failed=1
           exit "$failed"
