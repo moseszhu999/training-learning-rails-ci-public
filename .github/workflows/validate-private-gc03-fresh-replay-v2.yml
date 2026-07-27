@@ -192,6 +192,7 @@ jobs:
       start-${{ needs.fresh-replay.outputs.start_status }}
       reset-${{ needs.fresh-replay.outputs.reset_status }}
       stage-${{ needs.fresh-replay.outputs.failure_stage }}
+      migration-${{ needs.fresh-replay.outputs.last_migration }}
     runs-on: ubuntu-24.04
     steps:
       - name: Enforce fresh replay
