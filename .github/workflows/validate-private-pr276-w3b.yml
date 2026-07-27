@@ -1,0 +1,225 @@
+name: Validate private TrainingOS PR 276 exact head
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/validate-private-pr276-w3b.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-pr276-385c5605457695b2c94f5b5232019b3a21897284
+  cancel-in-progress: false
+
+jobs:
+  exact-head-validation:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'ci/verify-private-pr276-w3b-final'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: 385c5605457695b2c94f5b5232019b3a21897284
+    outputs:
+      python_status: ${{ steps.python_focused.outputs.status }}
+      python_count: ${{ steps.python_focused.outputs.test_count }}
+      node_status: ${{ steps.node_focused.outputs.status }}
+      node_count: ${{ steps.node_focused.outputs.test_count }}
+      node_pass: ${{ steps.node_focused.outputs.pass_count }}
+      node_fail: ${{ steps.node_focused.outputs.fail_count }}
+      owned_status: ${{ steps.sanitized.outputs.owned_status }}
+      owned_step: ${{ steps.sanitized.outputs.owned_step }}
+      owned_exit: ${{ steps.owned.outputs.exit_code }}
+
+    steps:
+      - name: Validate exact head and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
+
+      - name: Check out private PR 276 exact head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: 385c5605457695b2c94f5b5232019b3a21897284
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head and clean checkout
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
+          [[ -z "$(git status --porcelain)" ]] || exit 3
+          printf 'Verified private exact head: `%s`\n' "$PRIVATE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run focused Python contracts with sealed output
+        id: python_focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest -v \
+            tests.test_trainingos_wave3_mutual_evaluation_contract \
+            tests.test_trainingos_wave3_mutual_evaluation_e2e_contract \
+            > "$RUNNER_TEMP/private-pr276-python.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/private-pr276-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          ok = code == 0 and count == 21 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
+          with open(sys.argv[3], 'a', encoding='utf-8') as out:
+              out.write(f'exit_code={code}\n')
+              out.write(f'test_count={count}\n')
+              out.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run focused Node contract with sealed output
+        id: node_focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/test/mutual-evaluation.test.mjs \
+            > "$RUNNER_TEMP/private-pr276-node.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/private-pr276-node.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          def metric(name):
+              match = re.search(rf'^#\s+{name}\s+(\d+)\s*$', text, re.MULTILINE)
+              return int(match.group(1)) if match else 0
+          count = metric('tests')
+          passed = metric('pass')
+          failed = metric('fail')
+          ok = code == 0 and count == 8 and passed == 8 and failed == 0
+          with open(sys.argv[3], 'a', encoding='utf-8') as out:
+              out.write(f'exit_code={code}\n')
+              out.write(f'test_count={count}\n')
+              out.write(f'pass_count={passed}\n')
+              out.write(f'fail_count={failed}\n')
+              out.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run private ci owned with sealed output
+        id: owned
+        working-directory: private-repo
+        shell: bash
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/private-pr276-owned.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized result
+        id: sanitized
+        if: always()
+        shell: bash
+        env:
+          PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_focused.outputs.test_count }}
+          NODE_STATUS: ${{ steps.node_focused.outputs.status }}
+          NODE_COUNT: ${{ steps.node_focused.outputs.test_count }}
+          NODE_PASS: ${{ steps.node_focused.outputs.pass_count }}
+          OWNED_EXIT: ${{ steps.owned.outputs.exit_code }}
+          REPORT: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          let owned = {
+            status: process.env.OWNED_EXIT === '0' ? 'PASS' : 'FAIL',
+            failedOrLastStep: 'report-unavailable',
+            exitCode: /^\d+$/.test(process.env.OWNED_EXIT || '') ? Number(process.env.OWNED_EXIT) : 1,
+          };
+          try {
+            if (fs.existsSync(process.env.REPORT)) {
+              const r = JSON.parse(fs.readFileSync(process.env.REPORT, 'utf8'));
+              owned = {
+                status: r.status === 'PASS' ? 'PASS' : 'FAIL',
+                failedOrLastStep: String(r.failedOrLastStep || 'unknown'),
+                exitCode: Number.isInteger(r.exitCode) ? r.exitCode : owned.exitCode,
+              };
+            }
+          } catch {
+            owned = { status: 'FAIL', failedOrLastStep: 'invalid-sanitized-report', exitCode: 1 };
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `owned_status=${owned.status}\nowned_step=${owned.failedOrLastStep}\n`);
+          const lines = [
+            '## TrainingOS PR 276 exact-head validation', '',
+            `- Exact SHA: \`${process.env.PRIVATE_SHA}\``,
+            `- Focused Python: **${process.env.PYTHON_STATUS || 'FAIL'} ${process.env.PYTHON_COUNT || '0'}/21**`,
+            `- Focused Node: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_PASS || '0'}/${process.env.NODE_COUNT || '0'}**`,
+            `- ci:owned: **${owned.status}**`,
+            `- Owned last step: \`${owned.failedOrLastStep}\``,
+            `- Owned exit code: \`${owned.exitCode}\``, '',
+            'Raw private output is sealed and deleted; no private source or logs are published.'
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`PR276_SANITIZED python=${process.env.PYTHON_STATUS}:${process.env.PYTHON_COUNT}/21 node=${process.env.NODE_STATUS}:${process.env.NODE_PASS}/${process.env.NODE_COUNT} owned=${owned.status} step=${owned.failedOrLastStep}`);
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/private-pr276-python.log" \
+            "$RUNNER_TEMP/private-pr276-node.log" \
+            "$RUNNER_TEMP/private-pr276-owned.log"
+
+  enforce-results:
+    needs: exact-head-validation
+    if: always()
+    name: >-
+      result python-${{ needs.exact-head-validation.outputs.python_status }}-${{ needs.exact-head-validation.outputs.python_count }}
+      node-${{ needs.exact-head-validation.outputs.node_status }}-${{ needs.exact-head-validation.outputs.node_pass }}
+      owned-${{ needs.exact-head-validation.outputs.owned_status }}-${{ needs.exact-head-validation.outputs.owned_step }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce sanitized results
+        shell: bash
+        env:
+          PYTHON_STATUS: ${{ needs.exact-head-validation.outputs.python_status }}
+          PYTHON_COUNT: ${{ needs.exact-head-validation.outputs.python_count }}
+          NODE_STATUS: ${{ needs.exact-head-validation.outputs.node_status }}
+          NODE_COUNT: ${{ needs.exact-head-validation.outputs.node_count }}
+          NODE_PASS: ${{ needs.exact-head-validation.outputs.node_pass }}
+          NODE_FAIL: ${{ needs.exact-head-validation.outputs.node_fail }}
+          OWNED_STATUS: ${{ needs.exact-head-validation.outputs.owned_status }}
+          OWNED_EXIT: ${{ needs.exact-head-validation.outputs.owned_exit }}
+        run: |
+          failed=0
+          [[ "$PYTHON_STATUS" == PASS && "$PYTHON_COUNT" == 21 ]] || failed=1
+          [[ "$NODE_STATUS" == PASS && "$NODE_COUNT" == 8 && "$NODE_PASS" == 8 && "$NODE_FAIL" == 0 ]] || failed=1
+          [[ "$OWNED_STATUS" == PASS && "$OWNED_EXIT" == 0 ]] || failed=1
+          exit "$failed"
