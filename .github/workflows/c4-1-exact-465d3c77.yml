@@ -1,0 +1,248 @@
+name: C4-1 exact-head checkpoint CI
+
+on:
+  push:
+    branches:
+      - ci/c4-1-exact-465d3c77
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c4-1-exact-465d3c77
+  cancel-in-progress: false
+
+jobs:
+  c4-1-exact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: 465d3c77aacd32c46a93936f63f1242668b58a19
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::PRIVATE_SHA must be an exact lowercase 40-character commit SHA"
+            exit 2
+          fi
+          if [[ -z "$PRIVATE_TOKEN" ]]; then
+            echo "::error::PRIVATE_REPO_READ_TOKEN is not configured"
+            exit 2
+          fi
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify checked-out exact head
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$PRIVATE_SHA" ]]; then
+            echo "::error::Checked-out commit does not match requested exact SHA"
+            exit 3
+          fi
+          printf 'Verified private exact head: `%s`\n' "$actual_sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run C4-1 focused Python contracts with sealed output
+        id: focused_python
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest discover \
+            -s tests \
+            -p 'test_trainingos_commercial_usage_cost_rollup*contract.py' \
+            -v > "$RUNNER_TEMP/private-c41-python.log" 2>&1
+          exit_code=$?
+          python - "$RUNNER_TEMP/private-c41-python.log" "$exit_code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          exit_code = int(sys.argv[2])
+          output_path = pathlib.Path(sys.argv[3])
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          ok = exit_code == 0 and count == 27 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
+          with output_path.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={exit_code}\n')
+              handle.write(f'test_count={count}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run C4-1 focused Node tests with sealed output
+        id: focused_node
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/commercial-usage-cost-rollup.test.mjs \
+            > "$RUNNER_TEMP/private-c41-node.log" 2>&1
+          exit_code=$?
+          python - "$RUNNER_TEMP/private-c41-node.log" "$exit_code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          exit_code = int(sys.argv[2])
+          output_path = pathlib.Path(sys.argv[3])
+          tests = re.search(r'# tests\s+(\d+)', text)
+          passed = re.search(r'# pass\s+(\d+)', text)
+          failed = re.search(r'# fail\s+(\d+)', text)
+          test_count = int(tests.group(1)) if tests else 0
+          pass_count = int(passed.group(1)) if passed else 0
+          fail_count = int(failed.group(1)) if failed else -1
+          ok = exit_code == 0 and test_count == 8 and pass_count == 8 and fail_count == 0
+          with output_path.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={exit_code}\n')
+              handle.write(f'test_count={test_count}\n')
+              handle.write(f'pass_count={pass_count}\n')
+              handle.write(f'fail_count={fail_count}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run private ci:owned with sealed output
+        id: owned
+        working-directory: private-repo
+        shell: bash
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/private-c41-owned.log" 2>&1
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized checkpoint result
+        if: always()
+        shell: bash
+        env:
+          PY_STATUS: ${{ steps.focused_python.outputs.status }}
+          PY_COUNT: ${{ steps.focused_python.outputs.test_count }}
+          NODE_STATUS: ${{ steps.focused_node.outputs.status }}
+          NODE_COUNT: ${{ steps.focused_node.outputs.test_count }}
+          NODE_PASS_COUNT: ${{ steps.focused_node.outputs.pass_count }}
+          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+          REPORT_FILE: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const exactSha = process.env.PRIVATE_SHA;
+          const ownedExitCode = /^\d+$/.test(process.env.OWNED_EXIT_CODE || '')
+            ? Number(process.env.OWNED_EXIT_CODE)
+            : 1;
+          let owned = {
+            status: ownedExitCode === 0 ? 'PASS' : 'FAIL',
+            failedOrLastStep: 'report-unavailable',
+            exitCode: ownedExitCode,
+            startedAt: null,
+            finishedAt: null,
+            runtime: null,
+          };
+          try {
+            if (fs.existsSync(process.env.REPORT_FILE)) {
+              const report = JSON.parse(fs.readFileSync(process.env.REPORT_FILE, 'utf8'));
+              owned = {
+                status: report.status === 'PASS' ? 'PASS' : 'FAIL',
+                failedOrLastStep: String(report.failedOrLastStep || 'unknown'),
+                exitCode: Number.isInteger(report.exitCode) ? report.exitCode : ownedExitCode,
+                startedAt: report.startedAt || null,
+                finishedAt: report.finishedAt || null,
+                runtime: report.runtime || null,
+              };
+            }
+          } catch {
+            owned.status = 'FAIL';
+            owned.failedOrLastStep = 'invalid-sanitized-report';
+          }
+          const summary = [
+            '## C4-1 exact-head checkpoint CI',
+            '',
+            `- Exact SHA: \`${exactSha}\``,
+            `- Focused Python: **${process.env.PY_STATUS || 'FAIL'} ${process.env.PY_COUNT || '0'}/27**`,
+            `- Focused Node: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_PASS_COUNT || '0'}/${process.env.NODE_COUNT || '0'}**`,
+            `- ci:owned: **${owned.status}**`,
+            `- Owned last step: \`${owned.failedOrLastStep}\``,
+            `- Owned exit code: \`${owned.exitCode}\``,
+            `- Started: \`${owned.startedAt || 'not-reported'}\``,
+            `- Finished: \`${owned.finishedAt || 'not-reported'}\``,
+          ];
+          if (owned.runtime) {
+            summary.push(`- Runtime: \`${owned.runtime.node || ''} / ${owned.runtime.platform || ''} / ${owned.runtime.arch || ''}\``);
+          }
+          summary.push('', 'Raw private output is sealed and deleted; no private source or logs are published.');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
+          console.log(
+            `C4_1_EXACT_CI python=${process.env.PY_STATUS}:${process.env.PY_COUNT}/27 ` +
+            `node=${process.env.NODE_STATUS}:${process.env.NODE_PASS_COUNT}/${process.env.NODE_COUNT} ` +
+            `owned=${owned.status} step=${owned.failedOrLastStep} sha=${exactSha}`,
+          );
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/private-c41-python.log" \
+            "$RUNNER_TEMP/private-c41-node.log" \
+            "$RUNNER_TEMP/private-c41-owned.log"
+
+      - name: Enforce checkpoint results
+        if: always()
+        shell: bash
+        env:
+          PY_STATUS: ${{ steps.focused_python.outputs.status }}
+          PY_COUNT: ${{ steps.focused_python.outputs.test_count }}
+          NODE_STATUS: ${{ steps.focused_node.outputs.status }}
+          NODE_COUNT: ${{ steps.focused_node.outputs.test_count }}
+          NODE_PASS_COUNT: ${{ steps.focused_node.outputs.pass_count }}
+          OWNED_EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+        run: |
+          failed=0
+          if [[ "${PY_STATUS:-FAIL}" != "PASS" || "${PY_COUNT:-0}" != "27" ]]; then
+            echo "::error::C4-1 focused Python contracts did not pass 27/27."
+            failed=1
+          fi
+          if [[ "${NODE_STATUS:-FAIL}" != "PASS" || "${NODE_COUNT:-0}" != "8" || "${NODE_PASS_COUNT:-0}" != "8" ]]; then
+            echo "::error::C4-1 focused Node tests did not pass 8/8."
+            failed=1
+          fi
+          if [[ "${OWNED_EXIT_CODE:-1}" != "0" ]]; then
+            echo "::error::Private exact-head ci:owned failed."
+            failed=1
+          fi
+          exit "$failed"
