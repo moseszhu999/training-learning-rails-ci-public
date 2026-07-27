@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-gc03-fresh-replay-d5f528b689f6f748426384cb81770b605ab298f3
+  group: private-gc03-fresh-replay-dea1609ea2132868b9a2d4ad684e70b32d4ef510
   cancel-in-progress: false
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_SHA: d5f528b689f6f748426384cb81770b605ab298f3
+      PRIVATE_SHA: dea1609ea2132868b9a2d4ad684e70b32d4ef510
       SUPABASE_CLI_VERSION: 2.109.1
       SUPABASE_TELEMETRY_DISABLED: '1'
       DO_NOT_TRACK: '1'
@@ -32,6 +32,7 @@ jobs:
       reset_status: ${{ steps.replay.outputs.reset_status }}
       last_migration: ${{ steps.replay.outputs.last_migration }}
       failure_stage: ${{ steps.replay.outputs.failure_stage }}
+      error_class: ${{ steps.replay.outputs.error_class }}
 
     steps:
       - name: Validate exact head and private read credential
@@ -44,11 +45,11 @@ jobs:
           [[ -n "$PRIVATE_TOKEN" ]]
           docker version >/dev/null
 
-      - name: Check out private GC-03 correction exact head
+      - name: Check out final private GC-03 exact head
         uses: actions/checkout@v4
         with:
           repository: moseszhu999/training-learning-rails
-          ref: d5f528b689f6f748426384cb81770b605ab298f3
+          ref: dea1609ea2132868b9a2d4ad684e70b32d4ef510
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           path: private-repo
           persist-credentials: false
@@ -78,6 +79,7 @@ jobs:
           reset_status=NOT_RUN
           failure_stage=init
           last_migration=none
+          error_class=none
 
           npx --yes "supabase@$SUPABASE_CLI_VERSION" --version \
             > "$RUNNER_TEMP/gc03-supabase-version.log" 2>&1
@@ -128,12 +130,53 @@ jobs:
             fi
           done
 
+          error_class=$(python - \
+            "$RUNNER_TEMP/gc03-supabase-start.log" \
+            "$RUNNER_TEMP/gc03-supabase-reset.log" <<'PY'
+          import pathlib, re, sys
+          text = "\n".join(
+              pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+              for path in sys.argv[1:]
+              if pathlib.Path(path).exists()
+          )
+          patterns = [
+              (r'relation ["\']?([A-Za-z0-9_.]+)["\']? does not exist', 'missing_relation'),
+              (r'column ["\']?([A-Za-z0-9_.]+)["\']? does not exist', 'missing_column'),
+              (r'function\s+([A-Za-z0-9_.]+)', 'missing_function'),
+              (r'type ["\']?([A-Za-z0-9_.]+)["\']? does not exist', 'missing_type'),
+          ]
+          result = 'none'
+          for pattern, prefix in patterns:
+              matches = re.findall(pattern, text, flags=re.IGNORECASE)
+              if matches:
+                  token = re.sub(r'[^A-Za-z0-9_.-]', '', matches[-1])[:80]
+                  result = f'{prefix}_{token}' if token else prefix
+                  break
+          if result == 'none':
+              lower = text.lower()
+              if 'duplicate key value' in lower:
+                  result = 'duplicate_key'
+              elif 'syntax error' in lower:
+                  result = 'syntax_error'
+              elif 'permission denied' in lower:
+                  result = 'permission_denied'
+              elif 'container is not ready' in lower or 'failed to start docker' in lower:
+                  result = 'docker_start'
+              elif 'error:' in lower or 'error ' in lower:
+                  result = 'unclassified_error'
+          print(result)
+          PY
+          )
+          error_class=$(printf '%s' "$error_class" | tr -cd 'A-Za-z0-9_.-')
+          [[ -n "$error_class" ]] || error_class=unclassified_error
+
           {
             echo "init_status=$init_status"
             echo "start_status=$start_status"
             echo "reset_status=$reset_status"
             echo "last_migration=$last_migration"
             echo "failure_stage=$failure_stage"
+            echo "error_class=$error_class"
           } >> "$GITHUB_OUTPUT"
 
           exit 0
@@ -146,6 +189,7 @@ jobs:
           RESET_STATUS: ${{ steps.replay.outputs.reset_status }}
           LAST_MIGRATION: ${{ steps.replay.outputs.last_migration }}
           FAILURE_STAGE: ${{ steps.replay.outputs.failure_stage }}
+          ERROR_CLASS: ${{ steps.replay.outputs.error_class }}
         run: |
           {
             echo '## TrainingOS GC-03 clean local migration replay'
@@ -157,6 +201,7 @@ jobs:
             echo "- destructive local reset replay: **${RESET_STATUS:-NOT_RUN}**"
             echo "- last sanitized migration marker: \`${LAST_MIGRATION:-none}\`"
             echo "- failure stage: \`${FAILURE_STAGE:-unknown}\`"
+            echo "- sanitized error class: \`${ERROR_CLASS:-unknown}\`"
             echo
             echo 'No remote Supabase project, Production system, Vercel deployment, private raw log, or artifact was used.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -193,6 +238,7 @@ jobs:
       reset-${{ needs.fresh-replay.outputs.reset_status }}
       stage-${{ needs.fresh-replay.outputs.failure_stage }}
       migration-${{ needs.fresh-replay.outputs.last_migration }}
+      error-${{ needs.fresh-replay.outputs.error_class }}
     runs-on: ubuntu-24.04
     steps:
       - name: Enforce fresh replay
