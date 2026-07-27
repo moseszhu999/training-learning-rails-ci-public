@@ -1,0 +1,205 @@
+name: Validate final private TrainingOS GC-03 candidate
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/validate-private-pr290-gc03-final-v2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-pr290-gc03-final-dea1609ea2132868b9a2d4ad684e70b32d4ef510
+  cancel-in-progress: false
+
+jobs:
+  exact-head-validation:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'ci/verify-private-pr290-gc03-final-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: dea1609ea2132868b9a2d4ad684e70b32d4ef510
+    outputs:
+      python_status: ${{ steps.python.outputs.status }}
+      python_count: ${{ steps.python.outputs.count }}
+      python_failures: ${{ steps.python.outputs.failures }}
+      node_status: ${{ steps.node.outputs.status }}
+      node_count: ${{ steps.node.outputs.count }}
+      owned_status: ${{ steps.sanitize.outputs.owned_status }}
+      owned_step: ${{ steps.sanitize.outputs.owned_step }}
+      owned_exit: ${{ steps.owned.outputs.exit_code }}
+
+    steps:
+      - name: Validate exact head and private read credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out final private PR 290 exact head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: dea1609ea2132868b9a2d4ad684e70b32d4ef510
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact SHA and clean checkout
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ -z "$(git status --porcelain)" ]]
+
+      - name: Focused GC-03 Python contracts
+        id: python
+        working-directory: private-repo
+        run: |
+          set +e
+          python -m unittest -v tests.test_trainingos_gc03_risk_intervention_contract \
+            > "$RUNNER_TEMP/pr290-gc03-python.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/pr290-gc03-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          failures = sorted(set(re.findall(r'^(?:FAIL|ERROR):\s+(test_[^(\s]+)', text, flags=re.MULTILINE)))
+          if not failures:
+              failures = sorted(set(re.findall(r'^(test_[^(\s]+).*\.\.\.\s+(?:FAIL|ERROR)$', text, flags=re.MULTILINE)))
+          label = ','.join(failures) if failures else 'none'
+          ok = code == 0 and count == 13 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
+          with open(sys.argv[3], 'a', encoding='utf-8') as out:
+              out.write(f'status={"PASS" if ok else "FAIL"}\n')
+              out.write(f'count={count}\n')
+              out.write(f'failures={label}\n')
+          PY
+          exit 0
+
+      - name: Focused GC-03 Node Gateway tests
+        id: node
+        working-directory: private-repo
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/test/risk-intervention.test.mjs \
+            > "$RUNNER_TEMP/pr290-gc03-node.log" 2>&1
+          code=$?
+          node - "$RUNNER_TEMP/pr290-gc03-node.log" "$code" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require('node:fs');
+          const text = fs.readFileSync(process.argv[2], 'utf8');
+          const code = Number(process.argv[3]);
+          const match = text.match(/# tests (\d+)/);
+          const count = match ? Number(match[1]) : 0;
+          const failed = Number((text.match(/# fail (\d+)/) || [])[1] || 0);
+          const ok = code === 0 && count === 7 && failed === 0;
+          fs.appendFileSync(process.argv[4], `status=${ok ? 'PASS' : 'FAIL'}\ncount=${count}\n`);
+          NODE
+          exit 0
+
+      - name: Full owned CI
+        id: owned
+        working-directory: private-repo
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/pr290-gc03-owned.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized result
+        id: sanitize
+        if: always()
+        env:
+          REPORT: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
+          OWNED_EXIT: ${{ steps.owned.outputs.exit_code }}
+          PY_STATUS: ${{ steps.python.outputs.status }}
+          PY_COUNT: ${{ steps.python.outputs.count }}
+          PY_FAILURES: ${{ steps.python.outputs.failures }}
+          NODE_STATUS: ${{ steps.node.outputs.status }}
+          NODE_COUNT: ${{ steps.node.outputs.count }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          let owned = {
+            status: process.env.OWNED_EXIT === '0' ? 'PASS' : 'FAIL',
+            failedOrLastStep: 'report-unavailable',
+          };
+          try {
+            if (fs.existsSync(process.env.REPORT)) {
+              const report = JSON.parse(fs.readFileSync(process.env.REPORT, 'utf8'));
+              owned = {
+                status: report.status === 'PASS' ? 'PASS' : 'FAIL',
+                failedOrLastStep: String(report.failedOrLastStep || 'unknown'),
+              };
+            }
+          } catch {
+            owned = { status: 'FAIL', failedOrLastStep: 'invalid-report' };
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `owned_status=${owned.status}\nowned_step=${owned.failedOrLastStep}\n`);
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              '## TrainingOS PR 290 final exact-head validation',
+              '',
+              `- SHA: \`${process.env.PRIVATE_SHA}\``,
+              `- Focused Python contracts: **${process.env.PY_STATUS || 'FAIL'} ${process.env.PY_COUNT || '0'}/13**`,
+              `- Sanitized failing test names: \`${process.env.PY_FAILURES || 'none'}\``,
+              `- Focused Node Gateway tests: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_COUNT || '0'}/7**`,
+              `- ci:owned: **${owned.status}** (${owned.failedOrLastStep})`,
+              '',
+              'Raw private output remained sealed and was deleted.',
+            ].join('\n') + '\n',
+          );
+          NODE
+
+      - name: Cleanup private checkout and sealed logs
+        if: always()
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/pr290-gc03-python.log" \
+            "$RUNNER_TEMP/pr290-gc03-node.log" \
+            "$RUNNER_TEMP/pr290-gc03-owned.log"
+
+  enforce-results:
+    needs: exact-head-validation
+    if: always()
+    name: >-
+      result python-${{ needs.exact-head-validation.outputs.python_status }}-${{ needs.exact-head-validation.outputs.python_count }}
+      pyfail-${{ needs.exact-head-validation.outputs.python_failures }}
+      node-${{ needs.exact-head-validation.outputs.node_status }}-${{ needs.exact-head-validation.outputs.node_count }}
+      owned-${{ needs.exact-head-validation.outputs.owned_status }}-${{ needs.exact-head-validation.outputs.owned_step }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Enforce sanitized results
+        env:
+          PY_STATUS: ${{ needs.exact-head-validation.outputs.python_status }}
+          PY_COUNT: ${{ needs.exact-head-validation.outputs.python_count }}
+          NODE_STATUS: ${{ needs.exact-head-validation.outputs.node_status }}
+          NODE_COUNT: ${{ needs.exact-head-validation.outputs.node_count }}
+          OWNED_STATUS: ${{ needs.exact-head-validation.outputs.owned_status }}
+          OWNED_EXIT: ${{ needs.exact-head-validation.outputs.owned_exit }}
+        run: |
+          [[ "$PY_STATUS" == PASS && "$PY_COUNT" == 13 ]]
+          [[ "$NODE_STATUS" == PASS && "$NODE_COUNT" == 7 ]]
+          [[ "$OWNED_STATUS" == PASS && "$OWNED_EXIT" == 0 ]]
