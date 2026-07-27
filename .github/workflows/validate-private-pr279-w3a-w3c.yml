@@ -78,16 +78,16 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m pytest -q tests/test_trainingos_wave3_enterprise_report_w3a_integration_contract.py \
+          python -m unittest -v tests.test_trainingos_wave3_enterprise_report_w3a_integration_contract \
             > "$RUNNER_TEMP/private-pr279-python.log" 2>&1
           code=$?
           python - "$RUNNER_TEMP/private-pr279-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
           import pathlib, re, sys
           text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
           code = int(sys.argv[2])
-          match = re.search(r'(?:^|\s)(\d+)\s+passed(?:\s|,|$)', text)
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
           count = int(match.group(1)) if match else 0
-          ok = code == 0 and count == 12
+          ok = code == 0 and count == 12 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
           with open(sys.argv[3], 'a', encoding='utf-8') as out:
               out.write(f'exit_code={code}\n')
               out.write(f'test_count={count}\n')
