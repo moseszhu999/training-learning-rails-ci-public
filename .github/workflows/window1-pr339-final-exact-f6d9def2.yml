@@ -1,0 +1,183 @@
+name: Window 1 PR339 final exact-head CI
+
+on:
+  push:
+    branches:
+      - ci/window1-pr339-exact-b0118d52
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: window1-pr339-final-exact-f6d9def2
+  cancel-in-progress: false
+
+jobs:
+  exact-head-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      PRIVATE_SHA: f6d9def2e1b575b07f4ee417b78859641e1e8067
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact head
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+
+      - name: Install dependencies with sealed output
+        id: install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/final-install.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run full Learning Workspace contracts with sealed output
+        id: contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run validate:learning-workspace-bridge > "$RUNNER_TEMP/final-contracts.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python - "$RUNNER_TEMP/final-contracts.log" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          node_tests = sum(int(v) for v in re.findall(r'# tests\s+(\d+)', text))
+          node_pass = sum(int(v) for v in re.findall(r'# pass\s+(\d+)', text))
+          py_tests = sum(int(v) for v in re.findall(r'Ran\s+(\d+)\s+tests?', text))
+          with open(sys.argv[2], 'a', encoding='utf-8') as out:
+              out.write(f'node_tests={node_tests}\n')
+              out.write(f'node_pass={node_pass}\n')
+              out.write(f'python_tests={py_tests}\n')
+          PY
+          exit 0
+
+      - name: Run repository typecheck with sealed output
+        id: typecheck
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/final-typecheck.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build VS Code extension with sealed output
+        id: vscode
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node extensions/trainingos-classroom-vscode/esbuild.mjs --production > "$RUNNER_TEMP/final-vscode.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run production build with sealed output
+        id: build
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/final-build.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized result
+        if: always()
+        shell: bash
+        env:
+          INSTALL_CODE: ${{ steps.install.outputs.exit_code }}
+          CONTRACT_CODE: ${{ steps.contracts.outputs.exit_code }}
+          NODE_TESTS: ${{ steps.contracts.outputs.node_tests }}
+          NODE_PASS: ${{ steps.contracts.outputs.node_pass }}
+          PY_TESTS: ${{ steps.contracts.outputs.python_tests }}
+          TYPECHECK_CODE: ${{ steps.typecheck.outputs.exit_code }}
+          VSCODE_CODE: ${{ steps.vscode.outputs.exit_code }}
+          BUILD_CODE: ${{ steps.build.outputs.exit_code }}
+        run: |
+          status() { [[ "${1:-1}" == "0" ]] && printf PASS || printf FAIL; }
+          report="$GITHUB_WORKSPACE/window1-pr339-final-exact.txt"
+          {
+            echo 'Window 1 PR #339 final exact-head validation'
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "npm_ci=$(status "$INSTALL_CODE")"
+            echo "learning_workspace_contracts=$(status "$CONTRACT_CODE")"
+            echo "node_tests=${NODE_PASS:-0}/${NODE_TESTS:-0}"
+            echo "python_tests=${PY_TESTS:-0}"
+            echo "typecheck=$(status "$TYPECHECK_CODE")"
+            echo "vscode_bundle=$(status "$VSCODE_CODE")"
+            echo "production_build=$(status "$BUILD_CODE")"
+            echo 'private_checkout_raw_logs_and_build_output=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: window1-pr339-final-exact
+          path: window1-pr339-final-exact.txt
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/final-*.log "$GITHUB_WORKSPACE/window1-pr339-final-exact.txt"
+
+      - name: Enforce final exact-head result
+        if: always()
+        shell: bash
+        env:
+          INSTALL_CODE: ${{ steps.install.outputs.exit_code }}
+          CONTRACT_CODE: ${{ steps.contracts.outputs.exit_code }}
+          TYPECHECK_CODE: ${{ steps.typecheck.outputs.exit_code }}
+          VSCODE_CODE: ${{ steps.vscode.outputs.exit_code }}
+          BUILD_CODE: ${{ steps.build.outputs.exit_code }}
+        run: |
+          for code in "$INSTALL_CODE" "$CONTRACT_CODE" "$TYPECHECK_CODE" "$VSCODE_CODE" "$BUILD_CODE"; do
+            [[ "${code:-1}" == "0" ]]
+          done
