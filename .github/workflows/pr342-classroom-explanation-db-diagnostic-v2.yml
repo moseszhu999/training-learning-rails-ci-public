@@ -1,0 +1,110 @@
+name: PR342 Classroom Explanation DB diagnostic v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-classroom-explanation-db-diagnostic-v2.yml
+      - carriers/pr342-final-7c575a2e.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 7c575a2e42e76d564e4ba15dfe8f682da8dee366
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Run sealed startup diagnostic
+        id: diagnostic
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/pr342-db-diagnostic-v2.log"
+          actual="$(git rev-parse HEAD 2>/dev/null)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA" 2>/dev/null)"
+          behind="$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA" 2>/dev/null)"
+          precheck=1
+          [[ "$actual" == "$PRIVATE_SHA" && "$merge_base" == "$BASE_SHA" && "$behind" == 0 ]] && precheck=0
+          start=1
+          if [[ "$precheck" == 0 ]]; then
+            supabase start --debug > "$log" 2>&1
+            start=$?
+          fi
+          last_migration="$(grep -Eo 'Applying migration [0-9]{14}_[A-Za-z0-9_]+\.sql' "$log" 2>/dev/null | tail -1 | awk '{print $3}')"
+          marker="$(grep -Eo '\b(TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+' "$log" 2>/dev/null | tail -1)"
+          sqlstate="$(grep -Eo 'SQLSTATE[ =:]+[A-Z0-9]{5}|SQL state:[[:space:]]*[A-Z0-9]{5}|ERROR:[[:space:]]*[A-Z0-9]{5}:' "$log" 2>/dev/null | tail -1 | grep -Eo '[A-Z0-9]{5}' | tail -1)"
+          signature="$(grep -E 'ERROR:|FATAL:|failed to|Error:' "$log" 2>/dev/null | tail -1 | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}/<uuid>/g; s#/home/runner/[^ :]+#<runner-path>#g; s#postgresql://[^ ]+#<database-url>#g' | cut -c1-420)"
+          {
+            echo "precheck_exit=$precheck"
+            echo "start_exit=$start"
+            echo "actual_sha=$actual"
+            echo "merge_base=$merge_base"
+            echo "behind=$behind"
+            echo "last_migration=${last_migration:-NONE}"
+            echo "failure_marker=${marker:-NONE}"
+            echo "sqlstate=${sqlstate:-NONE}"
+            echo "error_signature=${signature:-NONE}"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Publish sanitized diagnostic
+        env:
+          PRECHECK: ${{ steps.diagnostic.outputs.precheck_exit }}
+          START: ${{ steps.diagnostic.outputs.start_exit }}
+          ACTUAL: ${{ steps.diagnostic.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.diagnostic.outputs.merge_base }}
+          BEHIND: ${{ steps.diagnostic.outputs.behind }}
+          LAST: ${{ steps.diagnostic.outputs.last_migration }}
+          MARKER: ${{ steps.diagnostic.outputs.failure_marker }}
+          SQLSTATE: ${{ steps.diagnostic.outputs.sqlstate }}
+          SIGNATURE: ${{ steps.diagnostic.outputs.error_signature }}
+        shell: bash
+        run: |
+          report=pr342-db-diagnostic-v2.txt
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "expected_base_sha=$BASE_SHA"
+            echo "actual_sha=${ACTUAL:-MISSING}"
+            echo "merge_base=${MERGE_BASE:-MISSING}"
+            echo "behind=${BEHIND:-MISSING}"
+            echo "precheck_exit=${PRECHECK:-MISSING}"
+            echo "start_exit=${START:-MISSING}"
+            echo "last_migration=${LAST:-NONE}"
+            echo "failure_marker=${MARKER:-NONE}"
+            echo "sqlstate=${SQLSTATE:-NONE}"
+            echo "error_signature=${SIGNATURE:-NONE}"
+            echo 'raw_logs_private_source_and_database=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr342-db-diagnostic-v2
+          path: pr342-db-diagnostic-v2.txt
+          retention-days: 3
+      - name: Cleanup
+        if: always()
+        run: |
+          (cd private-repo && supabase stop --no-backup >/dev/null 2>&1) || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-db-diagnostic-v2.log pr342-db-diagnostic-v2.txt
