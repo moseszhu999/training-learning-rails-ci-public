@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - ci/window1-pr324-exact-857bc086
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
