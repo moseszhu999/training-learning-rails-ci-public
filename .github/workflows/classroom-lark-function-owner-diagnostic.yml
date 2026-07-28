@@ -1,0 +1,59 @@
+name: Classroom Lark function owner diagnostic
+
+on:
+  push:
+    branches:
+      - ci/classroom-lark-6663e16e
+    paths:
+      - .github/workflows/classroom-lark-function-owner-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    env:
+      PRIVATE_SHA: f55b6383861bb604c83e4423add51ff1fb994a87
+    steps:
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Scan function creator and DDL consumers
+        working-directory: private-repo
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          target = 'prepare_trainingos_chat_exercise_publication'
+          creator = re.compile(
+              rf'create(?:\s+or\s+replace)?\s+function\s+(?:public\.)?{target}\s*\(',
+              re.I,
+          )
+          ddl_patterns = {
+              'alter': re.compile(rf'alter\s+function\s+(?:public\.)?{target}\s*\(', re.I),
+              'drop': re.compile(rf'drop\s+function(?:\s+if\s+exists)?\s+(?:public\.)?{target}\s*\(', re.I),
+              'grant_revoke': re.compile(rf'(?:grant|revoke)[^;]{{0,500}}?on\s+function\s+(?:public\.)?{target}\s*\(', re.I),
+              'comment': re.compile(rf'comment\s+on\s+function\s+(?:public\.)?{target}\s*\(', re.I),
+          }
+          rows = []
+          for path in sorted(Path('supabase/migrations').glob('*.sql')):
+              text = path.read_text(encoding='utf-8', errors='replace')
+              kinds = []
+              if creator.search(text):
+                  kinds.append('create')
+              kinds.extend(name for name, pattern in ddl_patterns.items() if pattern.search(text))
+              if kinds:
+                  rows.append(f'{path.name}:{"+".join(kinds)}')
+          print('FUNCTION_OWNER_DIAGNOSTIC target=' + target + ' rows=' + ','.join(rows))
+          PY
