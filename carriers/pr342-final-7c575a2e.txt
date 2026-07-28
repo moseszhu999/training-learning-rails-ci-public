@@ -1,0 +1,15 @@
+private_repository=moseszhu999/training-learning-rails
+private_pr=342
+private_branch=agent/trainingos-classroom-explanation-runtime-v1
+exact_private_sha=7c575a2e42e76d564e4ba15dfe8f682da8dee366
+exact_main_sha=a2875b971b513f667caa67272eb4271485d2858c
+exact_merge_base=a2875b971b513f667caa67272eb4271485d2858c
+ahead_by=22
+behind_by=0
+changed_files=23
+explanation_migrations=16
+latest_explanation_migration=20260728161500
+superseded_private_sha_1=05df044760e9ffb3884319e4b5180a81f9093afb
+superseded_private_sha_2=230f97d1be72d79dd5aeb36f8348a7a42e6e6d20
+old_results_are_final_evidence=false
+sealed_output=true
