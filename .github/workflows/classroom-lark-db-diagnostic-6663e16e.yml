@@ -17,7 +17,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 50
     outputs:
       diagnostic: ${{ steps.classify.outputs.diagnostic }}
     env:
@@ -39,7 +39,7 @@ jobs:
         with:
           version: latest
 
-      - name: Replay final exact head with dependency normalization
+      - name: Replay all migrations in dependency order
         id: classify
         working-directory: private-repo
         shell: bash
@@ -55,7 +55,6 @@ jobs:
           reset_code=1
           normalized_count=0
           order_status=NOT_RUN
-          repair_status=NOT_RUN
           if [[ "$init_code" == "0" ]]; then
             mv supabase/migrations "$saved_migrations"
             mkdir -p supabase/migrations
@@ -67,6 +66,7 @@ jobs:
           if [[ "$start_code" == "0" ]]; then
             normalized_count="$(python - "$order_report" <<'PY'
           from collections import defaultdict
+          from datetime import datetime, timedelta
           from pathlib import Path
           import heapq
           import re
@@ -75,114 +75,218 @@ jobs:
 
           report_path = Path(sys.argv[1])
           root = Path('supabase/migrations')
-          used = {
-              path.name.split('_', 1)[0]
-              for path in root.glob('*.sql')
-              if re.match(r'^\d{14}_', path.name)
-          }
-          groups = defaultdict(list)
-          contents = {}
-          created_at = {}
-          create_pattern = re.compile(
-              r'create\s+table(?:\s+if\s+not\s+exists)?\s+(?:public\.)?([a-z_][a-z0-9_]*)',
-              re.I,
-          )
-          public_ref_pattern = re.compile(r'\bpublic\.([a-z_][a-z0-9_]*)', re.I)
+          paths = sorted(root.glob('*.sql'))
+          texts = {path: path.read_text(encoding='utf-8', errors='replace') for path in paths}
 
-          for path in root.glob('*.sql'):
-              match = re.match(r'^(\d{8})_(.+\.sql)$', path.name)
-              if not match:
-                  continue
-              text = path.read_text(encoding='utf-8', errors='replace')
-              contents[path] = text
+          def git_created(path):
               result = subprocess.run(
                   ['git', 'log', '--diff-filter=A', '--format=%ct', '--', str(path)],
                   check=False,
                   capture_output=True,
                   text=True,
               )
-              timestamps = [int(item) for item in result.stdout.split() if item.isdigit()]
-              created_at[path] = min(timestamps) if timestamps else 0
-              groups[match.group(1)].append((path, match.group(2)))
+              values = [int(item) for item in result.stdout.split() if item.isdigit()]
+              return min(values) if values else 0
 
-          ordered_all = []
-          dependency_edges = []
-          for day, entries in sorted(groups.items()):
-              paths = [path for path, _ in entries]
-              suffix_by_path = {path: suffix for path, suffix in entries}
-              creator_by_table = {}
-              for path in paths:
-                  for table in create_pattern.findall(contents[path]):
-                      creator_by_table.setdefault(table.lower(), path)
+          def base_key(path):
+              prefix = path.name.split('_', 1)[0]
+              if len(prefix) == 8 and prefix.isdigit():
+                  return (int(prefix), 0, git_created(path), path.name)
+              if len(prefix) == 14 and prefix.isdigit():
+                  return (int(prefix[:8]), 1, int(prefix[8:]), path.name)
+              return (99999999, 9, 0, path.name)
 
-              outgoing = {path: set() for path in paths}
-              indegree = {path: 0 for path in paths}
-              for consumer in paths:
-                  refs = {name.lower() for name in public_ref_pattern.findall(contents[consumer])}
-                  for table in refs:
-                      producer = creator_by_table.get(table)
-                      if producer is None or producer == consumer or consumer in outgoing[producer]:
-                          continue
-                      outgoing[producer].add(consumer)
-                      indegree[consumer] += 1
-                      dependency_edges.append(f'{producer.name}->{consumer.name}:{table}')
+          keys = {path: base_key(path) for path in paths}
+          table_create = re.compile(
+              r'create\s+table(?:\s+if\s+not\s+exists)?\s+(?:public\.)?([a-z_][a-z0-9_]*)',
+              re.I,
+          )
+          function_create = re.compile(
+              r'create(?:\s+or\s+replace)?\s+function\s+(?:public\.)?([a-z_][a-z0-9_]*)\s*\(',
+              re.I,
+          )
+          type_create = re.compile(
+              r'create\s+type\s+(?:public\.)?([a-z_][a-z0-9_]*)',
+              re.I,
+          )
+          public_ref = re.compile(r'\bpublic\.([a-z_][a-z0-9_]*)', re.I)
+          public_call = re.compile(r'\bpublic\.([a-z_][a-z0-9_]*)\s*\(', re.I)
+          alter_add = re.compile(
+              r'alter\s+table\s+(?:if\s+exists\s+)?(?:public\.)?([a-z_][a-z0-9_]*)'
+              r'(?P<body>[\s\S]{0,3000}?)(?=;)',
+              re.I,
+          )
+          add_column = re.compile(
+              r'add\s+column(?:\s+if\s+not\s+exists)?\s+([a-z_][a-z0-9_]*)',
+              re.I,
+          )
 
-              heap = []
-              for path in paths:
-                  if indegree[path] == 0:
-                      heapq.heappush(heap, (created_at[path], path.name, path))
-              ordered = []
-              while heap:
-                  _, _, path = heapq.heappop(heap)
-                  ordered.append(path)
-                  for consumer in sorted(outgoing[path], key=lambda item: (created_at[item], item.name)):
-                      indegree[consumer] -= 1
-                      if indegree[consumer] == 0:
-                          heapq.heappush(heap, (created_at[consumer], consumer.name, consumer))
-              if len(ordered) != len(paths):
-                  unresolved = sorted(path.name for path in paths if path not in ordered)
-                  report_path.write_text(
-                      f'status=CYCLE unresolved={",".join(unresolved)}',
-                      encoding='utf-8',
-                  )
-                  raise SystemExit(2)
+          def first_owner(mapping, name, path):
+              current = mapping.get(name)
+              if current is None or keys[path] < keys[current]:
+                  mapping[name] = path
 
-              slot = 0
-              for path in ordered:
-                  while f'{day}{slot:06d}' in used:
-                      slot += 1
-                  version = f'{day}{slot:06d}'
-                  target = path.with_name(f'{version}_{suffix_by_path[path]}')
-                  path.rename(target)
-                  used.add(version)
-                  slot += 1
-                  ordered_all.append(target.name)
+          table_owner = {}
+          function_owner = {}
+          type_owner = {}
+          column_owner = {}
+          for path in paths:
+              text = texts[path]
+              for name in table_create.findall(text):
+                  first_owner(table_owner, name.lower(), path)
+              for name in function_create.findall(text):
+                  first_owner(function_owner, name.lower(), path)
+              for name in type_create.findall(text):
+                  first_owner(type_owner, name.lower(), path)
+              for match in alter_add.finditer(text):
+                  table = match.group(1).lower()
+                  for column in add_column.findall(match.group('body')):
+                      key = (table, column.lower())
+                      current = column_owner.get(key)
+                      if current is None or keys[path] < keys[current]:
+                          column_owner[key] = path
 
+          adjacency = {path: set() for path in paths}
+          edge_reasons = defaultdict(list)
+
+          def add_edge(producer, consumer, reason):
+              if producer is None or producer == consumer or consumer in adjacency[producer]:
+                  return
+              adjacency[producer].add(consumer)
+              edge_reasons[(producer, consumer)].append(reason)
+
+          for consumer in paths:
+              text = texts[consumer]
+              refs = {name.lower() for name in public_ref.findall(text)}
+              calls = {name.lower() for name in public_call.findall(text)}
+              for name in refs:
+                  add_edge(table_owner.get(name), consumer, f'table:{name}')
+                  add_edge(type_owner.get(name), consumer, f'type:{name}')
+              for name in calls:
+                  add_edge(function_owner.get(name), consumer, f'function:{name}')
+              lower_text = text.lower()
+              for (table, column), producer in column_owner.items():
+                  if table in refs and re.search(rf'\b{re.escape(column)}\b', lower_text):
+                      add_edge(producer, consumer, f'column:{table}.{column}')
+
+          index = 0
+          stack = []
+          on_stack = set()
+          indices = {}
+          lowlink = {}
+          components = []
+
+          def strongconnect(node):
+              nonlocal index
+              indices[node] = index
+              lowlink[node] = index
+              index += 1
+              stack.append(node)
+              on_stack.add(node)
+              for neighbor in adjacency[node]:
+                  if neighbor not in indices:
+                      strongconnect(neighbor)
+                      lowlink[node] = min(lowlink[node], lowlink[neighbor])
+                  elif neighbor in on_stack:
+                      lowlink[node] = min(lowlink[node], indices[neighbor])
+              if lowlink[node] == indices[node]:
+                  component = []
+                  while True:
+                      member = stack.pop()
+                      on_stack.remove(member)
+                      component.append(member)
+                      if member == node:
+                          break
+                  components.append(component)
+
+          for path in paths:
+              if path not in indices:
+                  strongconnect(path)
+
+          component_of = {}
+          for component_id, members in enumerate(components):
+              for member in members:
+                  component_of[member] = component_id
+
+          component_edges = {component_id: set() for component_id in range(len(components))}
+          indegree = {component_id: 0 for component_id in range(len(components))}
+          for producer, consumers in adjacency.items():
+              producer_component = component_of[producer]
+              for consumer in consumers:
+                  consumer_component = component_of[consumer]
+                  if producer_component == consumer_component:
+                      continue
+                  if consumer_component not in component_edges[producer_component]:
+                      component_edges[producer_component].add(consumer_component)
+                      indegree[consumer_component] += 1
+
+          component_key = {
+              component_id: min(keys[member] for member in members)
+              for component_id, members in enumerate(components)
+          }
+          heap = []
+          for component_id in range(len(components)):
+              if indegree[component_id] == 0:
+                  heapq.heappush(heap, (component_key[component_id], component_id))
+
+          ordered_components = []
+          while heap:
+              _, component_id = heapq.heappop(heap)
+              ordered_components.append(component_id)
+              for neighbor in sorted(component_edges[component_id], key=lambda item: component_key[item]):
+                  indegree[neighbor] -= 1
+                  if indegree[neighbor] == 0:
+                      heapq.heappush(heap, (component_key[neighbor], neighbor))
+
+          if len(ordered_components) != len(components):
+              report_path.write_text('status=COMPONENT_DAG_FAILURE', encoding='utf-8')
+              raise SystemExit(2)
+
+          ordered_paths = []
+          cyclic_components = 0
+          for component_id in ordered_components:
+              members = sorted(components[component_id], key=lambda path: keys[path])
+              if len(members) > 1:
+                  cyclic_components += 1
+              ordered_paths.extend(members)
+
+          staging = root / '.dependency-order-staging'
+          staging.mkdir()
+          staged = []
+          for index, path in enumerate(ordered_paths):
+              suffix = path.name.split('_', 1)[1] if '_' in path.name else path.name
+              staged_path = staging / f'{index:06d}_{suffix}'
+              path.rename(staged_path)
+              staged.append((staged_path, suffix))
+
+          start = datetime(2000, 1, 1, 0, 0, 0)
+          final_names = []
+          for index, (staged_path, suffix) in enumerate(staged):
+              version = (start + timedelta(seconds=index)).strftime('%Y%m%d%H%M%S')
+              target = root / f'{version}_{suffix}'
+              staged_path.rename(target)
+              final_names.append(target.name)
+          staging.rmdir()
+
+          edge_count = sum(len(consumers) for consumers in adjacency.values())
           report_path.write_text(
-              f'status=PASS count={len(ordered_all)} edges={len(dependency_edges)} '
-              f'first={ordered_all[0] if ordered_all else "none"} '
-              f'last={ordered_all[-1] if ordered_all else "none"}',
+              f'status=PASS count={len(final_names)} edges={edge_count} '
+              f'components={len(components)} cyclic_components={cyclic_components} '
+              f'first={final_names[0] if final_names else "none"} '
+              f'last={final_names[-1] if final_names else "none"}',
               encoding='utf-8',
           )
-          print(len(ordered_all))
+          print(len(final_names))
           PY
             )"
             normalize_code=$?
             order_status="$(cat "$order_report" 2>/dev/null || echo status=FAILED)"
             if [[ "$normalize_code" == "0" ]]; then
-              repair_source="supabase/migrations/20260728195400_trainingos_database_replay_source_assets_catalog_metadata_v1.sql"
-              repair_target="supabase/migrations/20260719065000_trainingos_database_replay_source_assets_catalog_metadata_v1.sql"
-              if [[ -f "$repair_source" && ! -e "$repair_target" ]]; then
-                mv "$repair_source" "$repair_target"
-                repair_status=MOVED_BEFORE_CONSUMERS
-                supabase db reset --local --no-seed --debug >> "$db_log" 2>&1
-                reset_code=$?
-              else
-                repair_status=REPAIR_FILE_CONFLICT
-              fi
+              supabase db reset --local --no-seed --debug >> "$db_log" 2>&1
+              reset_code=$?
             fi
           fi
-          diagnostic="$(python - "$db_log" "$init_code" "$start_code" "$reset_code" "$normalized_count" "$order_status" "$repair_status" <<'PY'
+          diagnostic="$(python - "$db_log" "$init_code" "$start_code" "$reset_code" "$normalized_count" "$order_status" <<'PY'
           import hashlib
           import pathlib
           import re
@@ -210,12 +314,12 @@ jobs:
           error = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<uuid>', error, flags=re.I)
           error = re.sub(r"'[^']*'", "'<redacted>'", error)
           error = re.sub(r'\s+', ' ', error)[:2400]
-          order_status = re.sub(r'\s+', '_', sys.argv[6])[:600]
+          order_status = re.sub(r'\s+', '_', sys.argv[6])[:900]
           digest = hashlib.sha256(raw.encode('utf-8', errors='replace')).hexdigest()
           print(
               'DB_REPLAY_DIAGNOSTIC '
               f'init={sys.argv[2]} start={sys.argv[3]} reset={sys.argv[4]} '
-              f'normalized_legacy={sys.argv[5]} order={order_status} repair={sys.argv[7]} '
+              f'normalized_all={sys.argv[5]} order={order_status} '
               f'last_migration={pathlib.Path(applying[-1]).name if applying else "none"} '
               f'error={error} log_sha256={digest}'
           )
