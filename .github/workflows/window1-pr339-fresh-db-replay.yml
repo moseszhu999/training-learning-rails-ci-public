@@ -1,0 +1,133 @@
+name: Window 1 PR339 fresh database replay
+
+on:
+  push:
+    branches:
+      - ci/window1-pr339-exact-b0118d52
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: window1-pr339-fresh-db-replay
+  cancel-in-progress: false
+
+jobs:
+  fresh-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      PRIVATE_SHA: 375c1ec217123e1b5c3533d0a5c952c645f4ce49
+
+    steps:
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify exact head and Docker
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          docker version >/dev/null
+          supabase --version
+
+      - name: Replay canonical migrations twice on fresh database
+        id: replay
+        working-directory: private-repo
+        shell: bash
+        env:
+          TRAININGOS_SOURCE_SHA: ${{ env.PRIVATE_SHA }}
+        run: |
+          set +e
+          timeout 40m bash scripts/run-trainingos-fresh-database-replay.sh > "$RUNNER_TEMP/pr339-fresh-replay.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python - "$RUNNER_TEMP/pr339-fresh-replay.log" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          fresh = re.search(r'^freshReplay=(\S+)', text, flags=re.MULTILINE)
+          source = re.search(r'^sourceSha=(\S+)', text, flags=re.MULTILINE)
+          stages = re.findall(r'^stage=(\S+)', text, flags=re.MULTILINE)
+          with open(sys.argv[2], 'a', encoding='utf-8') as out:
+              out.write(f'fresh_replay={fresh.group(1) if fresh else "MISSING"}\n')
+              out.write(f'source_sha={source.group(1) if source else "MISSING"}\n')
+              out.write(f'stage_count={len(stages)}\n')
+              out.write(f'stages={"|".join(stages)}\n')
+          PY
+          exit 0
+
+      - name: Publish sanitized replay result
+        if: always()
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.replay.outputs.exit_code }}
+          FRESH_REPLAY: ${{ steps.replay.outputs.fresh_replay }}
+          SOURCE_SHA: ${{ steps.replay.outputs.source_sha }}
+          STAGE_COUNT: ${{ steps.replay.outputs.stage_count }}
+          STAGES: ${{ steps.replay.outputs.stages }}
+        run: |
+          status=FAIL
+          if [[ "${EXIT_CODE:-1}" == "0" && "$FRESH_REPLAY" == "PASS" && "$SOURCE_SHA" == "$PRIVATE_SHA" ]]; then status=PASS; fi
+          report="$GITHUB_WORKSPACE/window1-pr339-fresh-db-result.txt"
+          {
+            echo 'Window 1 PR #339 fresh database replay'
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "fresh_database_replay=$status"
+            echo "script_marker=${FRESH_REPLAY:-MISSING}"
+            echo "reported_source_sha=${SOURCE_SHA:-MISSING}"
+            echo "stage_count=${STAGE_COUNT:-0}"
+            echo "stages=${STAGES:--}"
+            echo 'destructive_reset_count=2'
+            echo 'private_checkout_raw_logs_and_local_database=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized replay result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: window1-pr339-fresh-db-result
+          path: window1-pr339-fresh-db-result.txt
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Cleanup private checkout and sealed replay log
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP/pr339-fresh-replay.log" "$GITHUB_WORKSPACE/window1-pr339-fresh-db-result.txt"
+
+      - name: Enforce replay result
+        if: always()
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.replay.outputs.exit_code }}
+          FRESH_REPLAY: ${{ steps.replay.outputs.fresh_replay }}
+          SOURCE_SHA: ${{ steps.replay.outputs.source_sha }}
+        run: |
+          [[ "${EXIT_CODE:-1}" == "0" ]]
+          [[ "$FRESH_REPLAY" == "PASS" ]]
+          [[ "$SOURCE_SHA" == "$PRIVATE_SHA" ]]
