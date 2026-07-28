@@ -33,7 +33,7 @@ PUBLIC_REF = re.compile(r"\bpublic\.([a-z_][a-z0-9_]*)", re.IGNORECASE)
 FUNCTION_DDL_REF = re.compile(
     r"(?:"
     r"\b(?:grant|revoke)\b[^;]{0,500}?\bon\s+function"
-    r"|\b(?:alter|comment\s+on)\s+function"
+    r"|\b(?:alter|comment\s+on|drop)\s+function(?:\s+if\s+exists)?"
     r")\s+(?:public\.)?([a-z_][a-z0-9_]*)\s*\(",
     re.IGNORECASE,
 )
@@ -99,7 +99,7 @@ def main() -> int:
     keys = {path: base_key(path) for path in paths}
 
     table_owner: dict[object, Path] = {}
-    function_owner: dict[object, Path] = {}
+    function_creators: dict[str, list[Path]] = defaultdict(list)
     type_owner: dict[object, Path] = {}
     column_owner: dict[object, Path] = {}
 
@@ -108,13 +108,18 @@ def main() -> int:
         for name in TABLE_CREATE.findall(text):
             first_owner(table_owner, name.lower(), path, keys)
         for name in FUNCTION_CREATE.findall(text):
-            first_owner(function_owner, name.lower(), path, keys)
+            normalized = name.lower()
+            if path not in function_creators[normalized]:
+                function_creators[normalized].append(path)
         for name in TYPE_CREATE.findall(text):
             first_owner(type_owner, name.lower(), path, keys)
         for match in ALTER_TABLE_STATEMENT.finditer(text):
             table = match.group(1).lower()
             for column in ADD_COLUMN.findall(match.group("body")):
                 first_owner(column_owner, (table, column.lower()), path, keys)
+
+    for creators in function_creators.values():
+        creators.sort(key=lambda path: keys[path])
 
     adjacency = {path: set() for path in paths}
     edge_reasons: dict[tuple[Path, Path], list[str]] = defaultdict(list)
@@ -133,7 +138,9 @@ def main() -> int:
             add_edge(table_owner.get(name), consumer, f"table:{name}")
             add_edge(type_owner.get(name), consumer, f"type:{name}")
         for name in function_ddl_refs:
-            add_edge(function_owner.get(name), consumer, f"function-ddl:{name}")
+            creators = function_creators.get(name, [])
+            producer = next((path for path in creators if path != consumer), None)
+            add_edge(producer, consumer, f"function-ddl:{name}")
         lower_text = text.lower()
         for (table, column), producer in column_owner.items():
             if table in refs and re.search(rf"\b{re.escape(column)}\b", lower_text):
