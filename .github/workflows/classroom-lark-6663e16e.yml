@@ -1,0 +1,398 @@
+name: Classroom Lark reconciled exact-head CI
+
+on:
+  push:
+    branches:
+      - ci/classroom-lark-6663e16e
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-lark-6663e16e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-lark-6663e16e-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: 6663e16e0ab44c9e91d6d8c012928b561691c029
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          for value in "$PRIVATE_SHA" "$BASE_SHA"; do
+            if [[ ! "$value" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Exact SHA must be a lowercase 40-character commit SHA"
+              exit 2
+            fi
+          done
+          if [[ -z "$PRIVATE_TOKEN" ]]; then
+            echo "::error::PRIVATE_REPO_READ_TOKEN is not configured"
+            exit 2
+          fi
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 200
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Verify exact private head, merge base and owned scope
+        id: scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          status=PASS
+          actual_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+          actual_merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA" 2>/dev/null || true)"
+          if [[ "$actual_sha" != "$PRIVATE_SHA" || "$actual_merge_base" != "$BASE_SHA" ]]; then
+            status=FAIL
+          fi
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            status=FAIL
+          else
+            actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+            expected_files=$'docs/architecture/trainingos-classroom-lark-adapter-v1.md\ndocs/architecture/trainingos-classroom-provider-adapter-contract-v1.md\ndocs/testing/trainingos-classroom-lark-adapter-validation-v1.md\nlib/trainingos-agent-gateway/classroom-lark-adapter.mjs\npackages/training-classroom-lark/src/lark-adapter.d.mts\npackages/training-classroom-lark/src/lark-adapter.mjs\npackages/training-classroom-provider/src/provider-adapter.d.mts\npackages/training-classroom-provider/src/provider-adapter.mjs\npackages/training-classroom-zoom/src/provider-adapter.d.mts\npackages/training-classroom-zoom/src/provider-adapter.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-lark-adapter.test.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-provider-adapter-contract.test.mjs\nscripts/run-trainingos-classroom-lark-adapter-validation.mjs\nsupabase/migrations/20260728195000_trainingos_classroom_lark_schema_v1.sql\nsupabase/migrations/20260728195100_trainingos_classroom_lark_rpc_v1.sql\nsupabase/migrations/20260728195200_trainingos_classroom_lark_projection_v1.sql\nsupabase/migrations/20260728195300_trainingos_classroom_lark_security_hardening_v1.sql\ntests/sql/trainingos_classroom_lark_adapter_e2e.sql\ntests/test_trainingos_classroom_lark_adapter_contract.py'
+            if [[ "$actual_files" != "$expected_files" ]]; then
+              status=FAIL
+            fi
+          fi
+          {
+            echo "status=$status"
+            echo "actual_sha=$actual_sha"
+            echo "merge_base=$actual_merge_base"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run JavaScript syntax checks with sealed output
+        id: syntax
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check packages/training-classroom-provider/src/provider-adapter.mjs
+            node --check packages/training-classroom-zoom/src/provider-adapter.mjs
+            node --check packages/training-classroom-lark/src/lark-adapter.mjs
+            node --check lib/trainingos-agent-gateway/classroom-zoom-adapter.mjs
+            node --check lib/trainingos-agent-gateway/classroom-lark-adapter.mjs
+            node --check scripts/run-trainingos-classroom-lark-adapter-validation.mjs
+          } > "$RUNNER_TEMP/classroom-lark-syntax.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run focused provider contracts with sealed output
+        id: node_contract
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node scripts/run-trainingos-classroom-lark-adapter-validation.mjs \
+            > "$RUNNER_TEMP/classroom-lark-node.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/classroom-lark-node.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          output = pathlib.Path(sys.argv[3])
+          tests = re.search(r'# tests\s+(\d+)', text)
+          passed = re.search(r'# pass\s+(\d+)', text)
+          failed = re.search(r'# fail\s+(\d+)', text)
+          test_count = int(tests.group(1)) if tests else 0
+          pass_count = int(passed.group(1)) if passed else 0
+          fail_count = int(failed.group(1)) if failed else -1
+          ok = code == 0 and test_count == 16 and pass_count == 16 and fail_count == 0
+          with output.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={code}\n')
+              handle.write(f'test_count={test_count}\n')
+              handle.write(f'pass_count={pass_count}\n')
+              handle.write(f'fail_count={fail_count}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run Python static and security contracts with sealed output
+        id: python_contract
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python tests/test_trainingos_classroom_lark_adapter_contract.py \
+            > "$RUNNER_TEMP/classroom-lark-python.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/classroom-lark-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          output = pathlib.Path(sys.argv[3])
+          ran = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          test_count = int(ran.group(1)) if ran else 0
+          ok = code == 0 and test_count == 11 and '\nOK' in text
+          with output.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={code}\n')
+              handle.write(f'test_count={test_count}\n')
+              handle.write(f'pass_count={test_count if ok else 0}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Install private repository dependencies with sealed output
+        id: install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/classroom-lark-install.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run repository typecheck with sealed output
+        id: typecheck
+        if: steps.install.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/classroom-lark-typecheck.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run production build with sealed output
+        id: build
+        if: steps.install.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/classroom-lark-build.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Set up Supabase CLI
+        if: steps.install.outputs.status == 'PASS'
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Replay all migrations in isolated Supabase
+        id: db_replay
+        if: steps.install.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          db_log="$RUNNER_TEMP/classroom-lark-db-replay.log"
+          : > "$db_log"
+          supabase init --force >> "$db_log" 2>&1
+          init_code=$?
+          start_code=1
+          reset_code=1
+          if [[ "$init_code" == "0" ]]; then
+            supabase start >> "$db_log" 2>&1
+            start_code=$?
+          fi
+          if [[ "$start_code" == "0" ]]; then
+            supabase db reset --local --no-seed >> "$db_log" 2>&1
+            reset_code=$?
+          fi
+          status=FAIL
+          if [[ "$init_code" == "0" && "$start_code" == "0" && "$reset_code" == "0" ]]; then
+            status=PASS
+          fi
+          {
+            echo "init_code=$init_code"
+            echo "start_code=$start_code"
+            echo "reset_code=$reset_code"
+            echo "status=$status"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run isolated Lark SQL E2E and zero-residue check
+        id: sql_e2e
+        if: steps.db_replay.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          e2e_log="$RUNNER_TEMP/classroom-lark-sql-e2e.log"
+          PGPASSWORD=postgres psql \
+            --host=127.0.0.1 --port=54322 --username=postgres --dbname=postgres \
+            --set=ON_ERROR_STOP=1 \
+            --file=tests/sql/trainingos_classroom_lark_adapter_e2e.sql \
+            > "$e2e_log" 2>&1
+          code=$?
+          status=FAIL
+          if [[ "$code" == "0" ]] \
+             && grep -Eq '"status"[[:space:]]*:[[:space:]]*"PASS"' "$e2e_log" \
+             && grep -Eq '"cleanupStatus"[[:space:]]*:[[:space:]]*"PASS"' "$e2e_log" \
+             && grep -Eq '"zeroResidueCount"[[:space:]]*:[[:space:]]*0' "$e2e_log" \
+             && grep -Eq '"studentProjectionRejected"[[:space:]]*:[[:space:]]*true' "$e2e_log" \
+             && grep -Eq '"agentConfirmationRejected"[[:space:]]*:[[:space:]]*true' "$e2e_log" \
+             && grep -Eq '"transcriptImmutable"[[:space:]]*:[[:space:]]*true' "$e2e_log" \
+             && grep -Eq '"attendanceDeterminationPerformed"[[:space:]]*:[[:space:]]*false' "$e2e_log"; then
+            status=PASS
+          fi
+          {
+            echo "exit_code=$code"
+            echo "status=$status"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Stop isolated Supabase
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          supabase stop --no-backup > "$RUNNER_TEMP/classroom-lark-db-stop.log" 2>&1 || true
+
+      - name: Publish sanitized exact-head result
+        if: always()
+        shell: bash
+        env:
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          NODE_STATUS: ${{ steps.node_contract.outputs.status }}
+          NODE_COUNT: ${{ steps.node_contract.outputs.test_count }}
+          NODE_PASS: ${{ steps.node_contract.outputs.pass_count }}
+          PYTHON_STATUS: ${{ steps.python_contract.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_contract.outputs.test_count }}
+          PYTHON_PASS: ${{ steps.python_contract.outputs.pass_count }}
+          INSTALL_STATUS: ${{ steps.install.outputs.status }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+          DB_REPLAY_STATUS: ${{ steps.db_replay.outputs.status }}
+          SQL_E2E_STATUS: ${{ steps.sql_e2e.outputs.status }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const value = (input) => input || 'NOT_RUN';
+          const lines = [
+            '## Classroom Lark Adapter reconciled exact-head CI',
+            '',
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}\``,
+            `- Exact merge base: \`${process.env.MERGE_BASE || 'NOT_RESOLVED'}\``,
+            `- Owned 19-file scope: **${value(process.env.SCOPE_STATUS)}**`,
+            `- JavaScript syntax: **${value(process.env.SYNTAX_STATUS)}**`,
+            `- Focused provider contracts: **${value(process.env.NODE_STATUS)} ${process.env.NODE_PASS || '0'}/${process.env.NODE_COUNT || '0'}**`,
+            `- Python static/security contracts: **${value(process.env.PYTHON_STATUS)} ${process.env.PYTHON_PASS || '0'}/${process.env.PYTHON_COUNT || '0'}**`,
+            `- Dependency install: **${value(process.env.INSTALL_STATUS)}**`,
+            `- Repository typecheck: **${value(process.env.TYPECHECK_STATUS)}**`,
+            `- Production build: **${value(process.env.BUILD_STATUS)}**`,
+            `- Isolated database replay: **${value(process.env.DB_REPLAY_STATUS)}**`,
+            `- SQL E2E and zero residue: **${value(process.env.SQL_E2E_STATUS)}**`,
+            '',
+            'Raw private output is sealed and deleted. No private source, fixtures, identifiers, provider tokens, transcript text, or logs are published.',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(
+            `CLASSROOM_LARK_RECONCILED_EXACT_CI scope=${value(process.env.SCOPE_STATUS)} ` +
+            `syntax=${value(process.env.SYNTAX_STATUS)} ` +
+            `node=${value(process.env.NODE_STATUS)}:${process.env.NODE_PASS || '0'}/${process.env.NODE_COUNT || '0'} ` +
+            `python=${value(process.env.PYTHON_STATUS)}:${process.env.PYTHON_PASS || '0'}/${process.env.PYTHON_COUNT || '0'} ` +
+            `install=${value(process.env.INSTALL_STATUS)} typecheck=${value(process.env.TYPECHECK_STATUS)} ` +
+            `build=${value(process.env.BUILD_STATUS)} db=${value(process.env.DB_REPLAY_STATUS)} ` +
+            `sql=${value(process.env.SQL_E2E_STATUS)} sha=${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}`,
+          );
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/classroom-lark-syntax.log" \
+            "$RUNNER_TEMP/classroom-lark-node.log" \
+            "$RUNNER_TEMP/classroom-lark-python.log" \
+            "$RUNNER_TEMP/classroom-lark-install.log" \
+            "$RUNNER_TEMP/classroom-lark-typecheck.log" \
+            "$RUNNER_TEMP/classroom-lark-build.log" \
+            "$RUNNER_TEMP/classroom-lark-db-replay.log" \
+            "$RUNNER_TEMP/classroom-lark-sql-e2e.log" \
+            "$RUNNER_TEMP/classroom-lark-db-stop.log"
+
+      - name: Enforce reconciled exact-head result
+        if: always()
+        shell: bash
+        env:
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          NODE_STATUS: ${{ steps.node_contract.outputs.status }}
+          NODE_COUNT: ${{ steps.node_contract.outputs.test_count }}
+          NODE_PASS: ${{ steps.node_contract.outputs.pass_count }}
+          PYTHON_STATUS: ${{ steps.python_contract.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_contract.outputs.test_count }}
+          PYTHON_PASS: ${{ steps.python_contract.outputs.pass_count }}
+          INSTALL_STATUS: ${{ steps.install.outputs.status }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+          DB_REPLAY_STATUS: ${{ steps.db_replay.outputs.status }}
+          SQL_E2E_STATUS: ${{ steps.sql_e2e.outputs.status }}
+        run: |
+          failed=0
+          [[ "${SCOPE_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${SYNTAX_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${NODE_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${NODE_COUNT:-0}" == "16" ]] || failed=1
+          [[ "${NODE_PASS:-0}" == "16" ]] || failed=1
+          [[ "${PYTHON_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${PYTHON_COUNT:-0}" == "11" ]] || failed=1
+          [[ "${PYTHON_PASS:-0}" == "11" ]] || failed=1
+          [[ "${INSTALL_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${TYPECHECK_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${BUILD_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${DB_REPLAY_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${SQL_E2E_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          if [[ "$failed" != "0" ]]; then
+            echo "::error::Classroom Lark reconciled exact-head validation failed. Review the sanitized step summary."
+          fi
+          exit "$failed"
