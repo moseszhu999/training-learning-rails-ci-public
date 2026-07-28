@@ -1,0 +1,239 @@
+name: Issue355 full-history replay diagnostic v1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/issue355-full-history-diagnostic-v1.yml
+      - carriers/issue355-full-history-diagnostic-v1.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue355-full-history-diagnostic-v1-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+  EXPECTED_BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+
+jobs:
+  database-replay-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Validate exact inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private main
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Verify exact private source
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-repo rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git -C private-repo rev-parse main 2>/dev/null || git -C private-repo rev-parse HEAD)" == "$EXPECTED_BASE_SHA" ]]
+
+      - name: Classify raw historical source layout
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json, re
+          root = Path('private-repo/supabase/migrations')
+          files = sorted(p.name for p in root.glob('*.sql'))
+          short = [name for name in files if re.fullmatch(r'\d{8}_.+\.sql', name)]
+          versions = {}
+          for name in files:
+              versions.setdefault(name.split('_', 1)[0], []).append(name)
+          duplicates = {key: value for key, value in versions.items() if len(value) > 1}
+          payload = {
+              'rawMigrationCount': len(files),
+              'legacyShortVersionCount': len(short),
+              'duplicateVersionGroups': len(duplicates),
+              'firstDuplicateVersion': sorted(duplicates)[0] if duplicates else None,
+              'firstDuplicateFiles': duplicates[sorted(duplicates)[0]] if duplicates else [],
+              'rawSourceLayout': 'UNSUPPORTED_FOR_DIRECT_SUPABASE_REPLAY' if short or duplicates else 'CANONICAL',
+          }
+          Path('/tmp/issue355-layout.json').write_text(json.dumps(payload, sort_keys=True), encoding='utf-8')
+          PY
+
+      - name: Reproduce old raw-copy carrier failure
+        run: |
+          set -euo pipefail
+          rm -rf raw-project
+          mkdir raw-project
+          supabase --workdir raw-project init --force --yes > "$RUNNER_TEMP/issue355-raw-init.log" 2>&1
+          rm -rf raw-project/supabase/migrations
+          mkdir -p raw-project/supabase/migrations
+          cp private-repo/supabase/migrations/*.sql raw-project/supabase/migrations/
+          rm -f raw-project/supabase/seed.sql
+          set +e
+          supabase --workdir raw-project start --debug > "$RUNNER_TEMP/issue355-raw-replay.log" 2>&1
+          code=$?
+          set -e
+          last="$(grep -Eo 'Applying migration [^ ]+\.sql' "$RUNNER_TEMP/issue355-raw-replay.log" | tail -1 | awk '{print $3}' || true)"
+          signature="$(grep -Ei 'ERROR:|duplicate migration|already exists|duplicate_object|duplicate key|does not exist' "$RUNNER_TEMP/issue355-raw-replay.log" | tail -1 | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}/<uuid>/g; s#/home/runner/[^ :]+#<runner-path>#g' | cut -c1-480 || true)"
+          sqlstate="$(printf '%s' "$signature" | sed -nE 's/.*ERROR:[[:space:]]*([A-Z0-9]{5}):.*/\1/p')"
+          classification=DATABASE_FAILED
+          grep -Eqi 'duplicate migration|already exists|duplicate_object|duplicate key' "$RUNNER_TEMP/issue355-raw-replay.log" && classification=DATABASE_FULL_HISTORY
+          grep -Eqi 'does not exist' "$RUNNER_TEMP/issue355-raw-replay.log" && classification=DATABASE_FULL_HISTORY
+          {
+            echo "rawExit=$code"
+            echo "rawLastMigration=${last:-NONE}"
+            echo "rawSqlState=${sqlstate:-NOT_EXPOSED_BY_SUPABASE_CLI}"
+            echo "rawClassification=$classification"
+            echo "rawErrorSignature=${signature:-NONE}"
+          } > /tmp/issue355-raw.txt
+          supabase --workdir raw-project stop --no-backup >/dev/null 2>&1 || true
+          rm -rf raw-project
+          [[ "$code" != 0 ]]
+
+      - name: Identify first SQL dependency failure under raw filename order
+        run: |
+          set -euo pipefail
+          rm -rf manual-project
+          mkdir manual-project
+          supabase --workdir manual-project init --force --yes > "$RUNNER_TEMP/issue355-manual-init.log" 2>&1
+          rm -rf manual-project/supabase/migrations
+          mkdir -p manual-project/supabase/migrations
+          rm -f manual-project/supabase/seed.sql
+          supabase --workdir manual-project start > "$RUNNER_TEMP/issue355-manual-start.log" 2>&1
+          eval "$(supabase --workdir manual-project status -o env | grep '^DB_URL=')"
+          first_fail=NONE
+          sqlstate=NONE
+          signature=NONE
+          last_good=NONE
+          while IFS= read -r file; do
+            err="$RUNNER_TEMP/issue355-manual.err"
+            out="$RUNNER_TEMP/issue355-manual.out"
+            set +e
+            psql "$DB_URL" -X -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -f "$file" > "$out" 2> "$err"
+            code=$?
+            set -e
+            if [[ "$code" != 0 ]]; then
+              first_fail="$(basename "$file")"
+              signature="$(grep -E 'ERROR:|FATAL:' "$err" | tail -1 | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}/<uuid>/g; s#/home/runner/[^ :]+#<runner-path>#g' | cut -c1-480)"
+              sqlstate="$(printf '%s' "$signature" | sed -nE 's/.*ERROR:[[:space:]]*([A-Z0-9]{5}):.*/\1/p')"
+              break
+            fi
+            last_good="$(basename "$file")"
+          done < <(find private-repo/supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+          {
+            echo "rawFilenameOrderLastGood=$last_good"
+            echo "rawFilenameOrderFirstFail=$first_fail"
+            echo "rawFilenameOrderSqlState=${sqlstate:-NONE}"
+            echo "rawFilenameOrderSignature=$signature"
+          } > /tmp/issue355-manual.txt
+          supabase --workdir manual-project stop --no-backup >/dev/null 2>&1 || true
+          rm -rf manual-project
+          [[ "$first_fail" != NONE ]]
+
+      - name: Canonical full-history empty replay pass 1 and pass 2
+        run: |
+          set -euo pipefail
+          rm -rf canonical-project
+          mkdir canonical-project
+          supabase --workdir canonical-project init --force --yes > "$RUNNER_TEMP/issue355-canonical-init.log" 2>&1
+          rm -rf canonical-project/supabase/migrations
+          python private-repo/scripts/build-trainingos-fresh-bootstrap.py \
+            --repo-root private-repo \
+            --output-dir canonical-project/supabase/migrations \
+            --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/issue355-canonical-build.log" 2>&1
+          supabase --workdir canonical-project start > "$RUNNER_TEMP/issue355-canonical-pass1.log" 2>&1
+          supabase --workdir canonical-project db reset --local --no-seed > "$RUNNER_TEMP/issue355-canonical-cleanup-reset.log" 2>&1
+          supabase --workdir canonical-project db reset --local --no-seed > "$RUNNER_TEMP/issue355-canonical-pass2.log" 2>&1
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          manifest = json.loads(Path('canonical-project/supabase/trainingos-bootstrap-manifest.json').read_text(encoding='utf-8'))
+          Path('/tmp/issue355-canonical.txt').write_text(
+              '\n'.join([
+                  'fullHistoryReplayPass1=PASS',
+                  'cleanupReset=PASS',
+                  'fullHistoryReplayPass2=PASS',
+                  f"canonicalMigrationCount={manifest['migrationCount']}",
+                  f"firstCanonicalMigration={manifest['firstMigration']}",
+                  f"lastCanonicalMigration={manifest['lastMigration']}",
+                  f"legacyMappingCount={manifest['legacyMappingCount']}",
+                  f"compatibilityMigrationCount={manifest['compatibilityMigrationCount']}",
+              ]) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+      - name: ACL and representative data preservation smoke
+        run: |
+          set -euo pipefail
+          eval "$(supabase --workdir canonical-project status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 -At > "$RUNNER_TEMP/issue355-acl.log" 2>&1 <<'SQL'
+          do $verify$
+          declare
+            v_unsecured integer;
+            v_anon_grants integer;
+          begin
+            select count(*) into v_unsecured
+            from pg_class c join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and c.relkind='r' and not c.relrowsecurity;
+            if v_unsecured <> 0 then raise exception 'PUBLIC_TABLE_WITHOUT_RLS:%', v_unsecured; end if;
+            select count(*) into v_anon_grants
+            from information_schema.role_table_grants
+            where table_schema='public' and grantee in ('PUBLIC','anon');
+            if v_anon_grants <> 0 then raise exception 'ANON_OR_PUBLIC_TABLE_GRANTS:%', v_anon_grants; end if;
+          end
+          $verify$;
+          select 'ACL_PASS';
+          SQL
+          echo 'aclStatus=PASS' > /tmp/issue355-acl.txt
+          echo 'dataPreservation=PASS_NOT_APPLICABLE_EMPTY_REPLAY' >> /tmp/issue355-acl.txt
+
+      - name: Publish sanitized diagnostic evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          report="$GITHUB_WORKSPACE/issue355-full-history-diagnostic-v1.txt"
+          {
+            echo "privateExactSha=$PRIVATE_SHA"
+            echo "expectedBaseSha=$EXPECTED_BASE_SHA"
+            cat /tmp/issue355-layout.json 2>/dev/null || true
+            cat /tmp/issue355-raw.txt 2>/dev/null || true
+            cat /tmp/issue355-manual.txt 2>/dev/null || true
+            cat /tmp/issue355-canonical.txt 2>/dev/null || true
+            cat /tmp/issue355-acl.txt 2>/dev/null || true
+            echo 'rawLogs=SEALED_AND_DELETED'
+          } | tee "$report" >> "$GITHUB_STEP_SUMMARY"
+          supabase --workdir canonical-project stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo canonical-project
+          rm -f "$RUNNER_TEMP"/issue355-*.log "$RUNNER_TEMP"/issue355-*.err "$RUNNER_TEMP"/issue355-*.out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue355-full-history-diagnostic-v1
+          path: issue355-full-history-diagnostic-v1.txt
+          retention-days: 3
