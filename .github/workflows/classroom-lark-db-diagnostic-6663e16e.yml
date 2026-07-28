@@ -1,0 +1,88 @@
+name: Classroom Lark DB replay diagnostic
+
+on:
+  push:
+    branches:
+      - ci/classroom-lark-6663e16e
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-lark-db-diagnostic-6663e16e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: 6663e16e0ab44c9e91d6d8c012928b561691c029
+
+    steps:
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Classify replay failure without publishing private logs
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          db_log="$RUNNER_TEMP/classroom-lark-db-diagnostic.log"
+          : > "$db_log"
+          supabase init --force >> "$db_log" 2>&1
+          init_code=$?
+          start_code=1
+          reset_code=1
+          if [[ "$init_code" == "0" ]]; then
+            supabase start >> "$db_log" 2>&1
+            start_code=$?
+          fi
+          if [[ "$start_code" == "0" ]]; then
+            supabase db reset --local --no-seed >> "$db_log" 2>&1
+            reset_code=$?
+          fi
+          python - "$db_log" "$init_code" "$start_code" "$reset_code" <<'PY'
+          import hashlib
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text(encoding='utf-8', errors='replace')
+          applying = re.findall(r'Applying migration\s+([^\s]+)', text, flags=re.I)
+          candidates = [
+              line.strip()
+              for line in text.splitlines()
+              if re.search(r'\b(ERROR|FATAL|failed|failure)\b', line, flags=re.I)
+          ]
+          error = candidates[-1] if candidates else 'none-captured'
+          error = re.sub(r'https?://\S+', '<url>', error)
+          error = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<uuid>', error, flags=re.I)
+          error = re.sub(r"'[^']*'", "'<redacted>'", error)
+          error = re.sub(r'\s+', ' ', error)[:300]
+          digest = hashlib.sha256(text.encode('utf-8', errors='replace')).hexdigest()
+          print(
+              'DB_REPLAY_DIAGNOSTIC '
+              f'init={sys.argv[2]} start={sys.argv[3]} reset={sys.argv[4]} '
+              f'last_migration={pathlib.Path(applying[-1]).name if applying else "none"} '
+              f'error={error} log_sha256={digest}'
+          )
+          PY
+          supabase stop --no-backup > /dev/null 2>&1 || true
+          rm -f "$db_log"
+          exit 0
