@@ -14,7 +14,7 @@ concurrency:
 
 env:
   BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
-  PRIVATE_SHA: 8670b6cbc20154985c51e344cdd83eece6997e17
+  PRIVATE_SHA: cbcdb11c20856258165846252763b2a379be89cc
 
 jobs:
   agent-ui-baseline-comparison:
@@ -89,7 +89,7 @@ jobs:
           payload = {
               'schemaVersion': 'trainingos-public-ci-agent-ui-comparison-v2',
               'baseSha': '9b8f04f29d572d22434ea577b5ed3543e4f6a2d3',
-              'candidateSha': '8670b6cbc20154985c51e344cdd83eece6997e17',
+              'candidateSha': 'cbcdb11c20856258165846252763b2a379be89cc',
               'base': base,
               'candidate': candidate,
               'sameBaselineFailure': same,
