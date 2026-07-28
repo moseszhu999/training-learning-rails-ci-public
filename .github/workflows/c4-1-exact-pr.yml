@@ -1,4 +1,4 @@
-name: C4-1 exact-head PR checkpoint CI
+name: Recipe Runtime PR325 fresh database replay
 
 on:
   pull_request:
@@ -9,15 +9,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: c4-1-exact-pr-${{ github.event.pull_request.number }}
+  group: recipe-pr325-db-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
-  c4-1-exact:
+  recipe-db-replay:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
-      PRIVATE_SHA: 90f4997c7a5d29cbb7ac1193c33c89733ae9d0cc
+      PRIVATE_SHA: 7f8118afd2e8a5d12154d678cab9fa929a76d079
 
     steps:
       - name: Validate exact SHA and private read credential
@@ -40,134 +40,97 @@ jobs:
           fetch-depth: 1
           clean: true
 
-      - uses: actions/setup-node@v4
+      - uses: supabase/setup-cli@v2
         with:
-          node-version: '20'
+          version: latest
+          github-token: ${{ github.token }}
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Verify exact private head
-        working-directory: private-repo
+      - name: Prepare isolated migration replay
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
-          printf 'Verified private exact head: `%s`\n' "$PRIVATE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          cp -R ../private-repo/supabase/migrations supabase/migrations
+          rm -f supabase/seed.sql
+          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          echo "RECIPE_DB_PREP status=PASS migration_files=$count sha=$PRIVATE_SHA"
 
-      - name: Run focused Python with sealed output
-        id: py
-        working-directory: private-repo
+      - name: First fresh migration replay
+        working-directory: replay-project
         shell: bash
         run: |
           set +e
-          python -m unittest discover -s tests -p 'test_trainingos_commercial_usage_cost_rollup*contract.py' -v \
-            > "$RUNNER_TEMP/c41-python.log" 2>&1
+          supabase db start > "$RUNNER_TEMP/recipe-db-first.log" 2>&1
           code=$?
-          python - "$RUNNER_TEMP/c41-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
-          import pathlib, re, sys
-          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
-          code = int(sys.argv[2])
-          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
-          count = int(match.group(1)) if match else 0
-          passed = code == 0 and count == 27 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
-          with open(sys.argv[3], 'a', encoding='utf-8') as out:
-              out.write(f'count={count}\nstatus={"PASS" if passed else "FAIL"}\n')
-          PY
-          exit 0
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_DB_FIRST status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
 
-      - name: Run focused Node with sealed output
-        id: node
-        working-directory: private-repo
+      - name: Second deterministic migration replay
+        working-directory: replay-project
         shell: bash
         run: |
           set +e
-          node --test prototypes/trainingos-agent-mvp-v1/commercial-usage-cost-rollup.test.mjs \
-            > "$RUNNER_TEMP/c41-node.log" 2>&1
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/recipe-db-second.log" 2>&1
           code=$?
-          python - "$RUNNER_TEMP/c41-node.log" "$code" "$GITHUB_OUTPUT" <<'PY'
-          import pathlib, re, sys
-          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
-          code = int(sys.argv[2])
-          tests = re.search(r'# tests\s+(\d+)', text)
-          passed = re.search(r'# pass\s+(\d+)', text)
-          failed = re.search(r'# fail\s+(\d+)', text)
-          count = int(tests.group(1)) if tests else 0
-          pass_count = int(passed.group(1)) if passed else 0
-          fail_count = int(failed.group(1)) if failed else -1
-          ok = code == 0 and count == 8 and pass_count == 8 and fail_count == 0
-          with open(sys.argv[3], 'a', encoding='utf-8') as out:
-              out.write(f'count={count}\npass_count={pass_count}\nstatus={"PASS" if ok else "FAIL"}\n')
-          PY
-          exit 0
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_DB_SECOND status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
 
-      - name: Run ci:owned with sealed output
-        id: owned
-        working-directory: private-repo
+      - name: Verify Recipe objects and direct ACL boundary
+        working-directory: replay-project
         shell: bash
-        env:
-          TRAININGOS_CI_INSTALL: always
-          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
-          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
         run: |
-          set +e
-          npm run ci:owned > "$RUNNER_TEMP/c41-owned.log" 2>&1
-          echo "code=$?" >> "$GITHUB_OUTPUT"
-          exit 0
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/recipe-db-acl.log" 2>&1 <<'SQL'
+          do $verify$
+          declare
+            v_tables integer;
+            v_forced integer;
+            v_authenticated integer;
+            v_service integer;
+          begin
+            select count(*) into v_tables
+            from information_schema.tables
+            where table_schema='public' and table_name in (
+              'trainingos_agent_recipes',
+              'trainingos_agent_recipe_versions',
+              'trainingos_agent_recipe_events',
+              'trainingos_agent_recipe_trigger_receipts'
+            );
+            select count(*) into v_forced
+            from pg_class c join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and c.relname in (
+              'trainingos_agent_recipes',
+              'trainingos_agent_recipe_versions',
+              'trainingos_agent_recipe_events',
+              'trainingos_agent_recipe_trigger_receipts'
+            ) and c.relrowsecurity and c.relforcerowsecurity;
+            select count(*) into v_authenticated
+            from information_schema.role_table_grants
+            where grantee='authenticated' and table_schema='public' and table_name like 'trainingos_agent_recipe%';
+            select count(*) into v_service
+            from information_schema.role_table_grants
+            where grantee='service_role' and table_schema='public' and table_name like 'trainingos_agent_recipe%';
+            if v_tables<>4 or v_forced<>4 or v_authenticated<>0 or v_service<>0 then
+              raise exception 'RECIPE_DB_ACL_INVALID';
+            end if;
+          end;
+          $verify$;
+SQL
+          echo 'RECIPE_DB_OBJECTS status=PASS tables=4 forced_rls=4 authenticated_direct=0 service_role_direct=0'
 
-      - name: Publish sanitized result
+      - name: Stop isolated database and remove sealed files
         if: always()
+        working-directory: replay-project
         shell: bash
-        env:
-          PY_STATUS: ${{ steps.py.outputs.status }}
-          PY_COUNT: ${{ steps.py.outputs.count }}
-          NODE_STATUS: ${{ steps.node.outputs.status }}
-          NODE_COUNT: ${{ steps.node.outputs.count }}
-          NODE_PASS: ${{ steps.node.outputs.pass_count }}
-          OWNED_CODE: ${{ steps.owned.outputs.code }}
-          REPORT: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
         run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          let owned = { status: process.env.OWNED_CODE === '0' ? 'PASS' : 'FAIL', failedOrLastStep: 'report-unavailable' };
-          try {
-            if (fs.existsSync(process.env.REPORT)) {
-              const r = JSON.parse(fs.readFileSync(process.env.REPORT, 'utf8'));
-              owned = { status: r.status === 'PASS' ? 'PASS' : 'FAIL', failedOrLastStep: String(r.failedOrLastStep || 'unknown') };
-            }
-          } catch {
-            owned = { status: 'FAIL', failedOrLastStep: 'invalid-sanitized-report' };
-          }
-          const lines = [
-            '## C4-1 exact-head PR checkpoint CI', '',
-            `- Exact SHA: \`${process.env.PRIVATE_SHA}\``,
-            `- Focused Python: **${process.env.PY_STATUS || 'FAIL'} ${process.env.PY_COUNT || '0'}/27**`,
-            `- Focused Node: **${process.env.NODE_STATUS || 'FAIL'} ${process.env.NODE_PASS || '0'}/${process.env.NODE_COUNT || '0'}**`,
-            `- ci:owned: **${owned.status}**`,
-            `- Owned last step: \`${owned.failedOrLastStep}\``, '',
-            'Raw private output is sealed and deleted; no private source or logs are published.'
-          ];
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
-          console.log(`C4_1_EXACT_CI python=${process.env.PY_STATUS}:${process.env.PY_COUNT}/27 node=${process.env.NODE_STATUS}:${process.env.NODE_PASS}/${process.env.NODE_COUNT} owned=${owned.status} step=${owned.failedOrLastStep} sha=${process.env.PRIVATE_SHA}`);
-          NODE
-
-      - name: Remove private checkout and sealed logs
-        if: always()
-        shell: bash
-        run: rm -rf private-repo "$RUNNER_TEMP/c41-python.log" "$RUNNER_TEMP/c41-node.log" "$RUNNER_TEMP/c41-owned.log"
-
-      - name: Enforce checkpoint result
-        if: always()
-        shell: bash
-        env:
-          PY_STATUS: ${{ steps.py.outputs.status }}
-          PY_COUNT: ${{ steps.py.outputs.count }}
-          NODE_STATUS: ${{ steps.node.outputs.status }}
-          NODE_COUNT: ${{ steps.node.outputs.count }}
-          NODE_PASS: ${{ steps.node.outputs.pass_count }}
-          OWNED_CODE: ${{ steps.owned.outputs.code }}
-        run: |
-          [[ "${PY_STATUS:-FAIL}" == PASS && "${PY_COUNT:-0}" == 27 ]]
-          [[ "${NODE_STATUS:-FAIL}" == PASS && "${NODE_COUNT:-0}" == 8 && "${NODE_PASS:-0}" == 8 ]]
-          [[ "${OWNED_CODE:-1}" == 0 ]]
+          supabase stop --no-backup || true
+          rm -f "$RUNNER_TEMP/recipe-db-first.log" "$RUNNER_TEMP/recipe-db-second.log" "$RUNNER_TEMP/recipe-db-acl.log"
+          rm -rf ../private-repo
