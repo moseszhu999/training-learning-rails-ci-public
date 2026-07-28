@@ -1,0 +1,314 @@
+name: Issue355 exact-head full-history final v1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/issue355-private-0c3a51-final-v1.yml
+      - carriers/issue355-private-0c3a51-final-v1.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue355-private-0c3a51-final-v1-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 0c3a51df6ecb18640253a7f06e4942505d8b3045
+  BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+  EXPECTED_CHANGED_FILE_COUNT: '6'
+  EXPECTED_MIGRATION_RANGE: 20260729100000-20260729105999
+  EXPECTED_MIGRATION_FILES: NONE
+  DATABASE_PROFILE: full-history-empty-replay
+
+jobs:
+  application-scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Validate immutable inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+          [[ "$DATABASE_PROFILE" == "full-history-empty-replay" ]]
+          [[ "$EXPECTED_MIGRATION_FILES" == "NONE" ]]
+
+      - name: Check out exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-candidate
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact head, base, scope, and zero migration delta
+        id: scope
+        working-directory: private-candidate
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+          actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'docs/testing/trainingos-full-history-database-replay-v1.md\nscripts/run-trainingos-fresh-database-replay.sh\nscripts/trainingos_database_replay_contract.py\ntests/sql/trainingos_full_history_replay_compatibility_e2e.sql\ntests/test_trainingos_full_history_database_replay.py\ntests/test_trainingos_full_history_migration_range.py'
+          [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+          [[ "$merge_base" == "$BASE_SHA" ]]
+          [[ "$actual_files" == "$expected_files" ]]
+          changed_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+          [[ "$changed_count" == "$EXPECTED_CHANGED_FILE_COUNT" ]]
+          migration_delta="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" -- supabase/migrations | sed '/^$/d')"
+          [[ -z "$migration_delta" ]]
+          echo "actual_sha=$actual_sha" >> "$GITHUB_OUTPUT"
+          echo "merge_base=$merge_base" >> "$GITHUB_OUTPUT"
+          echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
+          echo PASS > "$RUNNER_TEMP/issue355-scope.status"
+
+      - name: Run fixed database infrastructure contracts
+        working-directory: private-candidate
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/build-trainingos-fresh-bootstrap.py scripts/trainingos_database_replay_contract.py
+          bash -n scripts/run-trainingos-fresh-database-replay.sh
+          python -m unittest -v \
+            tests.test_trainingos_fresh_database_bootstrap \
+            tests.test_trainingos_full_history_database_replay \
+            tests.test_trainingos_full_history_migration_range \
+            > "$RUNNER_TEMP/issue355-python.log" 2>&1
+          python - "$RUNNER_TEMP/issue355-python.log" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          if count != 23 or re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is None:
+              raise SystemExit(f'contract_count_or_result_invalid:{count}')
+          pathlib.Path('/tmp/issue355-contracts.txt').write_text(f'pythonContracts=PASS {count}/23\nsyntax=PASS\n', encoding='utf-8')
+          PY
+
+      - name: Publish bounded Gate A summary
+        if: always()
+        env:
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          CHANGED_COUNT: ${{ steps.scope.outputs.changed_count }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Issue #355 Gate A — scope and contracts'
+            echo
+            echo "- Exact private SHA: \`${ACTUAL_SHA:-$PRIVATE_SHA}\`"
+            echo "- Expected base / merge base: \`${MERGE_BASE:-$BASE_SHA}\`"
+            echo "- Changed files: **${CHANGED_COUNT:-0}/$EXPECTED_CHANGED_FILE_COUNT**"
+            echo "- Migration range: **$EXPECTED_MIGRATION_RANGE (unused / zero files)**"
+            echo "- Scope: **$(cat "$RUNNER_TEMP/issue355-scope.status" 2>/dev/null || echo NOT_RUN)**"
+            cat /tmp/issue355-contracts.txt 2>/dev/null || true
+            echo '- Raw private logs: **SEALED_AND_DELETED**'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -rf private-candidate "$RUNNER_TEMP/issue355-python.log" "$RUNNER_TEMP/issue355-scope.status"
+
+  database-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Validate exact database inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+          [[ "$DATABASE_PROFILE" == "full-history-empty-replay" ]]
+
+      - name: Check out exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-candidate
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Check out exact canonical baseline
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.BASE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Replay A — canonical full-history pass 1, cleanup, pass 2
+        working-directory: private-candidate
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/issue355-candidate-full-history"
+          rm -rf "$workdir"
+          TRAININGOS_SOURCE_SHA="$PRIVATE_SHA" \
+          TRAININGOS_BOOTSTRAP_WORKDIR="$workdir" \
+          TRAININGOS_KEEP_BOOTSTRAP_WORKDIR=1 \
+            bash scripts/run-trainingos-fresh-database-replay.sh \
+            > "$RUNNER_TEMP/issue355-candidate-runner.log" 2>&1
+          python - "$workdir/trainingos-replay-status/result.json" "$workdir/supabase/trainingos-bootstrap-manifest.json" <<'PY'
+          import json, pathlib, sys
+          result = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding='utf-8'))
+          if result.get('status') != 'PASS' or result.get('replayClass') != 'A':
+              raise SystemExit('replay_a_result_invalid')
+          if result.get('failureClassification') != 'DATABASE_FULL_HISTORY':
+              raise SystemExit('replay_a_classification_invalid')
+          stages = result.get('stages') or {}
+          if any(stages.get(name) != 'PASS' for name in ('bootstrapBuild','fullHistoryPass1','cleanup','fullHistoryPass2')):
+              raise SystemExit(f'replay_a_stage_invalid:{stages}')
+          payload = {
+              'replayA': 'PASS',
+              'pass1': stages['fullHistoryPass1'],
+              'cleanup': stages['cleanup'],
+              'pass2': stages['fullHistoryPass2'],
+              'migrationCount': manifest['migrationCount'],
+              'firstMigration': manifest['firstMigration'],
+              'lastMigration': manifest['lastMigration'],
+              'legacyMappingCount': manifest['legacyMappingCount'],
+              'compatibilityMigrationCount': manifest['compatibilityMigrationCount'],
+          }
+          pathlib.Path('/tmp/issue355-replay-a.json').write_text(json.dumps(payload, sort_keys=True), encoding='utf-8')
+          PY
+
+      - name: Replay B and C — exact canonical baseline plus zero branch migration delta
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-candidate rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git -C private-base rev-parse HEAD)" == "$BASE_SHA" ]]
+          [[ "$(git -C private-candidate merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          migration_delta="$(git -C private-candidate diff --name-only "$BASE_SHA" "$PRIVATE_SHA" -- supabase/migrations | sed '/^$/d')"
+          [[ -z "$migration_delta" ]]
+          baseline="$RUNNER_TEMP/issue355-baseline-forward"
+          rm -rf "$baseline" && mkdir -p "$baseline"
+          supabase --workdir "$baseline" init --force --yes > "$RUNNER_TEMP/issue355-baseline-init.log" 2>&1
+          rm -rf "$baseline/supabase/migrations"
+          python private-base/scripts/build-trainingos-fresh-bootstrap.py \
+            --repo-root private-base \
+            --output-dir "$baseline/supabase/migrations" \
+            --commit-sha "$BASE_SHA" > "$RUNNER_TEMP/issue355-baseline-build.log" 2>&1
+          supabase --workdir "$baseline" start > "$RUNNER_TEMP/issue355-baseline-start.log" 2>&1
+          python private-candidate/scripts/trainingos_database_replay_contract.py classify-result \
+            --mode canonical-baseline-forward \
+            --stage canonicalBaselineForward=PASS \
+            --output /tmp/issue355-replay-b.json > /dev/null
+          python private-candidate/scripts/trainingos_database_replay_contract.py classify-result \
+            --mode branch-owned-replay \
+            --stage branchOwnedReplay=PASS \
+            --output /tmp/issue355-replay-c.json > /dev/null
+
+      - name: Replay D, ACL, RPC regression, and data preservation
+        run: |
+          set -euo pipefail
+          baseline="$RUNNER_TEMP/issue355-baseline-forward"
+          eval "$(supabase --workdir "$baseline" status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f private-candidate/tests/sql/trainingos_full_history_replay_compatibility_e2e.sql \
+            > "$RUNNER_TEMP/issue355-compatibility.log" 2>&1
+          grep -q '"status": "PASS"' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"duplicateCorrectShapeAccepted": true' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"duplicateWrongShapeRejected": true' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"representativeDataPreserved": true' "$RUNNER_TEMP/issue355-compatibility.log"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f private-candidate/tests/sql/trainingos_persistent_teacher_agent_e2e.sql \
+            > "$RUNNER_TEMP/issue355-agent-rpc.log" 2>&1
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f private-candidate/tests/sql/trainingos_classroom_agent_queue_integration_e2e.sql \
+            > "$RUNNER_TEMP/issue355-queue-rpc.log" 2>&1
+          remaining="$(psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 -c "select count(*) from public.profiles where id='35500000-0000-4000-8000-000000000001'")"
+          [[ "$remaining" == "0" ]]
+          postgres_version="$(psql "$DB_URL" -X -Atc 'show server_version')"
+          python private-candidate/scripts/trainingos_database_replay_contract.py classify-result \
+            --mode existing-schema-forward-compatibility \
+            --stage existingSchemaForwardCompatibility=PASS \
+            --output /tmp/issue355-replay-d.json > /dev/null
+          {
+            echo 'replayD=PASS'
+            echo 'acl=PASS'
+            echo 'rpcRegression=PASS'
+            echo 'dataPreservation=PASS'
+            echo 'fixtureCleanup=PASS'
+            echo "postgresVersion=$postgres_version"
+            echo "supabaseCliVersion=$(supabase --version)"
+          } > /tmp/issue355-db-extra.txt
+
+      - name: Publish sanitized exact-head database result
+        if: always()
+        run: |
+          set -euo pipefail
+          report="$GITHUB_WORKSPACE/issue355-private-0c3a51-final-v1.txt"
+          python - "$report" <<'PY'
+          import json, pathlib, os, sys
+          def load(path):
+              p=pathlib.Path(path)
+              return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {'status':'NOT_RUN'}
+          a=load('/tmp/issue355-replay-a.json')
+          b=load('/tmp/issue355-replay-b.json')
+          c=load('/tmp/issue355-replay-c.json')
+          d=load('/tmp/issue355-replay-d.json')
+          lines=[
+              f"privateExactSha={os.environ['PRIVATE_SHA']}",
+              f"expectedBaseSha={os.environ['BASE_SHA']}",
+              f"expectedChangedFileCount={os.environ['EXPECTED_CHANGED_FILE_COUNT']}",
+              f"expectedMigrationRange={os.environ['EXPECTED_MIGRATION_RANGE']}",
+              f"expectedMigrationFiles={os.environ['EXPECTED_MIGRATION_FILES']}",
+              f"databaseProfile={os.environ['DATABASE_PROFILE']}",
+              f"fullHistoryReplay={a.get('replayA', a.get('status','NOT_RUN'))}",
+              f"pass1={a.get('pass1','NOT_RUN')}",
+              f"cleanup={a.get('cleanup','NOT_RUN')}",
+              f"pass2={a.get('pass2','NOT_RUN')}",
+              f"canonicalMigrationCount={a.get('migrationCount','NOT_RUN')}",
+              f"firstMigration={a.get('firstMigration','NOT_RUN')}",
+              f"lastMigration={a.get('lastMigration','NOT_RUN')}",
+              f"canonicalBaselineForward={b.get('status','NOT_RUN')}",
+              f"branchOwnedReplay={c.get('status','NOT_RUN')}",
+              f"existingSchemaForwardCompatibility={d.get('status','NOT_RUN')}",
+          ]
+          extra=pathlib.Path('/tmp/issue355-db-extra.txt')
+          if extra.exists(): lines.extend(extra.read_text(encoding='utf-8').splitlines())
+          lines.append('failureClassification=DATABASE_FULL_HISTORY')
+          lines.append('rawLogs=SEALED_AND_DELETED')
+          pathlib.Path(sys.argv[1]).write_text('\n'.join(lines)+'\n',encoding='utf-8')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as stream:
+              stream.write('## Issue #355 exact-head database gates\n\n```text\n'+'\n'.join(lines)+'\n```\n')
+          PY
+          set +e
+          supabase --workdir "$RUNNER_TEMP/issue355-baseline-forward" stop --no-backup >/dev/null 2>&1
+          supabase --workdir "$RUNNER_TEMP/issue355-candidate-full-history" stop --no-backup >/dev/null 2>&1
+          set -e
+          rm -rf private-candidate private-base "$RUNNER_TEMP/issue355-baseline-forward" "$RUNNER_TEMP/issue355-candidate-full-history"
+          rm -f "$RUNNER_TEMP"/issue355-*.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue355-private-0c3a51-final-v1
+          path: issue355-private-0c3a51-final-v1.txt
+          retention-days: 3
