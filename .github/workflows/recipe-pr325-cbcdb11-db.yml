@@ -170,7 +170,7 @@ jobs:
                 and privilege_type='EXECUTE'
             )
           );
-SQL
+          SQL
           )"
           python - "$result" "$RUNNER_TEMP/recipe-db-acl.status" <<'PY'
           import json,pathlib,sys
