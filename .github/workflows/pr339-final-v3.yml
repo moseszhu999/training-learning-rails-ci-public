@@ -36,6 +36,12 @@ jobs:
       exercise_e2e: ${{ steps.report.outputs.exercise_e2e }}
       assessment_e2e: ${{ steps.report.outputs.assessment_e2e }}
       result_e2e: ${{ steps.report.outputs.result_e2e }}
+      python_diag: ${{ steps.report.outputs.python_diag }}
+      typecheck_diag: ${{ steps.report.outputs.typecheck_diag }}
+      workspace_diag: ${{ steps.report.outputs.workspace_diag }}
+      zero_permission_diag: ${{ steps.report.outputs.zero_permission_diag }}
+      build_diag: ${{ steps.report.outputs.build_diag }}
+      review_diag: ${{ steps.report.outputs.review_diag }}
     steps:
       - name: Check out public controller
         uses: actions/checkout@v4
@@ -82,7 +88,7 @@ jobs:
 
       - name: Run sealed exact-head application and database gates
         shell: bash
-        run: bash ci-repo/scripts/run-pr339-final-v3.sh private-repo
+        run: bash ci-repo/scripts/run-pr339-final-v4.sh private-repo
 
       - name: Capture sanitized gate statuses
         id: report
@@ -126,8 +132,16 @@ jobs:
           EXERCISE_E2E: ${{ needs.final.outputs.exercise_e2e }}
           ASSESSMENT_E2E: ${{ needs.final.outputs.assessment_e2e }}
           RESULT_E2E: ${{ needs.final.outputs.result_e2e }}
+          PYTHON_DIAG: ${{ needs.final.outputs.python_diag }}
+          TYPECHECK_DIAG: ${{ needs.final.outputs.typecheck_diag }}
+          WORKSPACE_DIAG: ${{ needs.final.outputs.workspace_diag }}
+          ZERO_PERMISSION_DIAG: ${{ needs.final.outputs.zero_permission_diag }}
+          BUILD_DIAG: ${{ needs.final.outputs.build_diag }}
+          REVIEW_DIAG: ${{ needs.final.outputs.review_diag }}
         run: |
           printf 'PR339_SANITIZED conclusion=%s exact=%s node=%s python=%s install=%s typecheck=%s vscode=%s workspace=%s zero_permission=%s build=%s review=%s db_first=%s db_second=%s db_acl=%s exercise_e2e=%s assessment_e2e=%s result_e2e=%s\n' \
             "$FINAL_CONCLUSION" "$EXACT" "$NODE" "$PYTHON" "$INSTALL" "$TYPECHECK" \
             "$VSCODE" "$WORKSPACE" "$ZERO_PERMISSION" "$BUILD" "$REVIEW" \
             "$DB_FIRST" "$DB_SECOND" "$DB_ACL" "$EXERCISE_E2E" "$ASSESSMENT_E2E" "$RESULT_E2E"
+          printf 'PR339_DIAGNOSTICS python=%s typecheck=%s workspace=%s zero_permission=%s build=%s review=%s\n' \
+            "$PYTHON_DIAG" "$TYPECHECK_DIAG" "$WORKSPACE_DIAG" "$ZERO_PERMISSION_DIAG" "$BUILD_DIAG" "$REVIEW_DIAG"
