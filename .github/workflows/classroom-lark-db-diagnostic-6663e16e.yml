@@ -15,11 +15,10 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  discover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
     outputs:
-      diagnostic: ${{ steps.classify.outputs.diagnostic }}
+      diagnostic: ${{ steps.scan.outputs.diagnostic }}
     env:
       PRIVATE_SHA: 6663e16e0ab44c9e91d6d8c012928b561691c029
 
@@ -34,113 +33,48 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Set up Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Classify replay with legacy-order normalization
-        id: classify
+      - name: Locate canonical classroom session migration owner
+        id: scan
         working-directory: private-repo
         shell: bash
         run: |
-          set +e
-          db_log="$RUNNER_TEMP/classroom-lark-db-diagnostic.log"
-          saved_migrations="$RUNNER_TEMP/classroom-lark-migrations"
-          : > "$db_log"
-          supabase init --force >> "$db_log" 2>&1
-          init_code=$?
-          start_code=1
-          reset_code=1
-          normalized_count=0
-          if [[ "$init_code" == "0" ]]; then
-            mv supabase/migrations "$saved_migrations"
-            mkdir -p supabase/migrations
-            supabase start --debug >> "$db_log" 2>&1
-            start_code=$?
-            rm -rf supabase/migrations
-            mv "$saved_migrations" supabase/migrations
-          fi
-          if [[ "$start_code" == "0" ]]; then
-            normalized_count="$(python <<'PY'
-          from collections import defaultdict
+          diagnostic="$(python <<'PY'
           from pathlib import Path
           import re
 
           root = Path('supabase/migrations')
-          groups = defaultdict(list)
-          for path in root.glob('*.sql'):
-              match = re.match(r'^(\d{8})_(.+\.sql)$', path.name)
-              if match:
-                  groups[match.group(1)].append((path, match.group(2)))
-          count = 0
-          for day, entries in sorted(groups.items()):
-              for index, (path, suffix) in enumerate(sorted(entries, key=lambda item: item[0].name)):
-                  version = 990000 + index
-                  target = path.with_name(f'{day}{version:06d}_{suffix}')
-                  if target.exists():
-                      raise SystemExit(f'legacy normalization collision: {target.name}')
-                  path.rename(target)
-                  count += 1
-          print(count)
-          PY
-            )"
-            normalize_code=$?
-            if [[ "$normalize_code" == "0" ]]; then
-              supabase db reset --local --no-seed --debug >> "$db_log" 2>&1
-              reset_code=$?
-            fi
-          fi
-          diagnostic="$(python - "$db_log" "$init_code" "$start_code" "$reset_code" "$normalized_count" <<'PY'
-          import hashlib
-          import pathlib
-          import re
-          import sys
-
-          path = pathlib.Path(sys.argv[1])
-          raw = path.read_text(encoding='utf-8', errors='replace')
-          text = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', raw)
-          applying = re.findall(r'Applying migration\s+([^\s]+)', text, flags=re.I)
-          candidates = []
-          for line in text.splitlines():
-              stripped = re.sub(r'\s+', ' ', line.strip())
-              if not re.search(
-                  r'(ERROR:|FATAL:|SQLSTATE|DETAIL:|HINT:|CONTEXT:|failed to apply|migration failed|syntax error|does not exist|already exists|duplicate|violates|permission denied|effect/sql/SqlError|Failed to execute statement)',
-                  stripped,
-                  flags=re.I,
-              ):
-                  continue
-              if 'Try rerunning the command with --debug' in stripped:
-                  continue
-              candidates.append(stripped)
-          selected = candidates[-16:]
-          error = ' | '.join(selected) if selected else 'none-captured'
-          error = re.sub(r'https?://\S+', '<url>', error)
-          error = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<uuid>', error, flags=re.I)
-          error = re.sub(r"'[^']*'", "'<redacted>'", error)
-          error = re.sub(r'\s+', ' ', error)[:3200]
-          digest = hashlib.sha256(raw.encode('utf-8', errors='replace')).hexdigest()
+          create_pattern = re.compile(
+              r'create\s+table(?:\s+if\s+not\s+exists)?\s+(?:public\.)?classroom_sessions\b',
+              re.I,
+          )
+          reference_pattern = re.compile(r'\bclassroom_sessions\b', re.I)
+          creators = []
+          references = []
+          for path in sorted(root.glob('*.sql')):
+              text = path.read_text(encoding='utf-8', errors='replace')
+              if create_pattern.search(text):
+                  creators.append(path.name)
+              if reference_pattern.search(text):
+                  references.append(path.name)
+          legacy = [path.name for path in sorted(root.glob('*.sql')) if re.match(r'^\d{8}_', path.name)]
           print(
-              'DB_REPLAY_DIAGNOSTIC '
-              f'init={sys.argv[2]} start={sys.argv[3]} reset={sys.argv[4]} '
-              f'normalized_legacy={sys.argv[5]} '
-              f'last_migration={pathlib.Path(applying[-1]).name if applying else "none"} '
-              f'error={error} log_sha256={digest}'
+              'MIGRATION_OWNER_DIAGNOSTIC '
+              f'creators={",".join(creators) if creators else "none"} '
+              f'first_reference={references[0] if references else "none"} '
+              f'reference_count={len(references)} legacy_count={len(legacy)} '
+              f'legacy_first={legacy[0] if legacy else "none"} legacy_last={legacy[-1] if legacy else "none"}'
           )
           PY
           )"
           echo "diagnostic=$diagnostic" >> "$GITHUB_OUTPUT"
-          supabase stop --no-backup > /dev/null 2>&1 || true
-          rm -f "$db_log"
-          exit 0
 
   report:
-    needs: diagnose
+    needs: discover
     runs-on: ubuntu-24.04
     steps:
-      - name: Print sanitized replay diagnostic
+      - name: Print migration-owner diagnostic
         shell: bash
         env:
-          DIAGNOSTIC: ${{ needs.diagnose.outputs.diagnostic }}
+          DIAGNOSTIC: ${{ needs.discover.outputs.diagnostic }}
         run: |
           echo "$DIAGNOSTIC"
