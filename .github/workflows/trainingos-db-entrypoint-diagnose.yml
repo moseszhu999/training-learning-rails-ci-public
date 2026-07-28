@@ -1,0 +1,49 @@
+name: TrainingOS database entrypoint diagnosis
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/trainingos-db-entrypoint-diagnose.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitized-entrypoints:
+    runs-on: ubuntu-24.04
+    env:
+      PRIVATE_SHA: 7751ec7d0e0535036c500e315078646ef1dc81f2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+      - name: Locate sanitized database entrypoint candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir sanitized
+          {
+            echo "private_sha=$PRIVATE_SHA"
+            echo '[baseline_bootstrap_paths]'
+            find private-repo -type f \( -iname '*baseline*' -o -iname '*bootstrap*' -o -iname '*schema*snapshot*' -o -iname '*migration*replay*' \) -printf '%P\n' | sort | head -200
+            echo '[supabase_cli_script_paths]'
+            grep -RIlE 'supabase (db (start|reset|push)|migration|start)' private-repo/scripts private-repo/tests private-repo/docs private-repo/.github 2>/dev/null | sed 's#^private-repo/##' | sort | head -200
+            echo '[psql_migration_script_paths]'
+            grep -RIlE '(psql|postgres).*(migration|supabase/migrations)|(migration|supabase/migrations).*(psql|postgres)' private-repo/scripts private-repo/tests private-repo/docs private-repo/.github 2>/dev/null | sed 's#^private-repo/##' | sort | head -200
+          } > sanitized/db-entrypoints.txt
+          rm -rf private-repo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trainingos-db-entrypoint-diagnosis
+          path: sanitized/db-entrypoints.txt
+          if-no-files-found: error
+          retention-days: 1
