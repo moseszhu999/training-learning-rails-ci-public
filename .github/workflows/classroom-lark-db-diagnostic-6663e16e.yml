@@ -13,12 +13,13 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    outputs:
+      diagnostic: ${{ steps.classify.outputs.diagnostic }}
     env:
       PRIVATE_SHA: 6663e16e0ab44c9e91d6d8c012928b561691c029
 
@@ -39,10 +40,9 @@ jobs:
           version: latest
 
       - name: Classify replay failure without publishing private logs
+        id: classify
         working-directory: private-repo
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set +e
           db_log="$RUNNER_TEMP/classroom-lark-db-diagnostic.log"
@@ -87,12 +87,18 @@ jobs:
           )
           PY
           )"
-          echo "$diagnostic"
-          gh api \
-            --method POST \
-            "repos/${GITHUB_REPOSITORY}/issues/48/comments" \
-            -f body="Sanitized database replay diagnostic for private exact head \`${PRIVATE_SHA}\`:\n\n\`\`\`text\n${diagnostic}\n\`\`\`" \
-            > /dev/null
+          echo "diagnostic=$diagnostic" >> "$GITHUB_OUTPUT"
           supabase stop --no-backup > /dev/null 2>&1 || true
           rm -f "$db_log"
           exit 0
+
+  report:
+    needs: diagnose
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Print sanitized replay diagnostic
+        shell: bash
+        env:
+          DIAGNOSTIC: ${{ needs.diagnose.outputs.diagnostic }}
+        run: |
+          echo "$DIAGNOSTIC"
