@@ -1,0 +1,144 @@
+name: Attendance audit current-main exact head
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/attendance-audit-final-147808d4.yml
+      - carriers/attendance-audit-final-147808d4.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 147808d46f87be7ed38703b3f060251c08eb4f65
+  BASE_SHA: 2315e6389b9a4db825c8d5901db3d8ce57f0c655
+  AUDIT_PATH: docs/testing/trainingos-attendance-canonical-gap-audit-v1.md
+
+jobs:
+  docs-exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Validate immutable inputs and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - name: Verify current-main ancestry one-file scope and zero migration
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+          [[ "$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA")" == "$AUDIT_PATH" ]]
+          [[ "$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | wc -l | tr -d ' ')" == 1 ]]
+          [[ "$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | grep -c '^supabase/migrations/' || true)" == 0 ]]
+      - name: Validate Markdown structure and snapshot/current-state distinction
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('docs/testing/trainingos-attendance-canonical-gap-audit-v1.md')
+          text=p.read_text(encoding='utf-8')
+          lines=text.splitlines()
+          assert text.endswith('\n')
+          assert lines[0]=='# TrainingOS Attendance Canonical Gap Audit v1'
+          assert sum(x.startswith('# ') for x in lines)==1
+          assert all('\t' not in x and x==x.rstrip(' ') for x in lines)
+          assert sum(x.startswith('```') for x in lines)%2==0
+          levels=[len(m.group(1)) for x in lines if (m:=re.match(r'^(#{1,6})\s+\S',x))]
+          assert all(b<=a+1 for a,b in zip(levels,levels[1:]))
+          for heading in (
+            '## 2. Historical window and conflict check',
+            '## 4. Canonical owner conclusion',
+            '## 5. Evidence classification matrix',
+            '## 12. Enterprise Report source analysis',
+            '## 22. Identified gaps and severity',
+            '## 24. Implementation options',
+            '## 26. Option A acceptance criteria',
+            '## 29. Unresolved questions',
+          ):
+              assert heading in text,heading
+          assert 'window type: read-only architecture audit' in text
+          assert 'runtime changes: none' in text
+          assert 'migration changes: none' in text
+          assert '本窗口不实施 Attendance Runtime' in text
+          assert '**当前 TrainingOS 不存在唯一的 learner-occurrence Attendance canonical owner。**' in text
+          assert 'P0_RELEASE_BLOCKER count: 0' in text
+          assert 'formal Attendance pilot blocked: yes' in text
+          assert 'RECOMMEND Option A' in text
+          # Historical lock facts are explicitly under the historical section.
+          assert '### 2.2 Open private PRs at final lock' in text
+          assert '| #358 |' in text and '| #356 |' in text
+          assert text.index('### 2.2 Open private PRs at final lock') < text.index('| #358 |')
+          print('ATTENDANCE_AUDIT_DOC PASS')
+          PY
+      - name: Validate referenced paths and canonical safety assertions
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in \
+            docs/architecture/trainingos-scheduling-delivery-runtime-v2.md \
+            supabase/migrations/20260728130100_trainingos_scheduling_delivery_runtime_v2_occurrence_schema.sql \
+            supabase/migrations/20260728132000_trainingos_scheduling_delivery_runtime_v2_conflict_guard.sql \
+            docs/architecture/trainingos-native-classroom-owner-audit-v1.md \
+            supabase/migrations/20260727230000_trainingos_native_classroom_schema_v1.sql \
+            docs/product/trainingos-classroom-zoom-adapter-v1.md \
+            packages/training-classroom-zoom/src/adapter.mjs \
+            docs/architecture/trainingos-classroom-lark-adapter-v1.md \
+            docs/architecture/trainingos-classroom-provider-adapter-contract-v1.md \
+            docs/product/trainingos-learning-activity-exercise-projection-v1.md \
+            supabase/migrations/20260713_jhc_lifecycle_daily_operations.sql \
+            supabase/migrations/20260724103000_trainingos_tencent_daily_ops_sync.sql \
+            docs/verification/trainingos-wave3-enterprise-report-v1.md \
+            supabase/migrations/20260727160200_trainingos_wave3_enterprise_report_sources_v1.sql \
+            supabase/migrations/20260727210000_trainingos_risk_intervention_schema_v1.sql \
+            docs/product/trainingos-classroom-agent-queue-integration-v1.md \
+            supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql
+          do [[ -f "$path" ]]; done
+          grep -Fq 'attendanceDetermination: false' packages/training-classroom-zoom/src/adapter.mjs
+          grep -Eiq 'automatic attendance|attendance inference|must not infer attendance|attendance.*not' docs/architecture/trainingos-classroom-lark-adapter-v1.md
+          grep -Fq 'attendance inference: NO' docs/product/trainingos-learning-activity-exercise-projection-v1.md
+          grep -Fq 'attendance_anomaly' supabase/migrations/20260727210000_trainingos_risk_intervention_schema_v1.sql
+          grep -Fq 'get_trainingos_teacher_action_queue_v2' supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql
+          grep -Fq 'not an attendance finding' docs/product/trainingos-classroom-agent-queue-integration-v1.md
+          if git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | grep -Eq '^(api/|apps/|extensions/|lib/|packages/|supabase/|tests/|scripts/)'; then exit 1; fi
+      - name: Publish sanitized evidence
+        run: |
+          {
+            echo 'exact_private_sha=147808d46f87be7ed38703b3f060251c08eb4f65'
+            echo 'exact_base_sha=2315e6389b9a4db825c8d5901db3d8ce57f0c655'
+            echo 'changed_files=1'
+            echo 'migrations=0'
+            echo 'runtime_changes=0'
+            echo 'markdown_structure=PASS'
+            echo 'historical_snapshot_labeling=PASS'
+            echo 'referenced_paths=PASS'
+            echo 'canonical_safety_boundaries=PASS'
+            echo 'database_replay=NOT_REQUIRED_DOCS_ONLY'
+            echo 'raw_private_output=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo
