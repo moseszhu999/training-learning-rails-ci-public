@@ -1,0 +1,208 @@
+name: PR342 synchronized Classroom Explanation final
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-final-64cd8fd1.yml
+      - carriers/pr342-final-64cd8fd1.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 64cd8fd14a9ebfdb6e4edf167a49633e70cd0b12
+  BASE_SHA: cf3a6cd4062c00c6798ea0c20e7c2f1c642f7d37
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Validate credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - name: Checkout exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact head and owned scope
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+          git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort > "$RUNNER_TEMP/pr342-files.txt"
+          python - "$RUNNER_TEMP/pr342-files.txt" <<'PY'
+          import pathlib,re,sys
+          files=[x for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x]
+          allowed=[]
+          for p in files:
+              ok=(p.startswith('lib/trainingos-agent-gateway/classroom-explanation-')
+                  or p=='prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs'
+                  or re.fullmatch(r'supabase/migrations/2026072816\d{4}_trainingos_classroom_explanation_[^/]+\.sql',p)
+                  or p=='tests/sql/trainingos_classroom_explanation_e2e.sql'
+                  or p=='tests/test_trainingos_classroom_explanation_contract.py'
+                  or p in {'docs/architecture/trainingos-classroom-explanation-runtime-v1.md','docs/verification/trainingos-classroom-explanation-runtime-v1.md'})
+              if ok: allowed.append(p)
+          print(f'PR342_SCOPE files={len(files)} allowed={len(allowed)}')
+          raise SystemExit(0 if len(files)==23 and len(allowed)==23 else 1)
+          PY
+          test "$(find supabase/migrations -maxdepth 1 -type f -name '2026072816*_trainingos_classroom_explanation_*.sql' | wc -l | tr -d ' ')" = 16
+      - name: Focused contracts
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          node --check lib/trainingos-agent-gateway/classroom-explanation-runtime.mjs
+          node --check lib/trainingos-agent-gateway/classroom-explanation-mcp-layer.mjs
+          node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs > "$RUNNER_TEMP/pr342-node.log" 2>&1
+          grep -q '^# tests 10$' "$RUNNER_TEMP/pr342-node.log"
+          grep -q '^# pass 10$' "$RUNNER_TEMP/pr342-node.log"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/pr342-node.log"
+          python -m unittest -v tests.test_trainingos_classroom_explanation_contract > "$RUNNER_TEMP/pr342-python.log" 2>&1
+          grep -q 'Ran 14 tests' "$RUNNER_TEMP/pr342-python.log"
+          grep -q '^OK$' "$RUNNER_TEMP/pr342-python.log"
+      - name: Repository gates
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          npm ci > "$RUNNER_TEMP/pr342-install.log" 2>&1
+          npm run typecheck > "$RUNNER_TEMP/pr342-typecheck.log" 2>&1
+          npm run build > "$RUNNER_TEMP/pr342-build.log" 2>&1
+      - name: Sanitized application result
+        run: |
+          {
+            echo 'exact_private_sha=64cd8fd14a9ebfdb6e4edf167a49633e70cd0b12'
+            echo 'exact_base_sha=cf3a6cd4062c00c6798ea0c20e7c2f1c642f7d37'
+            echo 'scope=PASS_23_FILES_16_MIGRATIONS'
+            echo 'syntax=PASS_2_2'
+            echo 'node=PASS_10_10'
+            echo 'python=PASS_14_14'
+            echo 'install=PASS'
+            echo 'typecheck=PASS'
+            echo 'build=PASS'
+            echo 'raw_private_output=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP"/pr342-*
+
+  canonical-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Validate credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - name: Checkout exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Build canonical fresh bootstrap
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/pr342-bootstrap"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/pr342-init.log" 2>&1
+          python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/pr342-bootstrap.log" 2>&1
+          test -n "$(find "$workdir/supabase/migrations" -type f -name '*.sql' -print -quit)"
+      - name: Start canonical database
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          supabase --workdir "$RUNNER_TEMP/pr342-bootstrap" start > "$RUNNER_TEMP/pr342-start.log" 2>&1
+      - name: First transaction E2E and catalog
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$RUNNER_TEMP/pr342-first.out" 2> "$RUNNER_TEMP/pr342-first.err"
+          python - "$RUNNER_TEMP/pr342-first.out" <<'PY'
+          import json,pathlib,sys
+          lines=pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines()
+          d=next(json.loads(x) for x in reversed(lines) if x.strip().startswith('{'))
+          required=('oneActiveExplanationEnforced','activeSlotReleasedAfterUpload','secondExplanationStarted','classEndedStartRejected','agentRecordingRejected','agentInferencePersisted','prohibitedCandidateRejected','teacherEvaluationConfirmed','agentConfirmRejected','staleVersionRejected','staleTranscriptRejected','crossClassRejected','transcriptUpdateRejected','transcriptDeleteRejected','rawAudioHidden','idempotencyConflictRejected','transcriptIdempotencyConflictRejected')
+          rem={k:v for k,v in d.items() if k.startswith('remaining')}
+          assert d.get('status')=='PASS' and d.get('fixtureCleanup')=='PLPGSQL_SUBTRANSACTION_ROLLBACK',d
+          assert all(d.get(k) is True for k in required),d
+          assert len(rem)>=13 and all(v==0 for v in rem.values()),rem
+          PY
+          catalog="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          with e(name) as (values ('trainingos_classroom_explanations'),('trainingos_classroom_explanation_captures'),('trainingos_classroom_explanation_transcript_imports'),('trainingos_classroom_explanation_speech_turns'),('trainingos_classroom_explanation_analysis_candidates'),('trainingos_classroom_explanation_evaluations'),('trainingos_classroom_explanation_events'))
+          select jsonb_build_object(
+            'forced',(select count(*) from e join pg_class c on c.relname=e.name join pg_namespace n on n.oid=c.relnamespace and n.nspname='public' where c.relrowsecurity and c.relforcerowsecurity),
+            'rawGrants',(select count(*) from information_schema.role_table_grants g join e on e.name=g.table_name where g.table_schema='public' and g.grantee in ('PUBLIC','anon','authenticated','service_role')),
+            'privateExec',(select count(*) from information_schema.routine_privileges where specific_schema='private' and routine_name like 'trainingos_classroom_explanation%' and grantee in ('PUBLIC','anon','authenticated','service_role')),
+            'activeIndex',(select count(*) from pg_indexes where schemaname='public' and indexname='trainingos_classroom_explanation_one_active_per_control_idx'),
+            'immutableTriggers',(select count(*) from pg_trigger where not tgisinternal and tgname in ('trainingos_classroom_explanation_transcript_immutable','trainingos_classroom_explanation_turn_immutable','trainingos_classroom_explanation_candidate_immutable','trainingos_classroom_explanation_evaluation_immutable','trainingos_classroom_explanation_event_immutable')));
+          SQL
+          )"
+          python - "$catalog" <<'PY'
+          import json,sys
+          d=json.loads(sys.argv[1]); assert d=={'forced':7,'rawGrants':0,'privateExec':0,'activeIndex':1,'immutableTriggers':5},d
+          PY
+      - name: Second deterministic replay and E2E
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          supabase --workdir "$RUNNER_TEMP/pr342-bootstrap" db reset --local --no-seed > "$RUNNER_TEMP/pr342-reset.log" 2>&1
+          psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$RUNNER_TEMP/pr342-second.out" 2> "$RUNNER_TEMP/pr342-second.err"
+          python - "$RUNNER_TEMP/pr342-second.out" <<'PY'
+          import json,pathlib,sys
+          d=next(json.loads(x) for x in reversed(pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines()) if x.strip().startswith('{'))
+          rem={k:v for k,v in d.items() if k.startswith('remaining')}
+          assert d.get('status')=='PASS' and d.get('fixtureCleanup')=='PLPGSQL_SUBTRANSACTION_ROLLBACK',d
+          assert len(rem)>=13 and all(v==0 for v in rem.values()),rem
+          PY
+      - name: Sanitized database result
+        run: |
+          {
+            echo 'exact_private_sha=64cd8fd14a9ebfdb6e4edf167a49633e70cd0b12'
+            echo 'canonical_bootstrap=PASS'
+            echo 'first_replay_and_e2e=PASS'
+            echo 'catalog_rls_acl_append_only=PASS'
+            echo 'second_replay_and_e2e=PASS'
+            echo 'zero_residue=PASS'
+            echo 'raw_private_database_output=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr342-bootstrap" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-*
