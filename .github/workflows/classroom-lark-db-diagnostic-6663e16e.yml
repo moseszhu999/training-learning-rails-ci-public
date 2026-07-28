@@ -88,13 +88,11 @@ jobs:
           PY
           )"
           echo "$diagnostic"
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            gh api \
-              --method POST \
-              "repos/${GITHUB_REPOSITORY}/issues/48/comments" \
-              -f body="Sanitized database replay diagnostic for private exact head \`${PRIVATE_SHA}\`:\n\n\`\`\`text\n${diagnostic}\n\`\`\`" \
-              > /dev/null
-          fi
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/48/comments" \
+            -f body="Sanitized database replay diagnostic for private exact head \`${PRIVATE_SHA}\`:\n\n\`\`\`text\n${diagnostic}\n\`\`\`" \
+            > /dev/null
           supabase stop --no-backup > /dev/null 2>&1 || true
           rm -f "$db_log"
           exit 0
