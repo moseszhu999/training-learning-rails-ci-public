@@ -1,0 +1,103 @@
+name: Issue355 2ef5c0a4 Student Learning RPC regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/issue355-private-2ef5c0a4-student-learning-rpc.yml
+      - carriers/issue355-private-2ef5c0a4-final-v1.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 2ef5c0a427b378a3bbbd4bad5e161175f9a6f9b1
+  BASE_SHA: 30a9c267e1a07078dcbf150a9ef363995db65de1
+
+jobs:
+  student-learning-rpc-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Validate exact inputs and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Checkout exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-candidate
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Checkout exact canonical baseline read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.BASE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Verify exact head and zero migration delta
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-candidate rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git -C private-base rev-parse HEAD)" == "$BASE_SHA" ]]
+          [[ "$(git -C private-candidate merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git -C private-candidate rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+          [[ "$(git -C private-candidate diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | wc -l | tr -d ' ')" == 6 ]]
+          [[ -z "$(git -C private-candidate diff --name-only "$BASE_SHA" "$PRIVATE_SHA" -- supabase/migrations | sed '/^$/d')" ]]
+
+      - name: Build canonical baseline and run Student Learning RPC regression
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/issue355-student-learning"
+          rm -rf "$workdir"
+          mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/issue355-student-init.log" 2>&1
+          rm -rf "$workdir/supabase/migrations"
+          python private-base/scripts/build-trainingos-fresh-bootstrap.py \
+            --repo-root private-base \
+            --output-dir "$workdir/supabase/migrations" \
+            --commit-sha "$BASE_SHA" > "$RUNNER_TEMP/issue355-student-build.log" 2>&1
+          supabase --workdir "$workdir" start > "$RUNNER_TEMP/issue355-student-start.log" 2>&1
+          eval "$(supabase --workdir "$workdir" status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f private-candidate/tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql \
+            > "$RUNNER_TEMP/issue355-student-rpc.log" 2>&1
+          {
+            echo "privateExactSha=$PRIVATE_SHA"
+            echo "expectedBaseSha=$BASE_SHA"
+            echo 'studentLearningRpcRegression=PASS'
+            echo 'fixtureCleanup=TRANSACTION_ROLLBACK'
+            echo 'artifactUpload=DISABLED'
+            echo 'rawLogs=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/issue355-student-learning" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-candidate private-base "$RUNNER_TEMP/issue355-student-learning"
+          rm -f "$RUNNER_TEMP"/issue355-student-*.log
