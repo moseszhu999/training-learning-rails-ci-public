@@ -1,0 +1,102 @@
+name: Window 1 PR339 final gate matrix
+
+on:
+  push:
+    branches:
+      - ci/window1-pr339-exact-b0118d52
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: window1-pr339-final-gate-matrix-f6d9def2
+  cancel-in-progress: false
+
+jobs:
+  python-contract:
+    name: python-${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: workspace
+            file: tests/test_trainingos_learning_workspace_bridge_contract.py
+          - label: web-adapter
+            file: tests/test_trainingos_learning_workspace_web_adapter_contract.py
+          - label: assessment-projection
+            file: tests/test_trainingos_learning_workspace_assessment_projection_contract.py
+          - label: vscode-classroom
+            file: tests/test_trainingos_vscode_classroom_extension_contract.py
+          - label: student-exercise
+            file: tests/test_trainingos_student_exercise_execution_contract.py
+          - label: vscode-exercise
+            file: tests/test_trainingos_vscode_exercise_execution_contract.py
+          - label: assessment-resume
+            file: tests/test_trainingos_assessment_resume_execution_contract.py
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: f6d9def2e1b575b07f4ee417b78859641e1e8067
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run ${{ matrix.label }} contract
+        working-directory: private-repo
+        run: python "${{ matrix.file }}"
+      - name: Remove private checkout
+        if: always()
+        run: rm -rf private-repo
+
+  command-gate:
+    name: gate-${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: learning-workspace
+            command: npm run validate:learning-workspace-bridge
+          - label: typecheck
+            command: npm run typecheck
+          - label: vscode-bundle
+            command: node extensions/trainingos-classroom-vscode/esbuild.mjs --production
+          - label: production-build
+            command: npm run build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: f6d9def2e1b575b07f4ee417b78859641e1e8067
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: private-repo
+        run: npm ci
+      - name: Run ${{ matrix.label }}
+        working-directory: private-repo
+        run: ${{ matrix.command }}
+      - name: Remove private checkout
+        if: always()
+        run: rm -rf private-repo
