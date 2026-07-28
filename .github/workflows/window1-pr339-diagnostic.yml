@@ -1,0 +1,123 @@
+name: Window 1 PR339 diagnostic
+
+on:
+  push:
+    branches:
+      - ci/window1-pr339-exact-b0118d52
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: window1-pr339-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: b0118d52db875fb2ca1b1c9a25507018f8997bba
+
+    steps:
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify and install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          npm ci > "$RUNNER_TEMP/pr339-diag-install.log" 2>&1
+
+      - name: Run bounded diagnostics
+        id: diagnostic
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          report="$GITHUB_WORKSPACE/window1-pr339-diagnostic.txt"
+          : > "$report"
+          status() { [[ "$1" == "0" ]] && printf PASS || printf FAIL; }
+          run_python() {
+            label="$1"; file="$2"; log="$RUNNER_TEMP/pr339-${label}.log"
+            python "$file" > "$log" 2>&1
+            code=$?
+            names=$(python - "$log" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          found = re.findall(r'^(?:FAIL|ERROR):\s+([^\s(]+)', text, flags=re.MULTILINE)
+          print(','.join(found[:8]) if found else '-')
+          PY
+            )
+            echo "${label}=$(status "$code") failures=${names}" >> "$report"
+          }
+          run_command() {
+            label="$1"; shift; log="$RUNNER_TEMP/pr339-${label}.log"
+            "$@" > "$log" 2>&1
+            code=$?
+            names=$(python - "$log" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          found = []
+          found += re.findall(r'^not ok\s+\d+\s+-\s+(.+)$', text, flags=re.MULTILINE)
+          found += re.findall(r'^(?:FAIL|ERROR):\s+([^\s(]+)', text, flags=re.MULTILINE)
+          print(','.join(item.strip()[:120] for item in found[:8]) if found else '-')
+          PY
+            )
+            echo "${label}=$(status "$code") failures=${names}" >> "$report"
+          }
+
+          run_python py_workspace tests/test_trainingos_learning_workspace_bridge_contract.py
+          run_python py_web tests/test_trainingos_learning_workspace_web_adapter_contract.py
+          run_python py_assessment_projection tests/test_trainingos_learning_workspace_assessment_projection_contract.py
+          run_python py_vscode_classroom tests/test_trainingos_vscode_classroom_extension_contract.py
+          run_python py_student_exercise tests/test_trainingos_student_exercise_execution_contract.py
+          run_python py_vscode_exercise tests/test_trainingos_vscode_exercise_execution_contract.py
+          run_python py_assessment_resume tests/test_trainingos_assessment_resume_execution_contract.py
+          run_command native_classroom node scripts/run-trainingos-native-classroom-validation.mjs
+          run_command zero_permission node scripts/run-trainingos-zero-permission-bridge-validation.mjs
+          run_command direct_vite npx vite build --config vite.config.ts
+
+          echo "exact_private_sha=$PRIVATE_SHA" | cat - "$report" > "$report.tmp"
+          mv "$report.tmp" "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+          exit 0
+
+      - name: Upload sanitized diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: window1-pr339-diagnostic
+          path: window1-pr339-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove private checkout and logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-diag-install.log "$RUNNER_TEMP"/pr339-*.log "$GITHUB_WORKSPACE/window1-pr339-diagnostic.txt"
