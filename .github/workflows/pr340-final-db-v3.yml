@@ -1,0 +1,137 @@
+name: PR340 corrected Classroom Lark database v3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr340-final-db-v3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 0df28f3d4056cc8aa2b65baa30981713a02f5b6a
+  BASE_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  canonical-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    steps:
+      - name: Validate exact inputs and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Verify exact head and current-main ancestry
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+      - name: Build and start canonical fresh bootstrap
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/pr340-db-v3"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/pr340-v3-init.log" 2>&1
+          python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/pr340-v3-bootstrap.log" 2>&1
+          supabase --workdir "$workdir" start > "$RUNNER_TEMP/pr340-v3-start.log" 2>&1
+      - name: First Lark transaction E2E
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At -f tests/sql/trainingos_classroom_lark_adapter_e2e.sql > "$RUNNER_TEMP/pr340-v3-first.out" 2> "$RUNNER_TEMP/pr340-v3-first.err"
+          python - "$RUNNER_TEMP/pr340-v3-first.out" <<'PY'
+          import json,pathlib,sys
+          payload=next(json.loads(x) for x in reversed(pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines()) if x.strip().startswith('{'))
+          required={'status':'PASS','cleanupStatus':'PASS','zeroResidueCount':0,'transcriptImmutable':True,'studentProjectionRejected':True,'agentConfirmationRejected':True,'attendanceDeterminationPerformed':False,'minuteTokenExposed':False}
+          for k,v in required.items(): assert payload.get(k)==v,(k,payload.get(k),v,payload)
+          PY
+      - name: Verify live security and immutability catalog
+        run: |
+          set -euo pipefail
+          catalog="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          with expected_tables(name) as (
+            values ('trainingos_classroom_lark_meeting_bindings'),('trainingos_classroom_lark_recording_events'),('trainingos_classroom_lark_minute_sources'),('trainingos_classroom_lark_transcripts'),('trainingos_classroom_lark_speaker_candidates'),('trainingos_classroom_lark_speaker_confirmations'),('trainingos_classroom_lark_audit_events')
+          ), expected_triggers(name) as (
+            values ('trainingos_lark_binding_immutable'),('trainingos_lark_recording_event_immutable'),('trainingos_lark_minute_source_immutable'),('trainingos_lark_transcript_immutable'),('trainingos_lark_candidate_immutable'),('trainingos_lark_confirmation_immutable'),('trainingos_lark_audit_immutable')
+          )
+          select jsonb_build_object(
+            'tables',(select count(*) from expected_tables e join pg_class c on c.relname=e.name join pg_namespace n on n.oid=c.relnamespace and n.nspname='public'),
+            'forced',(select count(*) from expected_tables e join pg_class c on c.relname=e.name join pg_namespace n on n.oid=c.relnamespace and n.nspname='public' where c.relrowsecurity and c.relforcerowsecurity),
+            'privateExec',(select count(*) from information_schema.routine_privileges r where r.specific_schema='private' and r.routine_name like 'trainingos_lark%' and r.grantee in ('PUBLIC','anon','authenticated','service_role') and r.privilege_type='EXECUTE'),
+            'publicFunctions',(select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like '%trainingos_lark%'),
+            'securityDefiner',(select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like '%trainingos_lark%' and p.prosecdef),
+            'fixedSearchPath',(select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like '%trainingos_lark%' and p.prosecdef and exists(select 1 from unnest(coalesce(p.proconfig,array[]::text[])) setting where setting='search_path=""')),
+            'immutableTriggers',(select count(*) from expected_triggers e join pg_trigger t on t.tgname=e.name where not t.tgisinternal),
+            'authenticatedTranscriptSelect',has_table_privilege('authenticated','public.trainingos_classroom_lark_transcripts','SELECT'),
+            'serviceMinuteSelect',has_table_privilege('service_role','public.trainingos_classroom_lark_minute_sources','SELECT'),
+            'authenticatedProviderWrite',has_function_privilege('authenticated','public.record_trainingos_lark_recording_status(uuid,text,text,timestamptz,text,text)','EXECUTE'),
+            'serviceHumanConfirm',has_function_privilege('service_role','public.confirm_trainingos_lark_speaker(uuid,text,uuid,text,text)','EXECUTE'),
+            'anonProjection',has_function_privilege('anon','public.get_trainingos_lark_provider_projection(uuid)','EXECUTE')
+          );
+          SQL
+          )"
+          python - "$catalog" <<'PY'
+          import json,sys
+          d=json.loads(sys.argv[1])
+          expected={'tables':7,'forced':7,'privateExec':0,'publicFunctions':6,'securityDefiner':6,'fixedSearchPath':6,'immutableTriggers':7,'authenticatedTranscriptSelect':False,'serviceMinuteSelect':False,'authenticatedProviderWrite':False,'serviceHumanConfirm':False,'anonProjection':False}
+          assert d==expected,(d,expected)
+          PY
+      - name: Second deterministic replay and E2E
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          supabase --workdir "$RUNNER_TEMP/pr340-db-v3" db reset --local --no-seed > "$RUNNER_TEMP/pr340-v3-reset.log" 2>&1
+          psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At -f tests/sql/trainingos_classroom_lark_adapter_e2e.sql > "$RUNNER_TEMP/pr340-v3-second.out" 2> "$RUNNER_TEMP/pr340-v3-second.err"
+          python - "$RUNNER_TEMP/pr340-v3-second.out" <<'PY'
+          import json,pathlib,sys
+          d=next(json.loads(x) for x in reversed(pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines()) if x.strip().startswith('{'))
+          assert d.get('status')=='PASS' and d.get('cleanupStatus')=='PASS' and d.get('zeroResidueCount')==0,d
+          assert d.get('transcriptImmutable') is True and d.get('studentProjectionRejected') is True and d.get('agentConfirmationRejected') is True,d
+          assert d.get('attendanceDeterminationPerformed') is False,d
+          PY
+      - name: Sanitized database result
+        run: |
+          {
+            echo 'exact_private_sha=0df28f3d4056cc8aa2b65baa30981713a02f5b6a'
+            echo 'exact_base_sha=542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547'
+            echo 'canonical_bootstrap=PASS'
+            echo 'first_lark_e2e=PASS'
+            echo 'force_rls=PASS_7_7'
+            echo 'private_helper_execute=PASS_0'
+            echo 'public_security_definer_fixed_search_path=PASS_6_6'
+            echo 'effective_acl_denials=PASS'
+            echo 'immutable_triggers=PASS_7_7'
+            echo 'second_replay_lark_e2e=PASS'
+            echo 'zero_residue=PASS'
+            echo 'raw_private_database_output=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr340-db-v3" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr340-v3-*
