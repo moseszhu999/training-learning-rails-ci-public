@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_SHA: b0118d52db875fb2ca1b1c9a25507018f8997bba
+      PRIVATE_SHA: 375c1ec217123e1b5c3533d0a5c952c645f4ce49
 
     steps:
       - name: Check out exact private commit
