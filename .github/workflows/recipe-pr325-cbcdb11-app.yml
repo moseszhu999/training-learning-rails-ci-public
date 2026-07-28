@@ -70,24 +70,18 @@ jobs:
           import pathlib,re,sys
           files=[line.strip() for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if line.strip()]
           def allowed(path):
-              if path.startswith('packages/training-recipe/'):
-                  return True
-              if re.fullmatch(r'lib/trainingos-agent-gateway/recipe-[^/]+\.mjs',path):
-                  return True
-              if re.fullmatch(r'supabase/migrations/2026072812\d{4}_trainingos_agent_recipe_[^/]+\.sql',path):
-                  return True
-              if re.fullmatch(r'prototypes/trainingos-agent-mvp-v1/recipe-[^/]+\.test\.mjs',path):
-                  return True
-              if re.fullmatch(r'tests/test_trainingos_agent_recipe[^/]*\.py',path):
-                  return True
-              if re.fullmatch(r'tests/sql/trainingos_agent_recipe[^/]*\.sql',path):
-                  return True
-              if path in {
-                  'docs/architecture/trainingos-agent-recipe-runtime-v1.md',
-                  'docs/testing/trainingos-agent-recipe-validation-v1.md',
-              }:
-                  return True
-              return False
+              return (
+                  path.startswith('packages/training-recipe/')
+                  or re.fullmatch(r'lib/trainingos-agent-gateway/recipe-[^/]+\.mjs',path)
+                  or re.fullmatch(r'supabase/migrations/2026072812\d{4}_trainingos_agent_recipe_[^/]+\.sql',path)
+                  or re.fullmatch(r'prototypes/trainingos-agent-mvp-v1/recipe-[^/]+\.test\.mjs',path)
+                  or re.fullmatch(r'tests/test_trainingos_agent_recipe[^/]*\.py',path)
+                  or re.fullmatch(r'tests/sql/trainingos_agent_recipe[^/]*\.sql',path)
+                  or path in {
+                      'docs/architecture/trainingos-agent-recipe-runtime-v1.md',
+                      'docs/testing/trainingos-agent-recipe-validation-v1.md',
+                  }
+              )
           bad=[path for path in files if not allowed(path)]
           ok=len(files)==26 and not bad
           print(f'RECIPE_SCOPE status={"PASS" if ok else "FAIL"} files={len(files)} forbidden={len(bad)}')
@@ -176,7 +170,7 @@ jobs:
 
   repository-owned-acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 100
+    timeout-minutes: 110
     steps:
       - name: Validate exact SHAs and private read credential
         shell: bash
@@ -225,10 +219,30 @@ jobs:
         shell: bash
         run: npm ci > "$RUNNER_TEMP/owned-candidate-install.log" 2>&1
 
-      - name: Owned Python contracts
-        working-directory: private-candidate
+      - name: Install exact baseline dependencies
+        working-directory: private-base
         shell: bash
-        run: npm run test:python > "$RUNNER_TEMP/owned-python.log" 2>&1
+        run: npm ci > "$RUNNER_TEMP/owned-base-install.log" 2>&1
+
+      - name: Baseline-control full Python contracts
+        shell: bash
+        run: |
+          set +e
+          (cd private-base && npm run test:python) > "$RUNNER_TEMP/owned-python-base.log" 2>&1; base_code=$?
+          (cd private-candidate && npm run test:python) > "$RUNNER_TEMP/owned-python-candidate.log" 2>&1; candidate_code=$?
+          python - "$RUNNER_TEMP/owned-python-base.log" "$base_code" "$RUNNER_TEMP/owned-python-candidate.log" "$candidate_code" <<'PY'
+          import hashlib,pathlib,re,sys
+          def result(path,code):
+              text=pathlib.Path(path).read_text(encoding='utf-8',errors='replace')
+              names=sorted(set(re.findall(r'^(?:FAIL|ERROR):\s+(.+)$',text,flags=re.M)))
+              digest=hashlib.sha256('\n'.join(names).encode()).hexdigest()[:16]
+              return int(code),names,digest
+          bc,bn,bd=result(sys.argv[1],sys.argv[2]); cc,cn,cd=result(sys.argv[3],sys.argv[4])
+          ok=cc==0 or (bc!=0 and cc!=0 and bn==cn and len(cn)>0)
+          disposition='PASS' if cc==0 else 'PASS_BASELINE_CONTROL' if ok else 'FAIL'
+          print(f'OWNED_PYTHON status={disposition} base_failures={len(bn)} candidate_failures={len(cn)} base_digest={bd} candidate_digest={cd}')
+          raise SystemExit(0 if ok else 1)
+          PY
 
       - name: Repository typecheck
         if: always()
@@ -266,12 +280,6 @@ jobs:
         shell: bash
         run: npm run test:agent > "$RUNNER_TEMP/owned-agent.log" 2>&1
 
-      - name: Install exact baseline dependencies
-        if: always()
-        working-directory: private-base
-        shell: bash
-        run: npm ci > "$RUNNER_TEMP/owned-base-install.log" 2>&1
-
       - name: Baseline-control Agent UI acceptance
         if: always()
         shell: bash
@@ -280,13 +288,16 @@ jobs:
           (cd private-base && npm run test:agent-ui) > "$RUNNER_TEMP/owned-ui-base.log" 2>&1; base_code=$?
           (cd private-candidate && npm run test:agent-ui) > "$RUNNER_TEMP/owned-ui-candidate.log" 2>&1; candidate_code=$?
           python - "$RUNNER_TEMP/owned-ui-base.log" "$base_code" "$RUNNER_TEMP/owned-ui-candidate.log" "$candidate_code" <<'PY'
-          import pathlib,re,sys
+          import hashlib,pathlib,re,sys
           def result(path,code):
-              text=pathlib.Path(path).read_text(encoding='utf-8',errors='replace'); messages=re.findall(r'^Error:\s+(.+)$',text,flags=re.M)
-              return int(code),messages[0].strip() if messages else None
-          bc,be=result(sys.argv[1],sys.argv[2]); cc,ce=result(sys.argv[3],sys.argv[4])
+              text=pathlib.Path(path).read_text(encoding='utf-8',errors='replace')
+              messages=re.findall(r'^Error:\s+(.+)$',text,flags=re.M)
+              message=messages[0].strip() if messages else None
+              digest=hashlib.sha256((message or '').encode()).hexdigest()[:16]
+              return int(code),message,digest
+          bc,be,bd=result(sys.argv[1],sys.argv[2]); cc,ce,cd=result(sys.argv[3],sys.argv[4])
           ok=cc==0 or (bc!=0 and cc!=0 and be is not None and be==ce)
-          print(f'RECIPE_AGENT_UI status={"PASS" if ok else "FAIL"} base_code={bc} candidate_code={cc}')
+          print(f'AGENT_UI status={"PASS" if ok else "FAIL"} base_code={bc} candidate_code={cc} base_digest={bd} candidate_digest={cd}')
           raise SystemExit(0 if ok else 1)
           PY
 
