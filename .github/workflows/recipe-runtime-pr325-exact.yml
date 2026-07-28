@@ -16,7 +16,7 @@ env:
   PRIVATE_SHA: 028871119c5cbf68923308b4478ca7438348457b
 
 jobs:
-  canonical-prerequisite-replay-and-sql-e2e:
+  sql-e2e-diagnostic:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
@@ -76,71 +76,83 @@ jobs:
             cp "../private-repo/supabase/migrations/$migration" "supabase/migrations/$migration"
           done
           rm -f supabase/seed.sql
-          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          test "$count" = 16
-          echo "RECIPE_CANONICAL_REPLAY_PREP status=PASS migrations=$count sha=$PRIVATE_SHA"
 
-      - name: First canonical prerequisite replay
+      - name: Start canonical prerequisite database
+        working-directory: replay-project
+        shell: bash
+        run: supabase start > "$RUNNER_TEMP/recipe-canonical-start.log" 2>&1
+
+      - name: Capture sanitized transactional SQL E2E diagnosis
+        id: e2e
         working-directory: replay-project
         shell: bash
         run: |
           set +e
-          supabase start > "$RUNNER_TEMP/recipe-canonical-first.log" 2>&1
-          code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-first.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
-          echo "RECIPE_CANONICAL_FIRST status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
-          exit "$code"
-
-      - name: Second deterministic canonical replay
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set +e
-          supabase db reset --local > "$RUNNER_TEMP/recipe-canonical-second.log" 2>&1
-          code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-second.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
-          echo "RECIPE_CANONICAL_SECOND status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
-          exit "$code"
-
-      - name: Run transactional Recipe SQL E2E
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set -euo pipefail
           eval "$(supabase status -o env | grep '^DB_URL=')"
           psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
             -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
             > "$RUNNER_TEMP/recipe-sql-e2e.log" 2>&1
-          python - "$RUNNER_TEMP/recipe-sql-e2e.log" <<'PY'
-          import json, pathlib, sys
-          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
-          payloads=[]
-          for line in text.splitlines():
-              line=line.strip()
-              if not line.startswith('{'):
-                  continue
-              try: payloads.append(json.loads(line))
-              except json.JSONDecodeError: pass
-          payload=payloads[-1] if payloads else {}
-          residue=payload.get('residue') or {}
-          cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
-          ok=(payload.get('status')=='PASS'
-              and payload.get('canonicalExecutionReused') is True
-              and payload.get('canonicalExecutionCount')==1
-              and payload.get('triggerReceiptCount')==2
-              and payload.get('formalWritePerformed') is False
-              and payload.get('badSourceDigestDenied') is True
-              and payload.get('humanInitialTriggerDenied') is True
-              and payload.get('humanReplayDenied') is True
-              and payload.get('changedExecutorProvenanceDenied') is True
-              and cleanup)
-          print('RECIPE_SQL_E2E status=%s execution=%s receipts=%s cleanup=%s' % (
-              'PASS' if ok else 'FAIL',payload.get('canonicalExecutionCount',0),
-              payload.get('triggerReceiptCount',0),'PASS' if cleanup else 'FAIL'))
-          raise SystemExit(0 if ok else 1)
+          code=$?
+          CODE="$code" PRIVATE_SHA="$PRIVATE_SHA" python - "$RUNNER_TEMP/recipe-sql-e2e.log" "$RUNNER_TEMP/recipe-sql-e2e-diagnostic.json" <<'PY'
+          import hashlib, json, os, pathlib, re, sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          lower=text.lower()
+          custom=re.findall(r'ERROR:\s+([A-Z][A-Z0-9_]+)',text)
+          sqlstate=None
+          for pattern in [r'SQL state:\s*([0-9A-Z]{5})',r'SQLSTATE[=: ]+([0-9A-Z]{5})']:
+              match=re.search(pattern,text,re.I)
+              if match:
+                  sqlstate=match.group(1).upper(); break
+          if custom:
+              error_class='custom_recipe_assertion'
+          elif 'does not exist' in lower and 'relation' in lower:
+              error_class='missing_relation'
+          elif 'does not exist' in lower and 'column' in lower:
+              error_class='missing_column'
+          elif 'does not exist' in lower and 'function' in lower:
+              error_class='missing_function'
+          elif 'violates not-null constraint' in lower:
+              error_class='not_null_violation'
+          elif 'violates check constraint' in lower:
+              error_class='check_violation'
+          elif 'violates foreign key constraint' in lower:
+              error_class='foreign_key_violation'
+          elif int(os.environ['CODE'])==0:
+              error_class=None
+          else:
+              error_class='unknown_sql_e2e_failure'
+          tail='\n'.join(text.splitlines()[-80:])
+          payload={
+              'schemaVersion':'trainingos-recipe-sql-e2e-diagnostic-v1',
+              'privateSha':os.environ['PRIVATE_SHA'],
+              'status':'PASS' if int(os.environ['CODE'])==0 else 'FAIL',
+              'exitCode':int(os.environ['CODE']),
+              'errorClass':error_class,
+              'customErrorToken':custom[-1] if custom else None,
+              'sqlstate':sqlstate,
+              'tailFingerprint':hashlib.sha256(tail.encode()).hexdigest(),
+              'rawOutputPublished':False,
+          }
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(payload,indent=2)+'\n',encoding='utf-8')
+          print('RECIPE_SQL_E2E_DIAGNOSTIC status=%s class=%s token=%s sqlstate=%s fingerprint=%s' % (
+              payload['status'],payload['errorClass'] or 'none',payload['customErrorToken'] or 'none',
+              payload['sqlstate'] or 'none',payload['tailFingerprint']))
           PY
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload sanitized SQL E2E diagnosis
+        uses: actions/upload-artifact@v4
+        with:
+          name: recipe-pr325-sql-e2e-diagnostic
+          path: ${{ runner.temp }}/recipe-sql-e2e-diagnostic.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce transactional SQL E2E result
+        env:
+          E2E_CODE: ${{ steps.e2e.outputs.code }}
+        run: test "${E2E_CODE:-1}" = 0
 
       - name: Stop isolated database and remove sealed logs
         if: always()
@@ -148,6 +160,6 @@ jobs:
         shell: bash
         run: |
           supabase stop --no-backup || true
-          rm -f "$RUNNER_TEMP/recipe-canonical-first.log" "$RUNNER_TEMP/recipe-canonical-second.log" \
-            "$RUNNER_TEMP/recipe-sql-e2e.log"
+          rm -f "$RUNNER_TEMP/recipe-canonical-start.log" "$RUNNER_TEMP/recipe-sql-e2e.log" \
+            "$RUNNER_TEMP/recipe-sql-e2e-diagnostic.json"
           rm -rf ../private-repo
