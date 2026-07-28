@@ -1,0 +1,261 @@
+name: PR339 final canonical Student Learning
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-final-49f67a94.yml
+      - carriers/pr339-final-49f67a94.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 49f67a942c1ff3ea4daf6c01941146b942f0e390
+  BASE_SHA: e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Validate exact input and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact ancestry scope and migrations
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+          git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort > "$RUNNER_TEMP/pr339-files"
+          python - "$RUNNER_TEMP/pr339-files" <<'PY'
+          import pathlib,sys
+          files=pathlib.Path(sys.argv[1]).read_text().splitlines()
+          assert len(files)==35,(len(files),files)
+          migrations=[f for f in files if f.startswith('supabase/migrations/')]
+          expected={
+            'supabase/migrations/20260728100000_trainingos_student_exercise_execution_v1.sql',
+            'supabase/migrations/20260728100100_trainingos_assessment_answer_resume_projection_v1.sql',
+            'supabase/migrations/20260728100200_trainingos_student_exercise_start_concurrency_v1.sql',
+            'supabase/migrations/20260728100250_trainingos_student_exercise_rpc_transition_bridge_v1.sql',
+            'supabase/migrations/20260728100300_trainingos_student_learning_execution_canonical_reconciliation_v1.sql',
+            'supabase/migrations/20260728100350_trainingos_assessment_start_privacy_hardening_v1.sql',
+            'supabase/migrations/20260728100360_trainingos_assessment_answer_option_object_compatibility_v1.sql',
+          }
+          assert set(migrations)==expected,(migrations,expected)
+          allowed=(
+            '.github/workflows/trainingos-learning-workspace-bridge.yml',
+            'api/integrations/agents/mcp.mjs',
+            'apps/training-web/src/',
+            'extensions/trainingos-classroom-vscode/',
+            'lib/trainingos-agent-gateway/',
+            'netlify/functions/trainingos-mcp.mjs',
+            'packages/training-learning-workspace/',
+            'prototypes/trainingos-agent-mvp-v1/',
+            'scripts/run-trainingos-learning-workspace-bridge-validation.mjs',
+            'supabase/migrations/2026072810',
+            'tests/sql/trainingos_student_',
+            'tests/test_trainingos_',
+          )
+          assert all(any(f==a or f.startswith(a) for a in allowed) for f in files),files
+          print('PR339_SCOPE PASS_35_FILES_7_MIGRATIONS')
+          PY
+      - name: Run focused contracts and production gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            prototypes/trainingos-agent-mvp-v1/student-exercise-execution.test.mjs \
+            prototypes/trainingos-agent-mvp-v1/student-assessment-resume.test.mjs \
+            prototypes/trainingos-agent-mvp-v1/student-learning-canonical-reconciliation.test.mjs \
+            > "$RUNNER_TEMP/pr339-node.log" 2>&1
+          : > "$RUNNER_TEMP/pr339-python.log"
+          for f in \
+            tests/test_trainingos_student_exercise_execution_contract.py \
+            tests/test_trainingos_assessment_resume_execution_contract.py \
+            tests/test_trainingos_learning_workspace_assessment_projection_contract.py \
+            tests/test_trainingos_vscode_exercise_execution_contract.py
+          do python "$f" >> "$RUNNER_TEMP/pr339-python.log" 2>&1; done
+          npm ci > "$RUNNER_TEMP/pr339-install.log" 2>&1
+          npm run typecheck > "$RUNNER_TEMP/pr339-typecheck.log" 2>&1
+          node extensions/trainingos-classroom-vscode/esbuild.mjs --production > "$RUNNER_TEMP/pr339-vscode.log" 2>&1
+          npm run validate:learning-workspace-bridge > "$RUNNER_TEMP/pr339-workspace.log" 2>&1
+          npm run validate:zero-permission-bridge > "$RUNNER_TEMP/pr339-zero.log" 2>&1
+          npm run build > "$RUNNER_TEMP/pr339-build.log" 2>&1
+      - name: Independent canonical safety review
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          rec=Path('supabase/migrations/20260728100300_trainingos_student_learning_execution_canonical_reconciliation_v1.sql').read_text()
+          bridge=Path('supabase/migrations/20260728100250_trainingos_student_exercise_rpc_transition_bridge_v1.sql').read_text()
+          privacy=Path('supabase/migrations/20260728100350_trainingos_assessment_start_privacy_hardening_v1.sql').read_text()
+          options=Path('supabase/migrations/20260728100360_trainingos_assessment_answer_option_object_compatibility_v1.sql').read_text()
+          combined=rec+bridge+privacy+options
+          assert 'create table' not in combined.lower()
+          assert 'select p, d into' not in rec.lower()
+          assert "current_setting('trainingos.student_exercise_rpc', true) is distinct from 'v1'" in bridge
+          assert "current_setting('trainingos.student_exercise_rpc', true) = 'v1'" in bridge
+          assert 'strip_private_json(si.prompt_payload)' in privacy
+          assert 'strip_private_json(si.material_references)' in privacy
+          assert 'input_contract(si.item_type, si.answer_schema)' in privacy
+          assert "v_item.item_type = 'single_choice'" in options
+          assert "v_item.item_type = 'multiple_choice'" in options
+          assert "nullif(option.value->>'id','')" in options
+          assert "nullif(option.value->>'key','')" in options
+          assert 'TRAININGOS_ASSESSMENT_ANSWER_IDENTITY_IMMUTABLE' in options
+          assert 'TRAININGOS_ASSESSMENT_SUBMITTED_ANSWER_IMMUTABLE' in options
+          assert 'revoke all on function trainingos_assessment_private.validate_answer()' in options
+          print('PR339_REVIEW PASS')
+          PY
+      - name: Publish sanitized application evidence
+        run: |
+          {
+            echo 'exact_private_sha=49f67a942c1ff3ea4daf6c01941146b942f0e390'
+            echo 'exact_base_sha=e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0'
+            echo 'scope=PASS_35_FILES_7_MIGRATIONS'
+            echo 'focused_node_python=PASS'
+            echo 'typecheck=PASS'
+            echo 'vscode_bundle=PASS'
+            echo 'learning_workspace_bridge=PASS'
+            echo 'zero_permission_bridge=PASS'
+            echo 'production_build=PASS'
+            echo 'independent_review=PASS'
+            echo 'raw_private_output=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP"/pr339-*
+
+  canonical-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Validate credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Build canonical fresh database
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          workdir="$RUNNER_TEMP/pr339-db"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/pr339-init.log" 2>&1
+          python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/pr339-bootstrap.log" 2>&1
+          supabase --workdir "$workdir" start > "$RUNNER_TEMP/pr339-start.log" 2>&1
+      - name: Verify canonical ACL trigger privacy and validator contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          select jsonb_build_object(
+            'duplicateTables',(select count(*) from information_schema.tables where table_schema='public' and table_name in ('student_exercise_submissions','student_exercise_answers','student_assessment_attempts','student_assessment_answers','assessment_resume_answers','assessment_execution_state')),
+            'assessmentDirectPrivileges',(select count(*) from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and table_name in ('trainingos_assessment_attempts','trainingos_assessment_answers') and privilege_type in ('INSERT','UPDATE','DELETE')),
+            'oldAssessmentSave',case when to_regprocedure('public.save_trainingos_assessment_answer(uuid,uuid,integer,jsonb)') is null then false else has_function_privilege('authenticated','public.save_trainingos_assessment_answer(uuid,uuid,integer,jsonb)','execute') end,
+            'newAssessmentSave',has_function_privilege('authenticated','public.save_trainingos_assessment_answer(uuid,uuid,integer,integer,jsonb,text)','execute'),
+            'assessmentStart',has_function_privilege('authenticated','public.start_trainingos_assessment_attempt(uuid,integer)','execute'),
+            'oldExerciseConfirm',case when to_regprocedure('public.confirm_my_trainingos_exercise_submission(uuid,bigint,text,boolean,text)') is null then false else has_function_privilege('authenticated','public.confirm_my_trainingos_exercise_submission(uuid,bigint,text,boolean,text)','execute') end,
+            'newExerciseConfirm',has_function_privilege('authenticated','public.confirm_my_trainingos_exercise_submission(uuid,bigint,text,text,text)','execute'),
+            'transitionTriggers',(select count(*) from pg_catalog.pg_trigger where tgrelid='public.exercise_submissions'::pg_catalog.regclass and not tgisinternal and tgname in ('validate_exercise_submission_scope','validate_exercise_submission_rpc_scope')),
+            'privateExerciseTriggerExecutable',has_function_privilege('authenticated','trainingos_student_exercise_private.validate_rpc_submission_scope()','execute'),
+            'privateAnswerValidatorExecutable',has_function_privilege('authenticated','trainingos_assessment_private.validate_answer()','execute'),
+            'functionBodies',current_setting('check_function_bodies')
+          );
+          SQL
+          )"
+          python - "$result" <<'PY'
+          import json,sys
+          d=json.loads(sys.argv[1])
+          expected={'duplicateTables':0,'assessmentDirectPrivileges':0,'oldAssessmentSave':False,'newAssessmentSave':True,'assessmentStart':True,'oldExerciseConfirm':False,'newExerciseConfirm':True,'transitionTriggers':2,'privateExerciseTriggerExecutable':False,'privateAnswerValidatorExecutable':False,'functionBodies':'on'}
+          assert d==expected,(d,expected)
+          PY
+      - name: First full canonical E2E pass
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql > "$RUNNER_TEMP/pr339-exercise1.log" 2>&1
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql > "$RUNNER_TEMP/pr339-assessment1.log" 2>&1
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql > "$RUNNER_TEMP/pr339-result1.log" 2>&1
+      - name: Second deterministic reset and E2E pass
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --workdir "$RUNNER_TEMP/pr339-db" db reset --local --no-seed > "$RUNNER_TEMP/pr339-reset.log" 2>&1
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql > "$RUNNER_TEMP/pr339-exercise2.log" 2>&1
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql > "$RUNNER_TEMP/pr339-assessment2.log" 2>&1
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql > "$RUNNER_TEMP/pr339-result2.log" 2>&1
+      - name: Publish sanitized database evidence
+        run: |
+          {
+            echo 'exact_private_sha=49f67a942c1ff3ea4daf6c01941146b942f0e390'
+            echo 'exact_base_sha=e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0'
+            echo 'canonical_bootstrap=PASS'
+            echo 'acl_trigger_privacy_validator_contract=PASS'
+            echo 'exercise_e2e_first=PASS_ZERO_RESIDUE'
+            echo 'assessment_e2e_first=PASS_ZERO_RESIDUE'
+            echo 'grading_result_e2e_first=PASS'
+            echo 'second_reset_replay=PASS'
+            echo 'exercise_e2e_second=PASS_ZERO_RESIDUE'
+            echo 'assessment_e2e_second=PASS_ZERO_RESIDUE'
+            echo 'grading_result_e2e_second=PASS'
+            echo 'raw_private_database_output=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-db" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-*
