@@ -1,0 +1,107 @@
+name: Classroom Explanation database replay diagnostic
+
+on:
+  push:
+    branches:
+      - ci/classroom-explanation-230f97d1-db
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-explanation-230f97d1-db.yml
+      - .github/workflows/classroom-explanation-230f97d1-db-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  PRIVATE_SHA: 230f97d1be72d79dd5aeb36f8348a7a42e6e6d20
+  EXPECTED_BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+jobs:
+  classify-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Run sealed replay and classify failure
+        id: replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-repo rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git -C private-repo merge-base "$EXPECTED_BASE_SHA" "$PRIVATE_SHA")" == "$EXPECTED_BASE_SHA" ]]
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          mkdir -p supabase/migrations
+          cp ../private-repo/supabase/migrations/*.sql supabase/migrations/
+          rm -f supabase/seed.sql
+          set +e
+          supabase start > "$RUNNER_TEMP/replay-diagnostic.log" 2>&1
+          code=$?
+          set -e
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/replay-diagnostic.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/replay-diagnostic.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          stamp="$(printf '%s' "$last" | grep -oE '^[0-9]+' || true)"
+          classification=replay_error
+          grep -qi 'already exists' "$RUNNER_TEMP/replay-diagnostic.log" && classification=duplicate_object
+          grep -qi 'does not exist' "$RUNNER_TEMP/replay-diagnostic.log" && classification=missing_dependency
+          grep -qi 'syntax error' "$RUNNER_TEMP/replay-diagnostic.log" && classification=syntax_error
+          grep -qi 'duplicate key' "$RUNNER_TEMP/replay-diagnostic.log" && classification=duplicate_key
+          {
+            echo "exit_code=$code"
+            echo "applied=$applied"
+            echo "last_timestamp=${stamp:-unknown}"
+            echo "classification=$classification"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish bounded diagnostic comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          EXIT_CODE: ${{ steps.replay.outputs.exit_code }}
+          APPLIED: ${{ steps.replay.outputs.applied }}
+          LAST_TIMESTAMP: ${{ steps.replay.outputs.last_timestamp }}
+          CLASSIFICATION: ${{ steps.replay.outputs.classification }}
+        with:
+          script: |
+            const marker = '<!-- classroom-explanation-db-diagnostic -->';
+            const body = `${marker}\n## Classroom Explanation database replay diagnostic\n\n- Exact private SHA: \`${process.env.PRIVATE_SHA}\`\n- Replay exit code: **${process.env.EXIT_CODE}**\n- Applied migration count before stop: **${process.env.APPLIED}**\n- Last attempted migration timestamp: **${process.env.LAST_TIMESTAMP}**\n- Failure classification: **${process.env.CLASSIFICATION}**\n\nRaw SQL output remains sealed and is deleted.`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find(comment => comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d replay-project ]]; then
+            (cd replay-project && supabase stop --no-backup) >/dev/null 2>&1 || true
+          fi
+          rm -rf private-repo replay-project "$RUNNER_TEMP/replay-diagnostic.log"
