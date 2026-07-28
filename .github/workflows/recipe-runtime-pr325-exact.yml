@@ -13,12 +13,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PRIVATE_SHA: 0e9052c142fe8a55d238b648f414caf04f107605
+  PRIVATE_SHA: 028871119c5cbf68923308b4478ca7438348457b
 
 jobs:
-  migration-order-manifest:
+  canonical-prerequisite-replay-and-sql-e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 75
     steps:
       - name: Validate exact SHA and private read credential
         shell: bash
@@ -40,34 +40,150 @@ jobs:
           fetch-depth: 1
           clean: true
 
-      - name: Build filename-only migration manifest
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Prepare canonical prerequisite migration set
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json, pathlib
-          root = pathlib.Path('private-repo/supabase/migrations')
-          names = sorted(path.name for path in root.glob('*.sql'))
-          payload = {
-              'schemaVersion': 'trainingos-private-migration-order-v1',
-              'privateSha': '0e9052c142fe8a55d238b648f414caf04f107605',
-              'migrationCount': len(names),
-              'filenames': names,
-              'sqlContentPublished': False,
-          }
-          pathlib.Path('/tmp/recipe-migration-order.json').write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
-          print(f'RECIPE_MIGRATION_ORDER status=PASS count={len(names)} first={names[0] if names else "none"} last={names[-1] if names else "none"}')
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          mkdir -p supabase/migrations
+          cp ../private-repo/tests/sql/trainingos_agent_recipe_prerequisite_harness.sql \
+            supabase/migrations/00000000000000_trainingos_agent_recipe_prerequisite_harness.sql
+          for migration in \
+            20260714_jhc_source_bundle_reference_assets.sql \
+            20260719233000_trainingos_agent_devices.sql \
+            20260724153000_trainingos_agent_execution_envelope.sql \
+            20260724154500_trainingos_agent_execution_envelope_hardening.sql \
+            20260724160000_trainingos_agent_execution_progress.sql \
+            20260727240000_trainingos_persistent_teacher_agent_schema_v1.sql \
+            20260727240100_trainingos_persistent_teacher_agent_policy_rpc_v1.sql \
+            20260728120000_trainingos_agent_recipe_schema_v1.sql \
+            20260728120100_trainingos_agent_recipe_management_v1.sql \
+            20260728120200_trainingos_agent_recipe_execution_v1.sql \
+            20260728120300_trainingos_agent_recipe_security_hardening_v1.sql \
+            20260728120400_trainingos_agent_recipe_actor_access_hardening_v1.sql \
+            20260728120500_trainingos_agent_recipe_trigger_entry_guard_v1.sql \
+            20260728120600_trainingos_agent_recipe_source_digest_guard_v1.sql \
+            20260728120700_trainingos_agent_recipe_executor_provenance_v1.sql
+          do
+            cp "../private-repo/supabase/migrations/$migration" "supabase/migrations/$migration"
+          done
+          rm -f supabase/seed.sql
+          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          test "$count" = 16
+          echo "RECIPE_CANONICAL_REPLAY_PREP status=PASS migrations=$count sha=$PRIVATE_SHA"
+
+      - name: First canonical prerequisite replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/recipe-canonical-first.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_CANONICAL_FIRST status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
+
+      - name: Second deterministic canonical replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase db reset --local > "$RUNNER_TEMP/recipe-canonical-second.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-second.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_CANONICAL_SECOND status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
+
+      - name: Run transactional Recipe SQL E2E
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
+            > "$RUNNER_TEMP/recipe-sql-e2e.log" 2>&1
+          python - "$RUNNER_TEMP/recipe-sql-e2e.log" <<'PY'
+          import json, pathlib, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          payloads=[]
+          for line in text.splitlines():
+              line=line.strip()
+              if not line.startswith('{'):
+                  continue
+              try: payloads.append(json.loads(line))
+              except json.JSONDecodeError: pass
+          payload=payloads[-1] if payloads else {}
+          residue=payload.get('residue') or {}
+          cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
+          ok=(
+              payload.get('status')=='PASS'
+              and payload.get('canonicalExecutionReused') is True
+              and payload.get('canonicalExecutionCount')==1
+              and payload.get('triggerReceiptCount')==2
+              and payload.get('formalWritePerformed') is False
+              and payload.get('badSourceDigestDenied') is True
+              and payload.get('humanInitialTriggerDenied') is True
+              and payload.get('humanReplayDenied') is True
+              and payload.get('changedExecutorProvenanceDenied') is True
+              and cleanup
+          )
+          print('RECIPE_SQL_E2E status=%s execution=%s receipts=%s cleanup=%s' % (
+              'PASS' if ok else 'FAIL',payload.get('canonicalExecutionCount',0),
+              payload.get('triggerReceiptCount',0),'PASS' if cleanup else 'FAIL'))
+          raise SystemExit(0 if ok else 1)
           PY
 
-      - name: Upload filename-only migration manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: recipe-pr325-migration-order
-          path: /tmp/recipe-migration-order.json
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Remove private checkout
-        if: always()
+      - name: Verify Recipe ACL and canonical execution ownership
+        working-directory: replay-project
         shell: bash
-        run: rm -rf private-repo /tmp/recipe-migration-order.json
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/recipe-acl.log" 2>&1 <<'SQL'
+          do $verify$
+          declare
+            v_tables integer;
+            v_forced integer;
+            v_direct integer;
+          begin
+            select count(*) into v_tables from information_schema.tables
+            where table_schema='public' and table_name in(
+              'trainingos_agent_recipes','trainingos_agent_recipe_versions',
+              'trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts'
+            );
+            select count(*) into v_forced from pg_class c join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and c.relname in(
+              'trainingos_agent_recipes','trainingos_agent_recipe_versions',
+              'trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts'
+            ) and c.relrowsecurity and c.relforcerowsecurity;
+            select count(*) into v_direct from information_schema.role_table_grants
+            where grantee in('authenticated','service_role') and table_schema='public'
+              and table_name like 'trainingos_agent_recipe%';
+            if v_tables<>4 or v_forced<>4 or v_direct<>0 then
+              raise exception 'RECIPE_ACL_OR_SCHEMA_INVALID';
+            end if;
+          end;
+          $verify$;
+SQL
+          echo 'RECIPE_ACL status=PASS tables=4 forced_rls=4 direct_authenticated_or_service_role=0 canonical_execution_owner=trainingos_agent_executions'
+
+      - name: Stop isolated database and remove sealed logs
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          supabase stop --no-backup || true
+          rm -f "$RUNNER_TEMP/recipe-canonical-first.log" "$RUNNER_TEMP/recipe-canonical-second.log" \
+            "$RUNNER_TEMP/recipe-sql-e2e.log" "$RUNNER_TEMP/recipe-acl.log"
+          rm -rf ../private-repo
