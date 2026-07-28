@@ -1,0 +1,319 @@
+name: Classroom Zoom adapter exact-head CI
+
+on:
+  push:
+    branches:
+      - ci/classroom-zoom-66b0d728
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-zoom-66b0d728.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-zoom-66b0d728-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: 66b0d7281337de787e92a55a892e1f54466bc9a8
+      EXPECTED_PARENT_SHA: 604631a96f01fb76d123072168c165cc699d9e8e
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::PRIVATE_SHA must be an exact lowercase 40-character commit SHA"
+            exit 2
+          fi
+          if [[ ! "$EXPECTED_PARENT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::EXPECTED_PARENT_SHA must be an exact lowercase 40-character commit SHA"
+            exit 2
+          fi
+          if [[ -z "$PRIVATE_TOKEN" ]]; then
+            echo "::error::PRIVATE_REPO_READ_TOKEN is not configured"
+            exit 2
+          fi
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 2
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head and Zoom-only scope
+        id: scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          status=PASS
+          actual_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+          actual_parent="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          if [[ "$actual_sha" != "$PRIVATE_SHA" ]]; then
+            status=FAIL
+          fi
+          if [[ "$actual_parent" != "$EXPECTED_PARENT_SHA" ]]; then
+            status=FAIL
+          fi
+          actual_files="$(git diff --name-only "$EXPECTED_PARENT_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'api/integrations/classroom/zoom-webhook.mjs\ndocs/product/trainingos-classroom-zoom-adapter-v1.md\ndocs/testing/trainingos-classroom-zoom-adapter-verification-v1.md\nlib/trainingos-agent-gateway/classroom-zoom-adapter.mjs\nnetlify/functions/trainingos-zoom-webhook.mjs\npackages/training-classroom-zoom/src/adapter.d.mts\npackages/training-classroom-zoom/src/adapter.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-zoom-adapter.test.mjs\nsupabase/migrations/20260728190000_trainingos_classroom_zoom_adapter_schema_v1.sql\nsupabase/migrations/20260728190100_trainingos_classroom_zoom_adapter_rpc_v1.sql\ntests/sql/trainingos_classroom_zoom_adapter_e2e.sql\ntests/test_trainingos_classroom_zoom_adapter_contract.py'
+          if [[ "$actual_files" != "$expected_files" ]]; then
+            status=FAIL
+          fi
+          file_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+          {
+            echo "status=$status"
+            echo "actual_sha=$actual_sha"
+            echo "actual_parent=$actual_parent"
+            echo "file_count=$file_count"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run Zoom adapter syntax checks with sealed output
+        id: syntax
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check packages/training-classroom-zoom/src/adapter.mjs
+            node --check lib/trainingos-agent-gateway/classroom-zoom-adapter.mjs
+            node --check api/integrations/classroom/zoom-webhook.mjs
+            node --check netlify/functions/trainingos-zoom-webhook.mjs
+          } > "$RUNNER_TEMP/classroom-zoom-syntax.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run focused Zoom adapter Node contracts with sealed output
+        id: focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/classroom-zoom-adapter.test.mjs \
+            > "$RUNNER_TEMP/classroom-zoom-focused.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/classroom-zoom-focused.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          output = pathlib.Path(sys.argv[3])
+          tests = re.search(r'# tests\s+(\d+)', text)
+          passed = re.search(r'# pass\s+(\d+)', text)
+          failed = re.search(r'# fail\s+(\d+)', text)
+          test_count = int(tests.group(1)) if tests else 0
+          pass_count = int(passed.group(1)) if passed else 0
+          fail_count = int(failed.group(1)) if failed else -1
+          ok = code == 0 and test_count == 5 and pass_count == 5 and fail_count == 0
+          with output.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={code}\n')
+              handle.write(f'test_count={test_count}\n')
+              handle.write(f'pass_count={pass_count}\n')
+              handle.write(f'fail_count={fail_count}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run Zoom adapter Python contracts with sealed output
+        id: python_contract
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python tests/test_trainingos_classroom_zoom_adapter_contract.py \
+            > "$RUNNER_TEMP/classroom-zoom-python.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/classroom-zoom-python.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          output = pathlib.Path(sys.argv[3])
+          ran = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          test_count = int(ran.group(1)) if ran else 0
+          ok = code == 0 and test_count == 15 and re.search(r'^OK$', text, re.MULTILINE) is not None
+          with output.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={code}\n')
+              handle.write(f'test_count={test_count}\n')
+              handle.write(f'pass_count={test_count if ok else 0}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Install private repository dependencies with sealed output
+        id: install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/classroom-zoom-install.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run repository typecheck with sealed output
+        id: typecheck
+        if: steps.install.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/classroom-zoom-typecheck.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run production build with sealed output
+        id: build
+        if: steps.install.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/classroom-zoom-build.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized exact-head result
+        if: always()
+        shell: bash
+        env:
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          ACTUAL_PARENT: ${{ steps.scope.outputs.actual_parent }}
+          FILE_COUNT: ${{ steps.scope.outputs.file_count }}
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          FOCUSED_STATUS: ${{ steps.focused.outputs.status }}
+          FOCUSED_COUNT: ${{ steps.focused.outputs.test_count }}
+          FOCUSED_PASS: ${{ steps.focused.outputs.pass_count }}
+          PYTHON_STATUS: ${{ steps.python_contract.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_contract.outputs.test_count }}
+          PYTHON_PASS: ${{ steps.python_contract.outputs.pass_count }}
+          INSTALL_STATUS: ${{ steps.install.outputs.status }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const value = (input) => input || 'NOT_RUN';
+          const lines = [
+            '## Classroom Zoom Adapter exact-head CI',
+            '',
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}\``,
+            `- Exact parent SHA: \`${process.env.ACTUAL_PARENT || process.env.EXPECTED_PARENT_SHA}\``,
+            `- Zoom-only merge scope: **${value(process.env.SCOPE_STATUS)} (${process.env.FILE_COUNT || '0'} files)**`,
+            `- JavaScript syntax checks: **${value(process.env.SYNTAX_STATUS)} 4/4**`,
+            `- Focused Node contracts: **${value(process.env.FOCUSED_STATUS)} ${process.env.FOCUSED_PASS || '0'}/${process.env.FOCUSED_COUNT || '0'}**`,
+            `- Python static contracts: **${value(process.env.PYTHON_STATUS)} ${process.env.PYTHON_PASS || '0'}/${process.env.PYTHON_COUNT || '0'}**`,
+            `- Dependency install: **${value(process.env.INSTALL_STATUS)}**`,
+            `- Repository typecheck: **${value(process.env.TYPECHECK_STATUS)}**`,
+            `- Production build: **${value(process.env.BUILD_STATUS)}**`,
+            '- Database migration replay: **NOT_RUN in this public-safe workflow**',
+            '',
+            'Raw private output is sealed and deleted. No private source, fixtures, identifiers, credentials, or logs are published.',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(
+            `CLASSROOM_ZOOM_EXACT_CI scope=${value(process.env.SCOPE_STATUS)}:${process.env.FILE_COUNT || '0'} ` +
+            `syntax=${value(process.env.SYNTAX_STATUS)} ` +
+            `focused=${value(process.env.FOCUSED_STATUS)}:${process.env.FOCUSED_PASS || '0'}/${process.env.FOCUSED_COUNT || '0'} ` +
+            `python=${value(process.env.PYTHON_STATUS)}:${process.env.PYTHON_PASS || '0'}/${process.env.PYTHON_COUNT || '0'} ` +
+            `install=${value(process.env.INSTALL_STATUS)} typecheck=${value(process.env.TYPECHECK_STATUS)} ` +
+            `build=${value(process.env.BUILD_STATUS)} sha=${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}`,
+          );
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/classroom-zoom-syntax.log" \
+            "$RUNNER_TEMP/classroom-zoom-focused.log" \
+            "$RUNNER_TEMP/classroom-zoom-python.log" \
+            "$RUNNER_TEMP/classroom-zoom-install.log" \
+            "$RUNNER_TEMP/classroom-zoom-typecheck.log" \
+            "$RUNNER_TEMP/classroom-zoom-build.log"
+
+      - name: Enforce exact-head result
+        if: always()
+        shell: bash
+        env:
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          FILE_COUNT: ${{ steps.scope.outputs.file_count }}
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          FOCUSED_STATUS: ${{ steps.focused.outputs.status }}
+          FOCUSED_COUNT: ${{ steps.focused.outputs.test_count }}
+          FOCUSED_PASS: ${{ steps.focused.outputs.pass_count }}
+          PYTHON_STATUS: ${{ steps.python_contract.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_contract.outputs.test_count }}
+          PYTHON_PASS: ${{ steps.python_contract.outputs.pass_count }}
+          INSTALL_STATUS: ${{ steps.install.outputs.status }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+        run: |
+          failed=0
+          [[ "${SCOPE_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${FILE_COUNT:-0}" == "12" ]] || failed=1
+          [[ "${SYNTAX_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${FOCUSED_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${FOCUSED_COUNT:-0}" == "5" ]] || failed=1
+          [[ "${FOCUSED_PASS:-0}" == "5" ]] || failed=1
+          [[ "${PYTHON_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${PYTHON_COUNT:-0}" == "15" ]] || failed=1
+          [[ "${PYTHON_PASS:-0}" == "15" ]] || failed=1
+          [[ "${INSTALL_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${TYPECHECK_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${BUILD_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          if [[ "$failed" != "0" ]]; then
+            echo "::error::Classroom Zoom Adapter exact-head validation failed. Review the sanitized step summary."
+          fi
+          exit "$failed"
