@@ -1,0 +1,164 @@
+name: PR339 2288dfe4 database diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-2288dfe4-db-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 2288dfe484bec24ced60fb6eab0977d9559790a4
+  BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+  SCOPE_SHA256: cdcf02d2f487a87e3191de781406fb0bcfb455e21b34f20cc9e75651b499b99c
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    outputs:
+      ex_code: ${{ steps.probe.outputs.ex_code }}
+      ex_state: ${{ steps.probe.outputs.ex_state }}
+      ex_token: ${{ steps.probe.outputs.ex_token }}
+      as_code: ${{ steps.probe.outputs.as_code }}
+      as_state: ${{ steps.probe.outputs.as_state }}
+      as_token: ${{ steps.probe.outputs.as_token }}
+      gr_code: ${{ steps.probe.outputs.gr_code }}
+      gr_state: ${{ steps.probe.outputs.gr_state }}
+      gr_token: ${{ steps.probe.outputs.gr_token }}
+    steps:
+      - name: Validate exact inputs and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Checkout exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run exact-head bounded database probes
+        id: probe
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          actual_sha="$(git rev-parse HEAD)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+          behind="$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")"
+          git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort > "$RUNNER_TEMP/pr339-files.txt"
+          scope_hash="$(sha256sum "$RUNNER_TEMP/pr339-files.txt" | cut -d' ' -f1)"
+          file_count="$(wc -l < "$RUNNER_TEMP/pr339-files.txt" | tr -d ' ')"
+          if [[ "$actual_sha" != "$PRIVATE_SHA" || "$merge_base" != "$BASE_SHA" || "$behind" != 0 || "$file_count" != 35 || "$scope_hash" != "$SCOPE_SHA256" ]]; then
+            echo 'exact_head_scope_mismatch' >&2
+            exit 1
+          fi
+
+          workdir="$RUNNER_TEMP/pr339-2288-db"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/pr339-2288-init.log" 2>&1
+          init=$?
+          if [[ "$init" == 0 ]]; then
+            python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/pr339-2288-bootstrap.log" 2>&1
+            build=$?
+          else
+            build=1
+          fi
+          if [[ "$build" == 0 ]]; then
+            supabase --workdir "$workdir" start > "$RUNNER_TEMP/pr339-2288-start.log" 2>&1
+            start=$?
+          else
+            start=1
+          fi
+
+          run_probe() {
+            local file="$1" log="$2"
+            { printf '\\set VERBOSITY verbose\n'; cat "$file"; } | psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f - > "$log" 2>&1
+            return $?
+          }
+
+          parse_error() {
+            python - "$1" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          states=re.findall(r'ERROR:\s+([0-9A-Z]{5}):',text)
+          errors=re.findall(r'ERROR:\s+(?:[0-9A-Z]{5}:\s*)?([^\r\n]+)',text)
+          message=errors[-1] if errors else ''
+          tokens=[t for t in re.findall(r'\b[A-Z][A-Z0-9_]{3,}\b',message) if t not in {'ERROR','DETAIL','CONTEXT','NOTICE','WARNING'}]
+          if tokens:
+              token=tokens[0][:80]
+          else:
+              lower=message.lower()
+              if 'permission denied' in lower and 'function' in lower: token='FUNCTION_PERMISSION_DENIED'
+              elif 'permission denied' in lower and 'table' in lower: token='TABLE_PERMISSION_DENIED'
+              elif 'permission denied' in lower: token='PERMISSION_DENIED'
+              elif 'does not exist' in lower and 'function' in lower: token='MISSING_FUNCTION'
+              elif 'does not exist' in lower: token='MISSING_OBJECT'
+              elif 'violates' in lower: token='CONSTRAINT_VIOLATION'
+              elif 'syntax error' in lower: token='SQL_SYNTAX'
+              else: token='UNCLASSIFIED'
+          print(states[-1] if states else 'NONE')
+          print(token)
+          PY
+          }
+
+          ex_code=99; as_code=99; gr_code=99
+          ex_state=NOT_RUN; as_state=NOT_RUN; gr_state=NOT_RUN
+          ex_token=NOT_RUN; as_token=NOT_RUN; gr_token=NOT_RUN
+          if [[ "$start" == 0 ]]; then
+            run_probe tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql "$RUNNER_TEMP/pr339-2288-ex.log"
+            ex_code=$?; readarray -t parsed < <(parse_error "$RUNNER_TEMP/pr339-2288-ex.log"); ex_state="${parsed[0]:-NONE}"; ex_token="${parsed[1]:-UNCLASSIFIED}"
+            run_probe tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql "$RUNNER_TEMP/pr339-2288-as.log"
+            as_code=$?; readarray -t parsed < <(parse_error "$RUNNER_TEMP/pr339-2288-as.log"); as_state="${parsed[0]:-NONE}"; as_token="${parsed[1]:-UNCLASSIFIED}"
+            run_probe tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql "$RUNNER_TEMP/pr339-2288-gr.log"
+            gr_code=$?; readarray -t parsed < <(parse_error "$RUNNER_TEMP/pr339-2288-gr.log"); gr_state="${parsed[0]:-NONE}"; gr_token="${parsed[1]:-UNCLASSIFIED}"
+          fi
+
+          {
+            echo "ex_code=$ex_code"
+            echo "ex_state=$ex_state"
+            echo "ex_token=$ex_token"
+            echo "as_code=$as_code"
+            echo "as_state=$as_state"
+            echo "as_token=$as_token"
+            echo "gr_code=$gr_code"
+            echo "gr_state=$gr_state"
+            echo "gr_token=$gr_token"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-2288-db" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-2288-* "$RUNNER_TEMP"/pr339-files.txt
+
+  sanitized-disposition:
+    if: always()
+    needs: diagnose
+    name: 2288-ex${{ needs.diagnose.outputs.ex_code }}-${{ needs.diagnose.outputs.ex_state }}-${{ needs.diagnose.outputs.ex_token }}-as${{ needs.diagnose.outputs.as_code }}-${{ needs.diagnose.outputs.as_state }}-${{ needs.diagnose.outputs.as_token }}-gr${{ needs.diagnose.outputs.gr_code }}-${{ needs.diagnose.outputs.gr_state }}-${{ needs.diagnose.outputs.gr_token }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "bounded_database_diagnostic=published" >> "$GITHUB_STEP_SUMMARY"
