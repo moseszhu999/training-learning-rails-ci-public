@@ -1,0 +1,131 @@
+name: Classroom Lark b7ef9890 application diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/classroom-lark-b7ef9890-app-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: b7ef9890d18a97dc501057c51a955a730b62f53e
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    outputs:
+      syntax_code: ${{ steps.probe.outputs.syntax_code }}
+      node_code: ${{ steps.probe.outputs.node_code }}
+      node_count: ${{ steps.probe.outputs.node_count }}
+      node_passed: ${{ steps.probe.outputs.node_passed }}
+      node_failed: ${{ steps.probe.outputs.node_failed }}
+      python_code: ${{ steps.probe.outputs.python_code }}
+      python_count: ${{ steps.probe.outputs.python_count }}
+      install_code: ${{ steps.probe.outputs.install_code }}
+      typecheck_code: ${{ steps.probe.outputs.typecheck_code }}
+      build_code: ${{ steps.probe.outputs.build_code }}
+    steps:
+      - name: Validate private credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run sealed application diagnosis
+        id: probe
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          syntax_log="$RUNNER_TEMP/lark-app-diag-syntax.log"
+          node_log="$RUNNER_TEMP/lark-app-diag-node.log"
+          python_log="$RUNNER_TEMP/lark-app-diag-python.log"
+          install_log="$RUNNER_TEMP/lark-app-diag-install.log"
+          typecheck_log="$RUNNER_TEMP/lark-app-diag-typecheck.log"
+          build_log="$RUNNER_TEMP/lark-app-diag-build.log"
+
+          {
+            node --check packages/training-classroom-provider/src/provider-adapter.mjs
+            node --check packages/training-classroom-lark/src/lark-adapter.mjs
+            node --check packages/training-classroom-zoom/src/provider-adapter.mjs
+            node --check lib/trainingos-agent-gateway/classroom-lark-adapter.mjs
+            node --check scripts/run-trainingos-classroom-lark-adapter-validation.mjs
+          } > "$syntax_log" 2>&1
+          syntax_code=$?
+
+          node --test \
+            prototypes/trainingos-agent-mvp-v1/classroom-provider-adapter-contract.test.mjs \
+            prototypes/trainingos-agent-mvp-v1/classroom-lark-adapter.test.mjs \
+            > "$node_log" 2>&1
+          node_code=$?
+          node_count="$(grep -E '^# tests ' "$node_log" | tail -1 | awk '{print $3}')"
+          node_passed="$(grep -E '^# pass ' "$node_log" | tail -1 | awk '{print $3}')"
+          node_failed="$(grep -E '^# fail ' "$node_log" | tail -1 | awk '{print $3}')"
+
+          python -m unittest -v tests.test_trainingos_classroom_lark_adapter_contract > "$python_log" 2>&1
+          python_code=$?
+          python_count="$(grep -Eo 'Ran [0-9]+ tests?' "$python_log" | tail -1 | awk '{print $2}')"
+
+          npm ci > "$install_log" 2>&1
+          install_code=$?
+          typecheck_code=99
+          build_code=99
+          if [[ "$install_code" == 0 ]]; then
+            npm run typecheck > "$typecheck_log" 2>&1
+            typecheck_code=$?
+            npm run build > "$build_log" 2>&1
+            build_code=$?
+          fi
+
+          {
+            echo "syntax_code=$syntax_code"
+            echo "node_code=$node_code"
+            echo "node_count=${node_count:-0}"
+            echo "node_passed=${node_passed:-0}"
+            echo "node_failed=${node_failed:--1}"
+            echo "python_code=$python_code"
+            echo "python_count=${python_count:-0}"
+            echo "install_code=$install_code"
+            echo "typecheck_code=$typecheck_code"
+            echo "build_code=$build_code"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cleanup sealed application logs
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP"/lark-app-diag-*.log
+
+  sanitized-disposition:
+    if: always()
+    needs: diagnose
+    name: result-s${{ needs.diagnose.outputs.syntax_code }}-n${{ needs.diagnose.outputs.node_code }}-${{ needs.diagnose.outputs.node_passed }}of${{ needs.diagnose.outputs.node_count }}-f${{ needs.diagnose.outputs.node_failed }}-p${{ needs.diagnose.outputs.python_code }}-${{ needs.diagnose.outputs.python_count }}-i${{ needs.diagnose.outputs.install_code }}-t${{ needs.diagnose.outputs.typecheck_code }}-b${{ needs.diagnose.outputs.build_code }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "sanitized_application_diagnostic=published" >> "$GITHUB_STEP_SUMMARY"
