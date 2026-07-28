@@ -1,0 +1,284 @@
+name: Classroom Agent Queue exact-head CI
+
+on:
+  push:
+    branches:
+      - ci/classroom-agent-queue-b91c3135
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-agent-queue-b91c3135.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-agent-queue-b91c3135-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: 7751ec7d0e0535036c500e315078646ef1dc81f2
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head, merge base and file scope
+        id: scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          actual_merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+          actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'docs/product/trainingos-classroom-agent-queue-integration-v1.md\nlib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs\nlib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs\nlib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs\nlib/trainingos-agent-gateway/persistent-teacher-agent.mjs\nlib/trainingos-agent-gateway/teacher-action-queue.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs\nprototypes/trainingos-agent-mvp-v1/zero-permission-mcp-composition.test.mjs\nsupabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql\ntests/test_trainingos_classroom_agent_queue_integration_contract.py'
+          [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+          [[ "$actual_merge_base" == "$BASE_SHA" ]]
+          [[ "$actual_files" == "$expected_files" ]]
+          echo PASS > "$RUNNER_TEMP/caq-scope.status"
+          echo "actual_sha=$actual_sha" >> "$GITHUB_OUTPUT"
+          echo "merge_base=$actual_merge_base" >> "$GITHUB_OUTPUT"
+          echo "changed_file_count=$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Run Gateway syntax checks with sealed output
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check lib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs
+            node --check lib/trainingos-agent-gateway/persistent-teacher-agent.mjs
+            node --check lib/trainingos-agent-gateway/teacher-action-queue.mjs
+            node --check lib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs
+            node --check lib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs
+          } > "$RUNNER_TEMP/caq-syntax.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-syntax.status" || echo FAIL > "$RUNNER_TEMP/caq-syntax.status"
+          exit "$code"
+
+      - name: Run focused Node contracts with sealed output
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs > "$RUNNER_TEMP/caq-node.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/caq-node.log" "$code" "$RUNNER_TEMP/caq-node.status" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          tests = re.search(r'# tests\s+(\d+)', text)
+          passed = re.search(r'# pass\s+(\d+)', text)
+          failed = re.search(r'# fail\s+(\d+)', text)
+          count = int(tests.group(1)) if tests else 0
+          passed_count = int(passed.group(1)) if passed else 0
+          failed_count = int(failed.group(1)) if failed else -1
+          ok = code == 0 and count == 5 and passed_count == 5 and failed_count == 0
+          pathlib.Path(sys.argv[3]).write_text(f'{"PASS" if ok else "FAIL"} {passed_count}/{count}', encoding='utf-8')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Run focused Python contracts with sealed output
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python tests/test_trainingos_classroom_agent_queue_integration_contract.py > "$RUNNER_TEMP/caq-python.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/caq-python.log" "$code" "$RUNNER_TEMP/caq-python.status" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          ok = code == 0 and count == 8 and re.search(r'\nOK\s*$', text) is not None
+          pathlib.Path(sys.argv[3]).write_text(f'{"PASS" if ok else "FAIL"} {count if ok else 0}/{count}', encoding='utf-8')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Run merged queue and Persistent Agent regression contracts
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --test prototypes/trainingos-agent-mvp-v1/teacher-action-queue.test.mjs
+            node --test prototypes/trainingos-agent-mvp-v1/persistent-teacher-agent.test.mjs
+            python tests/test_trainingos_teacher_action_queue_contract.py
+            python tests/test_trainingos_persistent_teacher_agent_contract.py
+            python tests/test_trainingos_persistent_teacher_agent_draft_execution_contract.py
+          } > "$RUNNER_TEMP/caq-regressions.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-regressions.status" || echo FAIL > "$RUNNER_TEMP/caq-regressions.status"
+          exit "$code"
+
+      - name: Install private repository dependencies with sealed output
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/caq-install.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-install.status" || echo FAIL > "$RUNNER_TEMP/caq-install.status"
+          exit "$code"
+
+      - name: Run repository typecheck with sealed output
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/caq-typecheck.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-typecheck.status" || echo FAIL > "$RUNNER_TEMP/caq-typecheck.status"
+          exit "$code"
+
+      - name: Run Native Classroom prebuild validation
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node scripts/run-trainingos-native-classroom-validation.mjs > "$RUNNER_TEMP/caq-native.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-native.status" || echo FAIL > "$RUNNER_TEMP/caq-native.status"
+          exit "$code"
+
+      - name: Run zero-permission bridge prebuild validation
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node scripts/run-trainingos-zero-permission-bridge-validation.mjs > "$RUNNER_TEMP/caq-zero-permission.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-zero-permission.status" || echo FAIL > "$RUNNER_TEMP/caq-zero-permission.status"
+          exit "$code"
+
+      - name: Run Learning Workspace prebuild validation
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node scripts/run-trainingos-learning-workspace-bridge-validation.mjs > "$RUNNER_TEMP/caq-learning-workspace.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-learning-workspace.status" || echo FAIL > "$RUNNER_TEMP/caq-learning-workspace.status"
+          exit "$code"
+
+      - name: Run VS Code production bundle
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node extensions/trainingos-classroom-vscode/esbuild.mjs --production > "$RUNNER_TEMP/caq-vscode.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-vscode.status" || echo FAIL > "$RUNNER_TEMP/caq-vscode.status"
+          exit "$code"
+
+      - name: Run Vite production build
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npx vite build --config vite.config.ts > "$RUNNER_TEMP/caq-vite.log" 2>&1
+          code=$?
+          [[ "$code" == "0" ]] && echo PASS > "$RUNNER_TEMP/caq-vite.status" || echo FAIL > "$RUNNER_TEMP/caq-vite.status"
+          exit "$code"
+
+      - name: Publish sanitized exact-head result
+        if: always()
+        shell: bash
+        env:
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const read = (name) => {
+            try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8').trim(); }
+            catch { return 'NOT_RUN'; }
+          };
+          const result = {
+            scope: read('caq-scope.status'), syntax: read('caq-syntax.status'),
+            node: read('caq-node.status'), python: read('caq-python.status'),
+            regressions: read('caq-regressions.status'), install: read('caq-install.status'),
+            typecheck: read('caq-typecheck.status'), native: read('caq-native.status'),
+            zeroPermission: read('caq-zero-permission.status'),
+            learningWorkspace: read('caq-learning-workspace.status'),
+            vscode: read('caq-vscode.status'), vite: read('caq-vite.status'),
+          };
+          const lines = [
+            '## Classroom Agent Queue exact-head CI', '',
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}\``,
+            `- Exact merge base: \`${process.env.MERGE_BASE || process.env.BASE_SHA}\``,
+            `- Merge scope: **${result.scope} (${process.env.CHANGED_FILE_COUNT || '0'} files)**`,
+            `- Gateway syntax: **${result.syntax}**`,
+            `- Focused Node: **${result.node}**`,
+            `- Focused Python: **${result.python}**`,
+            `- Queue / Persistent Agent regressions: **${result.regressions}**`,
+            `- npm ci: **${result.install}**`,
+            `- Repository typecheck: **${result.typecheck}**`,
+            `- Native Classroom validation: **${result.native}**`,
+            `- Zero-permission validation: **${result.zeroPermission}**`,
+            `- Learning Workspace validation: **${result.learningWorkspace}**`,
+            `- VS Code production bundle: **${result.vscode}**`,
+            `- Vite production build: **${result.vite}**`, '',
+            'Raw private output is sealed and deleted. No private source, fixtures, identifiers, or logs are published.',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`CLASSROOM_AGENT_QUEUE_EXACT_CI ${Object.entries(result).map(([k,v]) => `${k}=${v}`).join(' ')} sha=${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}`);
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/caq-*.log "$RUNNER_TEMP"/caq-*.status
