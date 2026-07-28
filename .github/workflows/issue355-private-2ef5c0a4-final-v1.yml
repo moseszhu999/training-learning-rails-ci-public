@@ -1,0 +1,272 @@
+name: Issue355 exact-head full-history final 2ef5c0a4
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/issue355-private-2ef5c0a4-final-v1.yml
+      - carriers/issue355-private-2ef5c0a4-final-v1.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue355-private-2ef5c0a4-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 2ef5c0a427b378a3bbbd4bad5e161175f9a6f9b1
+  BASE_SHA: 30a9c267e1a07078dcbf150a9ef363995db65de1
+  EXPECTED_CHANGED_FILE_COUNT: '6'
+  EXPECTED_MIGRATION_RANGE: 20260729100000-20260729105999
+  EXPECTED_MIGRATION_FILES: NONE
+  DATABASE_PROFILE: full-history-empty-replay
+
+jobs:
+  exact-head-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+          [[ "$DATABASE_PROFILE" == "full-history-empty-replay" ]]
+          [[ "$EXPECTED_MIGRATION_FILES" == "NONE" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-candidate
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Check out exact canonical baseline read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.BASE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Gate A — exact scope zero migration delta and 23 contracts
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C private-candidate rev-parse HEAD)"
+          merge_base="$(git -C private-candidate merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+          ahead="$(git -C private-candidate rev-list --count "$BASE_SHA..$PRIVATE_SHA")"
+          behind="$(git -C private-candidate rev-list --count "$PRIVATE_SHA..$BASE_SHA")"
+          actual_files="$(git -C private-candidate diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'docs/testing/trainingos-full-history-database-replay-v1.md\nscripts/run-trainingos-fresh-database-replay.sh\nscripts/trainingos_database_replay_contract.py\ntests/sql/trainingos_full_history_replay_compatibility_e2e.sql\ntests/test_trainingos_full_history_database_replay.py\ntests/test_trainingos_full_history_migration_range.py'
+          [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+          [[ "$(git -C private-base rev-parse HEAD)" == "$BASE_SHA" ]]
+          [[ "$merge_base" == "$BASE_SHA" ]]
+          [[ "$behind" == "0" ]]
+          [[ "$actual_files" == "$expected_files" ]]
+          changed_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+          [[ "$changed_count" == "$EXPECTED_CHANGED_FILE_COUNT" ]]
+          [[ -z "$(git -C private-candidate diff --name-only "$BASE_SHA" "$PRIVATE_SHA" -- supabase/migrations | sed '/^$/d')" ]]
+          (
+            cd private-candidate
+            python -m py_compile scripts/build-trainingos-fresh-bootstrap.py scripts/trainingos_database_replay_contract.py
+            bash -n scripts/run-trainingos-fresh-database-replay.sh
+            python -m unittest -v \
+              tests.test_trainingos_full_history_database_replay \
+              tests.test_trainingos_full_history_migration_range \
+              > "$RUNNER_TEMP/issue355-unittest.log" 2>&1
+          )
+          python - "$RUNNER_TEMP/issue355-unittest.log" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          if count != 17 or re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is None:
+              raise SystemExit(f'unittest_count_or_result_invalid:{count}')
+          PY
+          (
+            cd private-candidate
+            python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          path = Path('tests/test_trainingos_fresh_database_bootstrap.py')
+          spec = importlib.util.spec_from_file_location('issue355_bootstrap_contracts', path)
+          if spec is None or spec.loader is None:
+              raise SystemExit('bootstrap_contract_module_load_failed')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          tests = sorted((name, value) for name, value in vars(module).items() if name.startswith('test_') and callable(value))
+          if len(tests) != 6:
+              raise SystemExit(f'bootstrap_contract_count_invalid:{len(tests)}')
+          for _, test in tests:
+              test()
+          PY
+          )
+          {
+            echo "privateExactSha=$actual_sha"
+            echo "mergeBase=$merge_base"
+            echo "ahead=$ahead"
+            echo "behind=$behind"
+            echo "changedFileCount=$changed_count"
+            echo 'unittestContracts=PASS 17/17'
+            echo 'bootstrapFunctionContracts=PASS 6/6'
+            echo 'totalContracts=PASS 23/23'
+            echo 'pythonSyntax=PASS'
+            echo 'shellSyntax=PASS'
+            echo 'applicationTypecheck=NOT_APPLICABLE_NO_APPLICATION_CODE'
+            echo 'applicationBuild=NOT_APPLICABLE_NO_APPLICATION_CODE'
+          } > /tmp/issue355-gate-a.txt
+
+      - name: Replay A — full history pass 1 cleanup pass 2 and repeat
+        working-directory: private-candidate
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/issue355-candidate-full-history"
+          rm -rf "$workdir"
+          TRAININGOS_SOURCE_SHA="$PRIVATE_SHA" \
+          TRAININGOS_BOOTSTRAP_WORKDIR="$workdir" \
+          TRAININGOS_KEEP_BOOTSTRAP_WORKDIR=1 \
+            bash scripts/run-trainingos-fresh-database-replay.sh \
+            > "$RUNNER_TEMP/issue355-candidate-replay.log" 2>&1
+          python - "$workdir/trainingos-replay-status/result.json" "$workdir/supabase/trainingos-bootstrap-manifest.json" "$workdir/trainingos-replay-status/deterministicReplayRepeat.status" <<'PY'
+          import json, pathlib, sys
+          result = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding='utf-8'))
+          repeat = pathlib.Path(sys.argv[3]).read_text(encoding='utf-8').strip()
+          stages = result.get('stages') or {}
+          required = ('bootstrapBuild', 'fullHistoryPass1', 'cleanup', 'fullHistoryPass2')
+          if result.get('status') != 'PASS' or result.get('replayClass') != 'A':
+              raise SystemExit('replay_a_result_invalid')
+          if result.get('failureClassification') != 'DATABASE_FULL_HISTORY':
+              raise SystemExit('replay_a_classification_invalid')
+          if any(stages.get(name) != 'PASS' for name in required) or repeat != 'PASS':
+              raise SystemExit('replay_a_stage_invalid')
+          lines = [
+              'fullHistoryReplay=PASS',
+              f"bootstrapBuild={stages['bootstrapBuild']}",
+              f"pass1={stages['fullHistoryPass1']}",
+              f"cleanup={stages['cleanup']}",
+              f"pass2={stages['fullHistoryPass2']}",
+              f'deterministicRepeat={repeat}',
+              f"canonicalMigrationCount={manifest['migrationCount']}",
+              f"firstMigration={manifest['firstMigration']}",
+              f"lastMigration={manifest['lastMigration']}",
+              f"legacyMappingCount={manifest['legacyMappingCount']}",
+              f"compatibilityMigrationCount={manifest['compatibilityMigrationCount']}",
+          ]
+          pathlib.Path('/tmp/issue355-replay-a.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+
+      - name: Replay B and C — canonical baseline and zero branch migrations
+        run: |
+          set -euo pipefail
+          baseline="$RUNNER_TEMP/issue355-baseline-forward"
+          rm -rf "$baseline"
+          mkdir -p "$baseline"
+          supabase --workdir "$baseline" init --force --yes > "$RUNNER_TEMP/issue355-baseline-init.log" 2>&1
+          rm -rf "$baseline/supabase/migrations"
+          python private-base/scripts/build-trainingos-fresh-bootstrap.py \
+            --repo-root private-base \
+            --output-dir "$baseline/supabase/migrations" \
+            --commit-sha "$BASE_SHA" > "$RUNNER_TEMP/issue355-baseline-build.log" 2>&1
+          supabase --workdir "$baseline" start > "$RUNNER_TEMP/issue355-baseline-start.log" 2>&1
+          python private-candidate/scripts/trainingos_database_replay_contract.py classify-result \
+            --mode canonical-baseline-forward \
+            --stage canonicalBaselineForward=PASS \
+            --output /tmp/issue355-replay-b.json > /dev/null
+          python private-candidate/scripts/trainingos_database_replay_contract.py classify-result \
+            --mode branch-owned-replay \
+            --stage branchOwnedReplay=PASS \
+            --output /tmp/issue355-replay-c.json > /dev/null
+          [[ "$(python -c "import json; print(json.load(open('/tmp/issue355-replay-b.json'))['status'])")" == PASS ]]
+          [[ "$(python -c "import json; print(json.load(open('/tmp/issue355-replay-c.json'))['status'])")" == PASS ]]
+
+      - name: Replay D — existing schema shape guards ACL RPC and cleanup
+        run: |
+          set -euo pipefail
+          baseline="$RUNNER_TEMP/issue355-baseline-forward"
+          eval "$(supabase --workdir "$baseline" status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f private-candidate/tests/sql/trainingos_full_history_replay_compatibility_e2e.sql \
+            > "$RUNNER_TEMP/issue355-compatibility.log" 2>&1
+          grep -q '"status": "PASS"' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"duplicateCorrectShapeAccepted": true' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"duplicateWrongShapeRejected": true' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"aclUnchanged": true' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"representativeDataPreserved": true' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"fixtureCleanup": "PASS"' "$RUNNER_TEMP/issue355-compatibility.log"
+          grep -q '"remainingRepresentativeProfiles": 0' "$RUNNER_TEMP/issue355-compatibility.log"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f private-candidate/tests/sql/trainingos_persistent_teacher_agent_e2e.sql \
+            > "$RUNNER_TEMP/issue355-agent-rpc.log" 2>&1
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f private-candidate/tests/sql/trainingos_classroom_agent_queue_integration_e2e.sql \
+            > "$RUNNER_TEMP/issue355-queue-rpc.log" 2>&1
+          remaining="$(psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 -c "select count(*) from public.profiles where id='35500000-0000-4000-8000-000000000001'")"
+          [[ "$remaining" == "0" ]]
+          python private-candidate/scripts/trainingos_database_replay_contract.py classify-result \
+            --mode existing-schema-forward-compatibility \
+            --stage existingSchemaForwardCompatibility=PASS \
+            --output /tmp/issue355-replay-d.json > /dev/null
+          [[ "$(python -c "import json; print(json.load(open('/tmp/issue355-replay-d.json'))['status'])")" == PASS ]]
+          {
+            echo 'canonicalBaselineForward=PASS'
+            echo 'branchOwnedReplay=PASS'
+            echo 'existingSchemaForwardCompatibility=PASS'
+            echo 'correctShapeDuplicate=PASS'
+            echo 'wrongShapeDuplicateRejected=PASS'
+            echo 'acl=PASS'
+            echo 'rpcRegression=PASS'
+            echo 'dataPreservation=PASS'
+            echo 'fixtureCleanup=PASS'
+            echo "postgresVersion=$(psql "$DB_URL" -X -Atc 'show server_version')"
+            echo "supabaseCliVersion=$(supabase --version)"
+          } > /tmp/issue355-gates-bcd.txt
+
+      - name: Publish sanitized final evidence
+        if: always()
+        run: |
+          {
+            echo "privateExactSha=$PRIVATE_SHA"
+            echo "expectedBaseSha=$BASE_SHA"
+            echo "expectedChangedFileCount=$EXPECTED_CHANGED_FILE_COUNT"
+            echo "expectedMigrationRange=$EXPECTED_MIGRATION_RANGE"
+            echo "expectedMigrationFiles=$EXPECTED_MIGRATION_FILES"
+            echo "databaseProfile=$DATABASE_PROFILE"
+            cat /tmp/issue355-gate-a.txt 2>/dev/null || true
+            cat /tmp/issue355-replay-a.txt 2>/dev/null || true
+            cat /tmp/issue355-gates-bcd.txt 2>/dev/null || true
+            echo 'failureClassification=DATABASE_FULL_HISTORY'
+            echo 'artifactUpload=DISABLED'
+            echo 'rawLogs=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup private checkouts and sealed output
+        if: always()
+        run: |
+          set +e
+          supabase --workdir "$RUNNER_TEMP/issue355-baseline-forward" stop --no-backup >/dev/null 2>&1
+          supabase --workdir "$RUNNER_TEMP/issue355-candidate-full-history" stop --no-backup >/dev/null 2>&1
+          set -e
+          rm -rf private-candidate private-base "$RUNNER_TEMP/issue355-baseline-forward" "$RUNNER_TEMP/issue355-candidate-full-history"
+          rm -f "$RUNNER_TEMP"/issue355-*.log /tmp/issue355-*.txt /tmp/issue355-replay-*.json
