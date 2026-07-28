@@ -1,4 +1,4 @@
-name: PR339 2288 business diagnostic
+name: PR339 0b944 canonical business diagnostic
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  PRIVATE_SHA: 2288dfe484bec24ced60fb6eab0977d9559790a4
+  PRIVATE_SHA: 0b94438ee73be768194c4f56ac31250cd6c9476e
   BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
   DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
@@ -43,7 +43,7 @@ jobs:
         working-directory: private-repo
         run: |
           set -euo pipefail
-          workdir="$RUNNER_TEMP/pr339-2288-db"
+          workdir="$RUNNER_TEMP/pr339-0b944-db"
           supabase --workdir "$workdir" init --force --yes >/dev/null 2>&1
           python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" >/dev/null 2>&1
           supabase --workdir "$workdir" start >/dev/null 2>&1
@@ -54,7 +54,7 @@ jobs:
         run: |
           set +e
           stage=NONE; failed="$RUNNER_TEMP/none.log"
-          for item in exercise:tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql assessment:tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql grading_result:tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql
+          for item in exercise:tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql assessment:tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql grading_result:tests/sql/trainingos_wave3_assessment_grading_result_canonical_bridge_e2e.sql
           do
             name="${item%%:*}"; file="${item#*:}"; log="$RUNNER_TEMP/$name.log"
             psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f "$file" >"$log" 2>&1
@@ -77,7 +77,7 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          supabase --workdir "$RUNNER_TEMP/pr339-2288-db" stop --no-backup >/dev/null 2>&1 || true
+          supabase --workdir "$RUNNER_TEMP/pr339-0b944-db" stop --no-backup >/dev/null 2>&1 || true
           rm -rf private-repo "$RUNNER_TEMP"/pr339-*
 
   disposition:
