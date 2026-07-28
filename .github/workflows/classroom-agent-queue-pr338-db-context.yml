@@ -1,4 +1,4 @@
-name: Classroom Agent Queue PR338 DB error context
+name: Classroom Agent Queue PR338 DB contract diagnosis
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ permissions:
 jobs:
   sanitized-context:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       PRIVATE_SHA: 7751ec7d0e0535036c500e315078646ef1dc81f2
       BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
@@ -32,42 +32,95 @@ jobs:
         with:
           version: latest
           github-token: ${{ github.token }}
-      - name: Produce redacted database error context
+      - name: Diagnose base Queue contract and candidate fix
         shell: bash
         run: |
           set -euo pipefail
           [[ "$(git -C private-repo rev-parse HEAD)" == "$PRIVATE_SHA" ]]
           [[ "$(git -C private-repo merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
-          mkdir -p replay-project sanitized
+          mkdir -p replay-project sanitized held-migrations
           supabase --workdir replay-project init --force --yes >/dev/null
           rm -rf replay-project/supabase/migrations
           python private-repo/scripts/build-trainingos-fresh-bootstrap.py \
             --repo-root private-repo \
             --output-dir replay-project/supabase/migrations \
             --commit-sha "$PRIVATE_SHA" >/dev/null
-          set +e
-          supabase --workdir replay-project start > "$RUNNER_TEMP/pr338-db-context.log" 2>&1
-          code=$?
-          set -e
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/pr338-db-context.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/pr338-db-context.log" | tail -1 | sed -E 's/.*Applying migration ([A-Za-z0-9_.-]+).*/\1/' || true)"
-          grep -E 'ERROR:|CONTEXT:' "$RUNNER_TEMP/pr338-db-context.log" \
-            | tail -8 \
-            | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g; s#https?://[^ ]+#<url>#g' \
-            | cut -c1-500 \
-            > sanitized/error-context.txt || true
+
+          target="replay-project/supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql"
+          cp "$target" held-migrations/original.sql
+          rm -f \
+            replay-project/supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql \
+            replay-project/supabase/migrations/20260728190000_trainingos_classroom_zoom_adapter_schema_v1.sql \
+            replay-project/supabase/migrations/20260728190100_trainingos_classroom_zoom_adapter_rpc_v1.sql
+
+          supabase --workdir replay-project start > "$RUNNER_TEMP/pr338-base-start.log" 2>&1
+          eval "$(supabase --workdir replay-project status -o env | grep '^DB_URL=')"
+
+          psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/pr338-base-definitions.txt" <<'SQL'
+          select pg_get_functiondef(p.oid)
+          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public'
+            and p.proname in ('get_trainingos_teacher_action_queue','trigger_trainingos_teacher_agent_from_queue')
+          order by p.proname,pg_get_function_identity_arguments(p.oid);
+          SQL
+
           {
             echo "private_sha=$PRIVATE_SHA"
             echo "base_sha=$BASE_SHA"
-            echo "status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL)"
-            echo "applied_count=$applied"
-            echo "last_migration=${last:-none}"
-            echo '[redacted_error_context]'
-            cat sanitized/error-context.txt
+            echo '[base_queue_contract_lines]'
+            grep -Ei 'p_limit|LIMIT_INVALID|get_trainingos_teacher_action_queue\(' "$RUNNER_TEMP/pr338-base-definitions.txt" \
+              | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g' \
+              | head -40 || true
           } > sanitized/pr338-db-context.txt
-          rm -f sanitized/error-context.txt "$RUNNER_TEMP/pr338-db-context.log"
+
+          set +e
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f held-migrations/original.sql \
+            > "$RUNNER_TEMP/pr338-original.log" 2>&1
+          original_code=$?
+          set -e
+          {
+            echo "original_status=$([[ "$original_code" == 0 ]] && echo PASS || echo FAIL)"
+            echo '[original_redacted_error_context]'
+            grep -Ei -B4 -A8 'TRAININGOS_TEACHER_ACTION_QUEUE_LIMIT_INVALID|SQLSTATE|CONTEXT:|PL/pgSQL|ERROR' \
+              "$RUNNER_TEMP/pr338-original.log" \
+              | tail -40 \
+              | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g; s#https?://[^ ]+#<url>#g' \
+              | cut -c1-600 || true
+          } >> sanitized/pr338-db-context.txt
+
+          supabase --workdir replay-project db reset --local --no-seed \
+            > "$RUNNER_TEMP/pr338-base-reset.log" 2>&1
+
+          cp held-migrations/original.sql held-migrations/candidate.sql
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('held-migrations/candidate.sql')
+          text = path.read_text()
+          old = 'v_base := public.get_trainingos_teacher_action_queue(p_class_id,p_as_of,p_horizon_days,500);'
+          new = 'v_base := public.get_trainingos_teacher_action_queue(p_class_id,p_as_of,p_horizon_days,least(p_limit,200));'
+          if text.count(old) != 1:
+              raise SystemExit(f'candidate_anchor_count={text.count(old)}')
+          path.write_text(text.replace(old,new))
+          PY
+
+          set +e
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f held-migrations/candidate.sql \
+            > "$RUNNER_TEMP/pr338-candidate.log" 2>&1
+          candidate_code=$?
+          set -e
+          {
+            echo "candidate_status=$([[ "$candidate_code" == 0 ]] && echo PASS || echo FAIL)"
+            echo '[candidate_redacted_error_context]'
+            grep -Ei -B4 -A8 'TRAININGOS_[A-Z0-9_]+|SQLSTATE|CONTEXT:|PL/pgSQL|ERROR' \
+              "$RUNNER_TEMP/pr338-candidate.log" \
+              | tail -40 \
+              | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g; s#https?://[^ ]+#<url>#g' \
+              | cut -c1-600 || true
+          } >> sanitized/pr338-db-context.txt
+
           supabase --workdir replay-project stop --no-backup || true
-          rm -rf private-repo replay-project
+          rm -rf private-repo replay-project held-migrations
+          rm -f "$RUNNER_TEMP"/pr338-*.log "$RUNNER_TEMP/pr338-base-definitions.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: classroom-agent-queue-pr338-db-context
