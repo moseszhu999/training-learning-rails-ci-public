@@ -1,0 +1,84 @@
+name: PR339 bootstrap duplicate-object diagnostic v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-db-bootstrap-diagnostic-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: dddfec403fad343ce22af1c61dc1b7c5e1ad6215
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Build start and extract bounded error identity
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr339-diag-v2"
+          mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes >/dev/null 2>&1
+          python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" >/dev/null 2>&1
+          supabase --workdir "$workdir" start --debug > "$RUNNER_TEMP/pr339-diag-v2.log" 2>&1
+          code=$?
+          set -e
+          python - "$RUNNER_TEMP/pr339-diag-v2.log" "$code" <<'PY' | tee "$GITHUB_WORKSPACE/pr339-db-diagnostic-v2.txt" >> "$GITHUB_STEP_SUMMARY"
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          lines=text.splitlines()
+          candidates=[]
+          for line in lines:
+              if re.search(r'ERROR:|failed to apply migration|already exists|duplicate|cannot change name|is not unique',line,re.I):
+                  clean=re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}','<uuid>',line,flags=re.I)
+                  clean=re.sub(r'/home/runner/[^ :]+','<runner-path>',clean)
+                  clean=re.sub(r'postgresql://\S+','<database-url>',clean)
+                  clean=' '.join(clean.split())[:420]
+                  candidates.append(clean)
+          object_tokens=[]
+          for pattern in (r'(?:function|procedure|relation|constraint|index|trigger|schema|type)\s+"?([A-Za-z0-9_.() ,]+)"?\s+(?:already exists|is not unique)',r'already exists[^\n]*?([A-Za-z_][A-Za-z0-9_.]+)'):
+              for value in re.findall(pattern,text,re.I):
+                  value=' '.join(value.split())[:180]
+                  if value not in object_tokens: object_tokens.append(value)
+          migrations=re.findall(r'Applying migration\s+([^\s]+)',text)
+          states=re.findall(r'(?:SQLSTATE|SQL state:|code:)[ =:]+([0-9A-Z]{5})',text)
+          print(f'exact_private_sha={sys.argv[2] and "dddfec403fad343ce22af1c61dc1b7c5e1ad6215"}')
+          print(f'start_exit={sys.argv[2]}')
+          print(f'last_migration={migrations[-1] if migrations else "NONE"}')
+          print(f'sqlstate={states[-1] if states else "NONE"}')
+          print(f'object_identity={"|".join(object_tokens[:5]) if object_tokens else "NONE"}')
+          print(f'error_lines={" || ".join(candidates[-4:]) if candidates else "NONE"}')
+          print('raw_private_output=SEALED_AND_DELETED')
+          PY
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr339-db-diagnostic-v2
+          path: pr339-db-diagnostic-v2.txt
+          retention-days: 3
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-diag-v2" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-diag-v2* pr339-db-diagnostic-v2.txt
