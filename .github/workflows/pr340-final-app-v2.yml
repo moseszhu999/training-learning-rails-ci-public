@@ -1,0 +1,97 @@
+name: PR340 synchronized Classroom Lark application v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr340-final-app-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: b7ef9890d18a97dc501057c51a955a730b62f53e
+  BASE_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Validate credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact head and scope
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+          test "$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | wc -l | tr -d ' ')" = 20
+      - name: Syntax and focused contracts
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          node --check packages/training-classroom-provider/src/provider-adapter.mjs
+          node --check packages/training-classroom-zoom/src/provider-adapter.mjs
+          node --check packages/training-classroom-lark/src/lark-adapter.mjs
+          node --check lib/trainingos-agent-gateway/classroom-zoom-adapter.mjs
+          node --check lib/trainingos-agent-gateway/classroom-lark-adapter.mjs
+          node --check scripts/run-trainingos-classroom-lark-adapter-validation.mjs
+          node scripts/run-trainingos-classroom-lark-adapter-validation.mjs > "$RUNNER_TEMP/pr340-node-v2.log" 2>&1
+          python - "$RUNNER_TEMP/pr340-node-v2.log" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          tests=re.search(r'# tests\s+(\d+)',text); passed=re.search(r'# pass\s+(\d+)',text); failed=re.search(r'# fail\s+(\d+)',text)
+          values=(int(tests.group(1)) if tests else 0,int(passed.group(1)) if passed else 0,int(failed.group(1)) if failed else -1)
+          print('PR340_TAP',values)
+          raise SystemExit(0 if values==(16,16,0) else 1)
+          PY
+          python tests/test_trainingos_classroom_lark_adapter_contract.py > "$RUNNER_TEMP/pr340-python-v2.log" 2>&1
+          python - "$RUNNER_TEMP/pr340-python-v2.log" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace'); ran=re.search(r'Ran\s+(\d+)\s+tests?',text)
+          assert ran and int(ran.group(1))==11 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text),text[-500:]
+          PY
+      - name: Install typecheck and build
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          npm ci > "$RUNNER_TEMP/pr340-install-v2.log" 2>&1
+          npm run typecheck > "$RUNNER_TEMP/pr340-typecheck-v2.log" 2>&1
+          npm run build > "$RUNNER_TEMP/pr340-build-v2.log" 2>&1
+      - name: Sanitized result
+        run: |
+          {
+            echo 'exact_private_sha=b7ef9890d18a97dc501057c51a955a730b62f53e'
+            echo 'scope=PASS_20_FILES'
+            echo 'syntax=PASS_6_6'
+            echo 'node=PASS_16_16'
+            echo 'python=PASS_11_11'
+            echo 'install_typecheck_build=PASS'
+            echo 'raw_private_output=SEALED_AND_DELETED'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP"/pr340-*-v2.log
