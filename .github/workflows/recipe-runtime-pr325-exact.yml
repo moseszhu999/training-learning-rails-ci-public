@@ -82,65 +82,84 @@ jobs:
         shell: bash
         run: supabase start > "$RUNNER_TEMP/recipe-canonical-start.log" 2>&1
 
-      - name: Capture sanitized transactional SQL E2E diagnosis
+      - name: Capture sanitized transactional SQL E2E result
         id: e2e
         working-directory: replay-project
         shell: bash
         run: |
           set +e
           eval "$(supabase status -o env | grep '^DB_URL=')"
-          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+          psql "$DB_URL" -X -qAt -1 -v ON_ERROR_STOP=1 \
             -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
             > "$RUNNER_TEMP/recipe-sql-e2e.log" 2>&1
           code=$?
           CODE="$code" PRIVATE_SHA="$PRIVATE_SHA" python - "$RUNNER_TEMP/recipe-sql-e2e.log" "$RUNNER_TEMP/recipe-sql-e2e-diagnostic.json" <<'PY'
           import hashlib, json, os, pathlib, re, sys
           text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
-          lower=text.lower()
+          payloads=[]
+          for line in text.splitlines():
+              line=line.strip()
+              if line.startswith('{'):
+                  try: payloads.append(json.loads(line))
+                  except json.JSONDecodeError: pass
+          result=payloads[-1] if payloads else {}
+          residue=result.get('residue') or {}
+          cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
+          expected=(result.get('status')=='PASS'
+              and result.get('canonicalExecutionReused') is True
+              and result.get('canonicalExecutionCount')==1
+              and result.get('triggerReceiptCount')==2
+              and result.get('formalWritePerformed') is False
+              and result.get('badSourceDigestDenied') is True
+              and result.get('humanInitialTriggerDenied') is True
+              and result.get('humanReplayDenied') is True
+              and result.get('changedExecutorProvenanceDenied') is True
+              and cleanup)
           custom=re.findall(r'ERROR:\s+([A-Z][A-Z0-9_]+)',text)
           relation=re.findall(r'relation\s+["\']([^"\']+)["\']\s+does not exist',text,re.I)
           column=re.findall(r'column\s+["\']?([a-zA-Z0-9_.]+)["\']?\s+does not exist',text,re.I)
           function=re.findall(r'function\s+([a-zA-Z0-9_.]+)\([^\n]*does not exist',text,re.I)
-          sqlstate=None
-          for pattern in [r'SQL state:\s*([0-9A-Z]{5})',r'SQLSTATE[=: ]+([0-9A-Z]{5})']:
-              match=re.search(pattern,text,re.I)
-              if match:
-                  sqlstate=match.group(1).upper(); break
-          if custom: error_class='custom_recipe_assertion'
+          if int(os.environ['CODE'])==0 and expected: error_class=None
+          elif custom: error_class='custom_recipe_assertion'
           elif relation: error_class='missing_relation'
           elif column: error_class='missing_column'
           elif function: error_class='missing_function'
-          elif 'violates not-null constraint' in lower: error_class='not_null_violation'
-          elif 'violates check constraint' in lower: error_class='check_violation'
-          elif 'violates foreign key constraint' in lower: error_class='foreign_key_violation'
-          elif int(os.environ['CODE'])==0: error_class=None
+          elif 'violates not-null constraint' in text.lower(): error_class='not_null_violation'
+          elif 'violates check constraint' in text.lower(): error_class='check_violation'
+          elif 'violates foreign key constraint' in text.lower(): error_class='foreign_key_violation'
+          elif int(os.environ['CODE'])==0: error_class='evidence_mismatch'
           else: error_class='unknown_sql_e2e_failure'
-          missing_object=(relation or column or function or [None])[-1]
+          missing=(relation or column or function or [None])[-1]
           tail='\n'.join(text.splitlines()[-80:])
-          payload={
-              'schemaVersion':'trainingos-recipe-sql-e2e-diagnostic-v2',
+          diagnostic={
+              'schemaVersion':'trainingos-recipe-sql-e2e-result-v3',
               'privateSha':os.environ['PRIVATE_SHA'],
-              'status':'PASS' if int(os.environ['CODE'])==0 else 'FAIL',
+              'status':'PASS' if int(os.environ['CODE'])==0 and expected else 'FAIL',
               'exitCode':int(os.environ['CODE']),
               'errorClass':error_class,
-              'missingObject':missing_object,
+              'missingObject':missing,
               'customErrorToken':custom[-1] if custom else None,
-              'sqlstate':sqlstate,
+              'canonicalExecutionCount':result.get('canonicalExecutionCount',0),
+              'triggerReceiptCount':result.get('triggerReceiptCount',0),
+              'cleanup':'PASS' if cleanup else 'FAIL',
               'tailFingerprint':hashlib.sha256(tail.encode()).hexdigest(),
               'rawOutputPublished':False,
           }
-          pathlib.Path(sys.argv[2]).write_text(json.dumps(payload,indent=2)+'\n',encoding='utf-8')
-          print('RECIPE_SQL_E2E_DIAGNOSTIC status=%s class=%s object=%s token=%s sqlstate=%s fingerprint=%s' % (
-              payload['status'],payload['errorClass'] or 'none',payload['missingObject'] or 'none',
-              payload['customErrorToken'] or 'none',payload['sqlstate'] or 'none',payload['tailFingerprint']))
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(diagnostic,indent=2)+'\n',encoding='utf-8')
+          print('RECIPE_SQL_E2E status=%s class=%s object=%s token=%s execution=%s receipts=%s cleanup=%s' % (
+              diagnostic['status'],diagnostic['errorClass'] or 'none',diagnostic['missingObject'] or 'none',
+              diagnostic['customErrorToken'] or 'none',diagnostic['canonicalExecutionCount'],
+              diagnostic['triggerReceiptCount'],diagnostic['cleanup']))
+          raise SystemExit(0 if diagnostic['status']=='PASS' else 1)
           PY
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          parser_code=$?
+          echo "code=$parser_code" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload sanitized SQL E2E diagnosis
+      - name: Upload sanitized SQL E2E result
         uses: actions/upload-artifact@v4
         with:
-          name: recipe-pr325-sql-e2e-diagnostic-v2
+          name: recipe-pr325-sql-e2e-result-v3
           path: ${{ runner.temp }}/recipe-sql-e2e-diagnostic.json
           if-no-files-found: error
           retention-days: 7
