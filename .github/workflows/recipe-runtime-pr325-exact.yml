@@ -157,37 +157,91 @@ jobs:
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
 
-      - name: Enforce repository-owned CI
+      - name: Stage npm-ci
         working-directory: private-repo
         shell: bash
-        env:
-          TRAININGOS_CI_INSTALL: always
-          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
-          TRAININGOS_CI_OUTPUT_DIR: ${{ github.workspace }}/private-repo/.trainingos-ci
-          REPORT: ${{ github.workspace }}/private-repo/.trainingos-ci/owned-container-ci-report.json
         run: |
-          set +e
-          npm run ci:owned > "$RUNNER_TEMP/recipe-owned.log" 2>&1
-          code=$?
-          OWNED_CODE="$code" node <<'NODE'
-          const fs = require('node:fs');
-          let status = process.env.OWNED_CODE === '0' ? 'PASS' : 'FAIL';
-          let last = 'report-unavailable';
-          try {
-            if (fs.existsSync(process.env.REPORT)) {
-              const report = JSON.parse(fs.readFileSync(process.env.REPORT, 'utf8'));
-              status = report.status === 'PASS' && process.env.OWNED_CODE === '0' ? 'PASS' : 'FAIL';
-              last = String(report.failedOrLastStep || 'unknown');
-            }
-          } catch {
-            status = 'FAIL';
-            last = 'invalid-sanitized-report';
-          }
-          console.log(`RECIPE_OWNED_CI status=${status} step=${last} sha=${process.env.PRIVATE_SHA}`);
-          NODE
-          exit "$code"
+          npm ci > "$RUNNER_TEMP/owned-npm-ci.log" 2>&1
+          echo 'OWNED_STAGE npm-ci PASS'
 
-      - name: Remove owned-CI private checkout and sealed log
+      - name: Stage python-contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:python > "$RUNNER_TEMP/owned-python-contracts.log" 2>&1
+          echo 'OWNED_STAGE python-contracts PASS'
+
+      - name: Stage typecheck
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run typecheck > "$RUNNER_TEMP/owned-typecheck.log" 2>&1
+          echo 'OWNED_STAGE typecheck PASS'
+
+      - name: Stage mvp-acceptance
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:mvp > "$RUNNER_TEMP/owned-mvp.log" 2>&1
+          echo 'OWNED_STAGE mvp-acceptance PASS'
+
+      - name: Stage jhc-acceptance
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:jhc > "$RUNNER_TEMP/owned-jhc.log" 2>&1
+          echo 'OWNED_STAGE jhc-acceptance PASS'
+
+      - name: Stage jhc-membership
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:jhc:membership > "$RUNNER_TEMP/owned-jhc-membership.log" 2>&1
+          echo 'OWNED_STAGE jhc-membership PASS'
+
+      - name: Stage jhc-supabase-contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:jhc:supabase > "$RUNNER_TEMP/owned-jhc-supabase.log" 2>&1
+          echo 'OWNED_STAGE jhc-supabase-contracts PASS'
+
+      - name: Stage trainingos-agent
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:agent > "$RUNNER_TEMP/owned-agent.log" 2>&1
+          echo 'OWNED_STAGE trainingos-agent PASS'
+
+      - name: Stage trainingos-agent-ui
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:agent-ui > "$RUNNER_TEMP/owned-agent-ui.log" 2>&1
+          echo 'OWNED_STAGE trainingos-agent-ui PASS'
+
+      - name: Stage oauth-redirect
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run test:oauth-redirect > "$RUNNER_TEMP/owned-oauth.log" 2>&1
+          echo 'OWNED_STAGE oauth-redirect PASS'
+
+      - name: Stage production-build
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run build > "$RUNNER_TEMP/owned-build.log" 2>&1
+          echo 'OWNED_STAGE production-build PASS'
+
+      - name: Stage build-verification
+        working-directory: private-repo
+        shell: bash
+        run: |
+          npm run verify:build > "$RUNNER_TEMP/owned-build-verification.log" 2>&1
+          echo 'OWNED_STAGE build-verification PASS'
+
+      - name: Remove owned-CI private checkout and sealed logs
         if: always()
         shell: bash
-        run: rm -rf private-repo "$RUNNER_TEMP/recipe-owned.log"
+        run: rm -rf private-repo "$RUNNER_TEMP"/owned-*.log
