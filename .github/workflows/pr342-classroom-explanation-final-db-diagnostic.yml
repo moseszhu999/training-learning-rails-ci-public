@@ -1,0 +1,158 @@
+name: PR342 Classroom Explanation final database diagnostic
+
+on:
+  push:
+    branches: [ci/pr342-final-05df0447]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-final-db-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      PRIVATE_SHA: 05df044760e9ffb3884319e4b5180a81f9093afb
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+      LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run sealed staged diagnostic
+        id: diagnostic
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr342-final-diag-supabase"
+          log="$RUNNER_TEMP/pr342-final-diag.log"
+          stderr="$RUNNER_TEMP/pr342-final-diag-stderr.log"
+          evidence="$RUNNER_TEMP/pr342-final-diag-evidence.txt"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          bootstrap=1; start=1; reset=1; e2e=1
+          {
+            [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+            [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+            supabase --workdir "$workdir" init --force --yes
+            python scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root "$PWD" \
+              --output-dir "$workdir/supabase/migrations" \
+              --commit-sha "$PRIVATE_SHA"
+          } >> "$log" 2>&1
+          bootstrap=$?
+          if [[ "$bootstrap" == 0 ]]; then
+            supabase --workdir "$workdir" start >> "$log" 2>&1
+            start=$?
+          fi
+          if [[ "$start" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed >> "$log" 2>&1
+            reset=$?
+          fi
+          if [[ "$reset" == 0 ]]; then
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$evidence" 2> "$stderr"
+            e2e=$?
+          fi
+          {
+            echo "bootstrap_code=$bootstrap"
+            echo "start_code=$start"
+            echo "reset_code=$reset"
+            echo "e2e_code=$e2e"
+          } >> "$GITHUB_OUTPUT"
+          python - "$log" "$stderr" "$evidence" "$GITHUB_OUTPUT" <<'PY'
+          import hashlib, pathlib, re, sys
+          log_path, err_path, evidence_path, output_path = map(pathlib.Path, sys.argv[1:])
+          log = log_path.read_text(encoding='utf-8', errors='replace') if log_path.exists() else ''
+          err = err_path.read_text(encoding='utf-8', errors='replace') if err_path.exists() else ''
+          evidence = evidence_path.read_text(encoding='utf-8', errors='replace') if evidence_path.exists() else ''
+          combined = log + '\n' + err
+          migrations = re.findall(r'Applying migration\s+([0-9]{14}_[A-Za-z0-9_]+\.sql)', log)
+          token_markers = re.findall(r'\b(?:TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+\b', combined)
+          sqlstate = 'NONE'
+          for pattern in (r'ERROR:\s*([A-Z0-9]{5}):', r'SQL state:\s*([A-Z0-9]{5})'):
+              found = re.findall(pattern, combined, flags=re.I)
+              if found:
+                  sqlstate = found[-1].upper()
+                  break
+          error_lines = [line.strip() for line in err.splitlines() if 'ERROR:' in line or 'FATAL:' in line]
+          error_line = error_lines[-1] if error_lines else 'NONE'
+          error_line = re.sub(r'\b[0-9a-f]{8}-[0-9a-f-]{27,}\b', '<uuid>', error_line, flags=re.I)
+          error_line = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+', '<email>', error_line)
+          error_line = re.sub(r'/home/runner/[^\s:]+', '<runner-path>', error_line)
+          error_line = error_line[:360]
+          error_digest = hashlib.sha256((err or 'NONE').encode()).hexdigest()
+          with output_path.open('a', encoding='utf-8') as out:
+              out.write(f'last_migration={migrations[-1] if migrations else "NONE"}\n')
+              out.write(f'failure_marker={token_markers[-1] if token_markers else "NONE"}\n')
+              out.write(f'sqlstate={sqlstate}\n')
+              out.write(f'error_signature={error_line}\n')
+              out.write(f'error_digest={error_digest}\n')
+              out.write(f'evidence_bytes={len(evidence.encode())}\n')
+          PY
+          exit 0
+
+      - name: Publish sanitized diagnostic
+        if: always()
+        env:
+          BOOTSTRAP: ${{ steps.diagnostic.outputs.bootstrap_code }}
+          START: ${{ steps.diagnostic.outputs.start_code }}
+          RESET: ${{ steps.diagnostic.outputs.reset_code }}
+          E2E: ${{ steps.diagnostic.outputs.e2e_code }}
+          LAST_MIGRATION: ${{ steps.diagnostic.outputs.last_migration }}
+          MARKER: ${{ steps.diagnostic.outputs.failure_marker }}
+          SQLSTATE: ${{ steps.diagnostic.outputs.sqlstate }}
+          ERROR_SIGNATURE: ${{ steps.diagnostic.outputs.error_signature }}
+          ERROR_DIGEST: ${{ steps.diagnostic.outputs.error_digest }}
+          EVIDENCE_BYTES: ${{ steps.diagnostic.outputs.evidence_bytes }}
+        run: |
+          report=pr342-final-db-diagnostic.txt
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "bootstrap_exit=${BOOTSTRAP:-MISSING}"
+            echo "start_exit=${START:-MISSING}"
+            echo "reset_exit=${RESET:-MISSING}"
+            echo "e2e_exit=${E2E:-MISSING}"
+            echo "last_migration=${LAST_MIGRATION:-NONE}"
+            echo "failure_marker=${MARKER:-NONE}"
+            echo "sqlstate=${SQLSTATE:-NONE}"
+            echo "error_signature=${ERROR_SIGNATURE:-NONE}"
+            echo "error_digest=${ERROR_DIGEST:-NONE}"
+            echo "evidence_bytes=${EVIDENCE_BYTES:-0}"
+            echo 'raw_logs_private_source_database_and_evidence=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr342-final-db-diagnostic
+          path: pr342-final-db-diagnostic.txt
+          retention-days: 3
+
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr342-final-diag-supabase" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP/pr342-final-diag-supabase" "$RUNNER_TEMP"/pr342-final-diag* \
+            pr342-final-db-diagnostic.txt
