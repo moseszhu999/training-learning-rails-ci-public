@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: teacher-operations-hub-audit-435a9868
+  group: teacher-operations-hub-audit-1176b63d
   cancel-in-progress: false
 
 jobs:
@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     env:
-      PRIVATE_EXACT_SHA: 435a98687539460291fa912dfa9623de84a44fa6
-      EXPECTED_BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+      PRIVATE_EXACT_SHA: 1176b63db591dcb58524b185db0476fbffd9b4c0
+      EXPECTED_BASE_SHA: 30a9c267e1a07078dcbf150a9ef363995db65de1
       VALIDATION_PROFILE: generic-owned
       EXPECTED_CHANGED_FILE_COUNT: '1'
       EXPECTED_MIGRATION_RANGE: none
@@ -69,7 +69,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: moseszhu999/training-learning-rails
-          ref: 435a98687539460291fa912dfa9623de84a44fa6
+          ref: 1176b63db591dcb58524b185db0476fbffd9b4c0
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           path: private-repo
           persist-credentials: false
@@ -125,9 +125,9 @@ jobs:
           const lines = [
             '## Teacher Operations Hub audit exact-head',
             '',
-            `- Validation profile: **generic-owned**`,
-            `- Exact private SHA: \`${process.env.ACTUAL_SHA || '435a98687539460291fa912dfa9623de84a44fa6'}\``,
-            `- Exact merge base: \`${process.env.MERGE_BASE || '26fc34af65b9489985aa9a5cbe45c9d1590826bf'}\``,
+            '- Validation profile: **generic-owned**',
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || '1176b63db591dcb58524b185db0476fbffd9b4c0'}\``,
+            `- Exact merge base: \`${process.env.MERGE_BASE || '30a9c267e1a07078dcbf150a9ef363995db65de1'}\``,
             `- Input validation: **${value(process.env.INPUT_STATUS)}**`,
             `- Read-only credential: **${value(process.env.CREDENTIAL_STATUS)}**`,
             `- Scope verification: **${value(process.env.SCOPE_STATUS)}**`,
