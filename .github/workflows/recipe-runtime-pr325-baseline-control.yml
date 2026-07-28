@@ -1,4 +1,4 @@
-name: Recipe Runtime PR325 baseline control
+name: Recipe Runtime PR325 focused diagnostic
 
 on:
   pull_request:
@@ -9,77 +9,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: recipe-runtime-pr325-baseline-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  group: recipe-runtime-pr325-diagnostic-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PRIVATE_SHA: cbcdb11c20856258165846252763b2a379be89cc
 
 jobs:
-  baseline-known-red-control:
+  focused-python-diagnostic:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      BASE_SHA: bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100
-
     steps:
-      - name: Validate base SHA and private read credential
-        shell: bash
-        env:
-          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-        run: |
-          set -euo pipefail
-          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
-
-      - name: Check out exact private base
-        uses: actions/checkout@v4
-        with:
-          repository: moseszhu999/training-learning-rails
-          ref: ${{ env.BASE_SHA }}
-          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-          path: private-base
-          persist-credentials: false
-          fetch-depth: 1
-          clean: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Verify exact private base
-        working-directory: private-base
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$(git rev-parse HEAD)" == "$BASE_SHA" ]] || exit 3
-
-      - name: Confirm same classroom contract is already red on base
-        working-directory: private-base
-        shell: bash
-        run: |
-          set +e
-          python tests/test_jhc_exercise_prompt_references.py \
-            ExercisePromptReferenceContracts.test_classroom_is_monitoring_only_and_has_no_exercise_creation \
-            -v > "$RUNNER_TEMP/recipe-baseline-control.log" 2>&1
-          code=$?
-          if [[ "$code" == 0 ]]; then
-            echo 'BASELINE_CONTROL unexpected-pass candidate-regression-not-excluded'
-            exit 1
-          fi
-          echo 'BASELINE_CONTROL confirmed-pre-existing-red exact-base=bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100'
-          exit 0
-
-      - name: Remove private base and sealed log
-        if: always()
-        shell: bash
-        run: rm -rf private-base "$RUNNER_TEMP/recipe-baseline-control.log"
-
-  candidate-fresh-database-replay:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      PRIVATE_SHA: 7f8118afd2e8a5d12154d678cab9fa929a76d079
-
-    steps:
-      - name: Validate candidate SHA and private read credential
+      - name: Validate exact SHA and private read credential
         shell: bash
         env:
           PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
@@ -88,119 +29,59 @@ jobs:
           [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ -n "$PRIVATE_TOKEN" ]] || exit 2
 
-      - name: Check out exact private candidate
+      - name: Check out exact private commit
         uses: actions/checkout@v4
         with:
           repository: moseszhu999/training-learning-rails
           ref: ${{ env.PRIVATE_SHA }}
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-          path: private-candidate
+          path: private-repo
           persist-credentials: false
           fetch-depth: 1
           clean: true
 
-      - uses: supabase/setup-cli@v2
+      - uses: actions/setup-python@v5
         with:
-          version: latest
-          github-token: ${{ github.token }}
+          python-version: '3.12'
 
-      - name: Prepare isolated Supabase project
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir replay-project
-          cd replay-project
-          supabase init
-          rm -rf supabase/migrations
-          cp -R ../private-candidate/supabase/migrations supabase/migrations
-          rm -f supabase/seed.sql
-          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          echo "RECIPE_DB_REPLAY migration_files=$count sha=$PRIVATE_SHA"
-
-      - name: First fresh migration replay
-        working-directory: replay-project
+      - name: Capture sanitized failing test identifiers
+        working-directory: private-repo
         shell: bash
         run: |
           set +e
-          supabase db start > "$RUNNER_TEMP/recipe-db-first.log" 2>&1
+          python -m unittest -v \
+            tests/test_trainingos_agent_recipe_contract.py \
+            tests/test_trainingos_agent_recipe_review_contract.py \
+            > "$RUNNER_TEMP/recipe-python-diagnostic.log" 2>&1
           code=$?
-          CODE="$code" python - <<'PY'
-          import os, pathlib, re
-          text = pathlib.Path(os.environ['RUNNER_TEMP']).joinpath('recipe-db-first.log').read_text(encoding='utf-8', errors='replace')
-          applied = re.findall(r'Applying migration\s+([^\s]+)', text)
-          last = applied[-1] if applied else 'none'
-          print(f'RECIPE_DB_FIRST status={"PASS" if int(os.environ["CODE"]) == 0 else "FAIL"} applied={len(applied)} last={last}')
+          CODE="$code" PRIVATE_SHA="$PRIVATE_SHA" python - "$RUNNER_TEMP/recipe-python-diagnostic.log" "$RUNNER_TEMP/recipe-python-diagnostic.json" <<'PY'
+          import json, os, pathlib, re, sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          match=re.search(r'Ran\s+(\d+)\s+tests?',text)
+          failures=[item.strip() for _,item in re.findall(r'^(FAIL|ERROR):\s+(.+)$',text,re.M)]
+          payload={
+              'schemaVersion':'trainingos-recipe-focused-python-diagnostic-v1',
+              'privateSha':os.environ['PRIVATE_SHA'],
+              'status':'PASS' if int(os.environ['CODE'])==0 else 'FAIL',
+              'testCount':int(match.group(1)) if match else 0,
+              'failureIdentifiers':failures,
+              'rawOutputPublished':False,
+          }
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(payload,indent=2)+'\n',encoding='utf-8')
+          print('RECIPE_PY_DIAGNOSTIC status=%s count=%s failures=%s' % (
+              payload['status'],payload['testCount'],'|'.join(failures) if failures else 'none'))
           PY
-          exit "$code"
+          exit 0
 
-      - name: Second deterministic migration replay
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set +e
-          supabase db reset --local --no-seed > "$RUNNER_TEMP/recipe-db-second.log" 2>&1
-          code=$?
-          CODE="$code" python - <<'PY'
-          import os, pathlib, re
-          text = pathlib.Path(os.environ['RUNNER_TEMP']).joinpath('recipe-db-second.log').read_text(encoding='utf-8', errors='replace')
-          applied = re.findall(r'Applying migration\s+([^\s]+)', text)
-          last = applied[-1] if applied else 'none'
-          print(f'RECIPE_DB_SECOND status={"PASS" if int(os.environ["CODE"]) == 0 else "FAIL"} applied={len(applied)} last={last}')
-          PY
-          exit "$code"
+      - name: Upload sanitized diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: recipe-pr325-focused-python-diagnostic
+          path: ${{ runner.temp }}/recipe-python-diagnostic.json
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Verify Recipe objects and ACL boundary
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set -euo pipefail
-          db_url="$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
-          [[ -n "$db_url" ]]
-          result="$(psql "$db_url" -X -Atv ON_ERROR_STOP=1 <<'SQL'
-          select jsonb_build_object(
-            'recipeTables', (
-              select count(*) from information_schema.tables
-              where table_schema='public' and table_name in (
-                'trainingos_agent_recipes',
-                'trainingos_agent_recipe_versions',
-                'trainingos_agent_recipe_events',
-                'trainingos_agent_recipe_trigger_receipts'
-              )
-            ),
-            'forcedRls', (
-              select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
-              where n.nspname='public' and c.relname in (
-                'trainingos_agent_recipes',
-                'trainingos_agent_recipe_versions',
-                'trainingos_agent_recipe_events',
-                'trainingos_agent_recipe_trigger_receipts'
-              ) and c.relrowsecurity and c.relforcerowsecurity
-            ),
-            'authenticatedDirect', (
-              select count(*) from information_schema.role_table_grants
-              where grantee='authenticated' and table_schema='public' and table_name like 'trainingos_agent_recipe%'
-            ),
-            'serviceRoleDirect', (
-              select count(*) from information_schema.role_table_grants
-              where grantee='service_role' and table_schema='public' and table_name like 'trainingos_agent_recipe%'
-            )
-          );
-SQL
-          )"
-          python - "$result" <<'PY'
-          import json, sys
-          data=json.loads(sys.argv[1])
-          ok=(data.get('recipeTables')==4 and data.get('forcedRls')==4 and data.get('authenticatedDirect')==0 and data.get('serviceRoleDirect')==0)
-          print('RECIPE_DB_OBJECTS status=%s tables=%s forced_rls=%s authenticated_direct=%s service_role_direct=%s' % (
-            'PASS' if ok else 'FAIL', data.get('recipeTables'), data.get('forcedRls'), data.get('authenticatedDirect'), data.get('serviceRoleDirect')))
-          raise SystemExit(0 if ok else 1)
-          PY
-
-      - name: Stop isolated Supabase project and delete sealed logs
+      - name: Remove private checkout and sealed log
         if: always()
-        working-directory: replay-project
         shell: bash
-        run: |
-          supabase stop --no-backup || true
-          rm -f "$RUNNER_TEMP/recipe-db-first.log" "$RUNNER_TEMP/recipe-db-second.log"
-          rm -rf ../private-candidate
+        run: rm -rf private-repo "$RUNNER_TEMP/recipe-python-diagnostic.log" "$RUNNER_TEMP/recipe-python-diagnostic.json"
