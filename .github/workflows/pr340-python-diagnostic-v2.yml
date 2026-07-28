@@ -1,0 +1,67 @@
+name: PR340 Python assertion diagnostic v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr340-python-diagnostic-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: b7ef9890d18a97dc501057c51a955a730b62f53e
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run and classify
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest -v tests.test_trainingos_classroom_lark_adapter_contract > "$RUNNER_TEMP/pr340-python-v2.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/pr340-python-v2.log" "$code" <<'PY' | tee "$GITHUB_WORKSPACE/pr340-python-diagnostic-v2.txt" >> "$GITHUB_STEP_SUMMARY"
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          failed=[]
+          for line in text.splitlines():
+              m=re.match(r'(test_[A-Za-z0-9_]+) \([^)]*\) \.\.\. (FAIL|ERROR)$',line.strip())
+              if m: failed.append(f'{m.group(1)}:{m.group(2)}')
+          assertions=[]
+          for line in text.splitlines():
+              line=line.strip()
+              if line.startswith('AssertionError:'):
+                  msg=re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}','<uuid>',line,flags=re.I)
+                  assertions.append(msg[:240])
+          ran=re.search(r'Ran\s+(\d+)\s+tests?',text)
+          print(f'exact_private_sha={sys.argv[2] and "b7ef9890d18a97dc501057c51a955a730b62f53e"}')
+          print(f'exit_code={sys.argv[2]}')
+          print(f'tests={ran.group(1) if ran else "0"}')
+          print(f'failed_tests={"|".join(failed) if failed else "NONE"}')
+          print(f'assertion_kinds={"|".join(assertions) if assertions else "NONE"}')
+          print('raw_private_output=SEALED_AND_DELETED')
+          PY
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr340-python-diagnostic-v2
+          path: pr340-python-diagnostic-v2.txt
+          retention-days: 3
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP/pr340-python-v2.log" pr340-python-diagnostic-v2.txt
