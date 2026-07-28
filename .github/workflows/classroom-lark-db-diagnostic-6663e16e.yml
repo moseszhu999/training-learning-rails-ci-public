@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   diagnose:
@@ -40,6 +41,8 @@ jobs:
       - name: Classify replay failure without publishing private logs
         working-directory: private-repo
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set +e
           db_log="$RUNNER_TEMP/classroom-lark-db-diagnostic.log"
@@ -56,7 +59,7 @@ jobs:
             supabase db reset --local --no-seed >> "$db_log" 2>&1
             reset_code=$?
           fi
-          python - "$db_log" "$init_code" "$start_code" "$reset_code" <<'PY'
+          diagnostic="$(python - "$db_log" "$init_code" "$start_code" "$reset_code" <<'PY'
           import hashlib
           import pathlib
           import re
@@ -83,6 +86,15 @@ jobs:
               f'error={error} log_sha256={digest}'
           )
           PY
+          )"
+          echo "$diagnostic"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/issues/48/comments" \
+              -f body="Sanitized database replay diagnostic for private exact head \`${PRIVATE_SHA}\`:\n\n\`\`\`text\n${diagnostic}\n\`\`\`" \
+              > /dev/null
+          fi
           supabase stop --no-backup > /dev/null 2>&1 || true
           rm -f "$db_log"
           exit 0
