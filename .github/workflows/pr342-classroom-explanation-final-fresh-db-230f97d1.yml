@@ -1,0 +1,164 @@
+name: PR342 Classroom Explanation final fresh database replay
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-classroom-explanation-final-db-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  fresh-database-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: 230f97d1be72d79dd5aeb36f8348a7a42e6e6d20
+      LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run two sealed fresh database E2E passes
+        id: database
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr342-final-supabase"
+          log="$RUNNER_TEMP/pr342-final-db.log"
+          first="$RUNNER_TEMP/pr342-final-db-first.txt"
+          second="$RUNNER_TEMP/pr342-final-db-second.txt"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          {
+            [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+            docker version >/dev/null
+            psql --version >/dev/null
+            supabase --workdir "$workdir" init --force --yes
+            python scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root "$PWD" \
+              --output-dir "$workdir/supabase/migrations" \
+              --commit-sha "$PRIVATE_SHA"
+            supabase --workdir "$workdir" start
+            supabase --workdir "$workdir" db reset --local --no-seed
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$first"
+            supabase --workdir "$workdir" db reset --local --no-seed
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$second"
+          } > "$log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python - "$first" "$second" "$log" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, re, sys
+          required = (
+              'oneActiveExplanationEnforced','activeSlotReleasedAfterUpload',
+              'secondExplanationStarted','classEndedStartRejected',
+              'agentRecordingRejected','agentInferencePersisted',
+              'prohibitedCandidateRejected','teacherEvaluationConfirmed',
+              'agentConfirmRejected','staleVersionRejected','staleTranscriptRejected',
+              'crossClassRejected','transcriptUpdateRejected','transcriptDeleteRejected',
+              'rawAudioHidden','idempotencyConflictRejected',
+              'transcriptIdempotencyConflictRejected',
+          )
+          def load(path):
+              target = pathlib.Path(path)
+              if not target.exists(): return {}
+              for line in reversed(target.read_text(encoding='utf-8', errors='replace').splitlines()):
+                  line = line.strip()
+                  if line.startswith('{'):
+                      try: return json.loads(line)
+                      except json.JSONDecodeError: pass
+              return {}
+          def valid(value):
+              return (value.get('status') == 'PASS'
+                      and value.get('fixtureCleanup') == 'PLPGSQL_SUBTRANSACTION_ROLLBACK'
+                      and all(value.get(key) is True for key in required)
+                      and all(value.get(key) == 0 for key in value if key.startswith('remaining')))
+          a, b = load(sys.argv[1]), load(sys.argv[2])
+          log = pathlib.Path(sys.argv[3]).read_text(encoding='utf-8', errors='replace')
+          markers = re.findall(r'\b(?:TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+\b', log)
+          migrations = re.findall(r'Applying migration\s+([0-9]{14}_[A-Za-z0-9_]+\.sql)', log)
+          with open(sys.argv[4], 'a', encoding='utf-8') as out:
+              out.write(f'first_pass={str(valid(a)).lower()}\n')
+              out.write(f'second_pass={str(valid(b)).lower()}\n')
+              out.write(f'first_status={a.get("status", "MISSING")}\n')
+              out.write(f'second_status={b.get("status", "MISSING")}\n')
+              out.write(f'first_zero={str(bool(a) and all(a.get(k) == 0 for k in a if k.startswith("remaining"))).lower()}\n')
+              out.write(f'second_zero={str(bool(b) and all(b.get(k) == 0 for k in b if k.startswith("remaining"))).lower()}\n')
+              out.write(f'failure_marker={markers[-1] if markers else "NONE"}\n')
+              out.write(f'last_migration={migrations[-1] if migrations else "NONE"}\n')
+          PY
+          exit 0
+
+      - name: Publish sanitized database result
+        if: always()
+        env:
+          CODE: ${{ steps.database.outputs.exit_code }}
+          FIRST: ${{ steps.database.outputs.first_pass }}
+          SECOND: ${{ steps.database.outputs.second_pass }}
+          FIRST_STATUS: ${{ steps.database.outputs.first_status }}
+          SECOND_STATUS: ${{ steps.database.outputs.second_status }}
+          FIRST_ZERO: ${{ steps.database.outputs.first_zero }}
+          SECOND_ZERO: ${{ steps.database.outputs.second_zero }}
+          MARKER: ${{ steps.database.outputs.failure_marker }}
+          LAST_MIGRATION: ${{ steps.database.outputs.last_migration }}
+        run: |
+          status=FAIL
+          if [[ "${CODE:-1}" == "0" && "$FIRST" == "true" && "$SECOND" == "true" ]]; then status=PASS; fi
+          report=pr342-classroom-explanation-final-fresh-db.txt
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "fresh_database_e2e=$status"
+            echo "first_status=${FIRST_STATUS:-MISSING}"
+            echo "second_status=${SECOND_STATUS:-MISSING}"
+            echo "first_remaining_zero=${FIRST_ZERO:-false}"
+            echo "second_remaining_zero=${SECOND_ZERO:-false}"
+            echo "failure_marker=${MARKER:-NONE}"
+            echo "last_migration=${LAST_MIGRATION:-NONE}"
+            echo 'destructive_reset_count=2'
+            echo 'raw_logs_private_source_database_and_fixture_evidence=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr342-classroom-explanation-final-fresh-db
+          path: pr342-classroom-explanation-final-fresh-db.txt
+          retention-days: 3
+
+      - name: Cleanup and enforce
+        if: always()
+        env:
+          CODE: ${{ steps.database.outputs.exit_code }}
+          FIRST: ${{ steps.database.outputs.first_pass }}
+          SECOND: ${{ steps.database.outputs.second_pass }}
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr342-final-supabase" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP/pr342-final-supabase" "$RUNNER_TEMP"/pr342-final-db* \
+            pr342-classroom-explanation-final-fresh-db.txt
+          [[ "${CODE:-1}" == "0" ]]
+          [[ "$FIRST" == "true" ]]
+          [[ "$SECOND" == "true" ]]
