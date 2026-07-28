@@ -1,9 +1,9 @@
-name: Classroom Explanation c4e0bc12 exact-head CI
+name: Classroom Explanation 05df0447 exact-head CI
 
 on:
   push:
     branches:
-      - ci/classroom-explanation-aa2d65c9
+      - ci/classroom-explanation-c4e0bc12-clean
   pull_request:
     branches:
       - main
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: classroom-explanation-c4e0bc12-${{ github.event_name }}
+  group: classroom-explanation-05df0447-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_SHA: c4e0bc12de1148839ca648aaed8c862ac58b2162
-      EXPECTED_BASE_SHA: 604631a96f01fb76d123072168c165cc699d9e8e
+      PRIVATE_SHA: 05df044760e9ffb3884319e4b5180a81f9093afb
+      EXPECTED_BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
 
     steps:
       - name: Validate exact SHA and private read credential
@@ -179,10 +179,10 @@ jobs:
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ## Classroom Explanation c4e0bc12 exact-head CI
+          ## Classroom Explanation 05df0447 exact-head CI
 
-          - Exact private SHA: `c4e0bc12de1148839ca648aaed8c862ac58b2162`
-          - Exact merge base: `604631a96f01fb76d123072168c165cc699d9e8e`
+          - Exact private SHA: `05df044760e9ffb3884319e4b5180a81f9093afb`
+          - Exact merge base: `9b8f04f29d572d22434ea577b5ed3543e4f6a2d3`
           - Window 1 scope: **PASS (22 files / 15 migrations)**
           - JavaScript syntax: **PASS 2/2**
           - Focused Node contracts: **PASS 10/10**
@@ -195,7 +195,7 @@ jobs:
 
           Raw private output is sealed and deleted. No private source, fixtures, credentials, or raw logs are published.
           EOF
-          echo "CLASSROOM_EXPLANATION_C4E0_EXACT_CI PASS sha=$PRIVATE_SHA files=22 migrations=15 node=10/10 python=14/14 intelligence=PASS typecheck=PASS build=PASS"
+          echo "CLASSROOM_EXPLANATION_05DF_EXACT_CI PASS sha=$PRIVATE_SHA files=22 migrations=15 node=10/10 python=14/14 intelligence=PASS typecheck=PASS build=PASS"
 
       - name: Remove private checkout and sealed logs
         if: always()
