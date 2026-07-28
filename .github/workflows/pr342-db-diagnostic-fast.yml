@@ -3,9 +3,18 @@ name: PR342 database diagnostic fast
 on:
   push:
     branches: [ci/pr342-db-diagnostic-fast]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-db-diagnostic-fast.yml
+      - carriers/pr342-db-diagnostic-fast.txt
 
 permissions:
   contents: read
+
+concurrency:
+  group: pr342-db-diagnostic-fast-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   diagnose:
@@ -39,6 +48,7 @@ jobs:
           log="$RUNNER_TEMP/pr342-fast-bootstrap.log"
           err="$RUNNER_TEMP/pr342-fast-e2e.err"
           out="$RUNNER_TEMP/pr342-fast-e2e.out"
+          report="$GITHUB_WORKSPACE/pr342-db-diagnostic-fast-result.txt"
           rm -rf "$workdir" && mkdir -p "$workdir"
           bootstrap=1; start=1; reset=1; e2e=1
           {
@@ -60,6 +70,7 @@ jobs:
           last_migration="$(grep -Eo 'Applying migration [0-9]{14}_[A-Za-z0-9_]+\.sql' "$log" | tail -1 | awk '{print $3}')"
           {
             echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
             echo "bootstrap_exit=$bootstrap"
             echo "start_exit=$start"
             echo "reset_exit=$reset"
@@ -70,13 +81,13 @@ jobs:
             echo "error_signature=${signature:-NONE}"
             echo "evidence_bytes=$(wc -c < "$out" 2>/dev/null || echo 0)"
             echo "raw_output=SEALED_AND_DELETED"
-          } | tee pr342-db-diagnostic-fast.txt >> "$GITHUB_STEP_SUMMARY"
+          } | tee "$report" >> "$GITHUB_STEP_SUMMARY"
           supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
           rm -rf "$workdir" "$log" "$err" "$out" private-repo
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: pr342-db-diagnostic-fast
-          path: private-repo/pr342-db-diagnostic-fast.txt
-          if-no-files-found: ignore
+          path: pr342-db-diagnostic-fast-result.txt
           retention-days: 3
