@@ -1,0 +1,87 @@
+name: PR339 answer shape diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-answer-shape-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: e032cf7fe9824a4a667fea41ce77aa17337b49d8
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    outputs:
+      shape: ${{ steps.shape.outputs.shape }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Start database
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/pr339-shape-db"
+          supabase --workdir "$workdir" init --force --yes >/dev/null 2>&1
+          python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" >/dev/null 2>&1
+          supabase --workdir "$workdir" start >/dev/null 2>&1
+      - name: Publish bounded answer-shape conditions
+        id: shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          definition="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          select p.prosrc
+          from pg_catalog.pg_proc p
+          join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='trainingos_assessment_private' and p.proname='validate_answer'
+          limit 1;
+          SQL
+          )"
+          shape="$(python - "$definition" <<'PY'
+          import re,sys
+          lines=sys.argv[1].splitlines()
+          keep=[]
+          for i,line in enumerate(lines):
+              if any(k in line for k in ('answer_payload','item_type','ANSWER_SCHEMA_INVALID')):
+                  keep.extend(lines[max(0,i-2):min(len(lines),i+3)])
+          out=' '.join(x.strip() for x in keep)
+          out=re.sub(r'\s+',' ',out)
+          out=re.sub(r'[^A-Za-z0-9_''(),.=<>: |!\[\]-]+','_',out)
+          print(out[:2200])
+          PY
+          )"
+          echo "shape=$shape" >> "$GITHUB_OUTPUT"
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-shape-db" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-*
+
+  disposition:
+    if: always()
+    needs: inspect
+    name: shape-${{ needs.inspect.outputs.shape }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo bounded_shape_published=true >> "$GITHUB_STEP_SUMMARY"
