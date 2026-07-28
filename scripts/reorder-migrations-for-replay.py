@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Dependency-order migration files in an isolated CI checkout.
 
-SQL content is never changed. The script discovers hard object-existence
-requirements, applies a stable topological order, breaks true cycles by the
-original version order, and assigns synthetic unique 14-digit versions.
+SQL content is never changed. Only top-level object-existence requirements are
+used as hard edges. Dollar-quoted function bodies are excluded because PL/pgSQL
+body references do not require those objects at CREATE FUNCTION time.
 """
 
 from __future__ import annotations
@@ -27,6 +27,10 @@ FUNCTION_CREATE = re.compile(
 )
 TYPE_CREATE = re.compile(
     r"create\s+type\s+(?:public\.)?([a-z_][a-z0-9_]*)",
+    re.IGNORECASE,
+)
+DOLLAR_QUOTED_BLOCK = re.compile(
+    r"(?P<tag>\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)[\s\S]*?(?P=tag)",
     re.IGNORECASE,
 )
 PUBLIC_REF = re.compile(r"\bpublic\.([a-z_][a-z0-9_]*)", re.IGNORECASE)
@@ -96,6 +100,7 @@ def main() -> int:
         return 2
 
     texts = {path: path.read_text(encoding="utf-8", errors="replace") for path in paths}
+    top_level_texts = {path: DOLLAR_QUOTED_BLOCK.sub(" ", text) for path, text in texts.items()}
     keys = {path: base_key(path) for path in paths}
 
     table_owner: dict[object, Path] = {}
@@ -105,15 +110,16 @@ def main() -> int:
 
     for path in paths:
         text = texts[path]
-        for name in TABLE_CREATE.findall(text):
+        top_level = top_level_texts[path]
+        for name in TABLE_CREATE.findall(top_level):
             first_owner(table_owner, name.lower(), path, keys)
-        for name in FUNCTION_CREATE.findall(text):
+        for name in FUNCTION_CREATE.findall(top_level):
             normalized = name.lower()
             if path not in function_creators[normalized]:
                 function_creators[normalized].append(path)
-        for name in TYPE_CREATE.findall(text):
+        for name in TYPE_CREATE.findall(top_level):
             first_owner(type_owner, name.lower(), path, keys)
-        for match in ALTER_TABLE_STATEMENT.finditer(text):
+        for match in ALTER_TABLE_STATEMENT.finditer(top_level):
             table = match.group(1).lower()
             for column in ADD_COLUMN.findall(match.group("body")):
                 first_owner(column_owner, (table, column.lower()), path, keys)
@@ -131,9 +137,9 @@ def main() -> int:
         edge_reasons[(producer, consumer)].append(reason)
 
     for consumer in paths:
-        text = texts[consumer]
-        refs = {name.lower() for name in PUBLIC_REF.findall(text)}
-        function_ddl_refs = {name.lower() for name in FUNCTION_DDL_REF.findall(text)}
+        top_level = top_level_texts[consumer]
+        refs = {name.lower() for name in PUBLIC_REF.findall(top_level)}
+        function_ddl_refs = {name.lower() for name in FUNCTION_DDL_REF.findall(top_level)}
         for name in refs:
             add_edge(table_owner.get(name), consumer, f"table:{name}")
             add_edge(type_owner.get(name), consumer, f"type:{name}")
@@ -141,9 +147,9 @@ def main() -> int:
             creators = function_creators.get(name, [])
             producer = next((path for path in creators if path != consumer), None)
             add_edge(producer, consumer, f"function-ddl:{name}")
-        lower_text = text.lower()
+        lower_top_level = top_level.lower()
         for (table, column), producer in column_owner.items():
-            if table in refs and re.search(rf"\b{re.escape(column)}\b", lower_text):
+            if table in refs and re.search(rf"\b{re.escape(column)}\b", lower_top_level):
                 add_edge(producer, consumer, f"column:{table}.{column}")
 
     indegree = {path: 0 for path in paths}
@@ -157,22 +163,36 @@ def main() -> int:
             heapq.heappush(heap, (keys[path], path))
 
     ordered: list[Path] = []
-    processed: set[Path] = set()
-    cycle_breaks = 0
-    while len(ordered) < len(paths):
-        if not heap:
-            candidate = min((path for path in paths if path not in processed), key=lambda path: keys[path])
-            heapq.heappush(heap, (keys[candidate], candidate))
-            cycle_breaks += 1
+    while heap:
         _, path = heapq.heappop(heap)
-        if path in processed:
-            continue
-        processed.add(path)
         ordered.append(path)
         for consumer in adjacency[path]:
             indegree[consumer] -= 1
             if indegree[consumer] == 0:
                 heapq.heappush(heap, (keys[consumer], consumer))
+
+    if len(ordered) != len(paths):
+        unresolved = sorted(path.name for path in paths if path not in set(ordered))
+        unresolved_set = set(unresolved)
+        cycle_edges = []
+        for (producer, consumer), reasons in edge_reasons.items():
+            if producer.name in unresolved_set and consumer.name in unresolved_set:
+                cycle_edges.append(
+                    f"{producer.name}->{consumer.name}:{'+'.join(sorted(set(reasons)))}"
+                )
+        report_path.write_text(
+            " ".join(
+                [
+                    "status=CYCLE",
+                    f"ordered={len(ordered)}",
+                    f"unresolved={len(unresolved)}",
+                    f"files={','.join(unresolved[:20])}",
+                    f"edges={';'.join(cycle_edges[:20])}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return 2
 
     staging = root / ".dependency-order-staging"
     if staging.exists():
@@ -201,7 +221,7 @@ def main() -> int:
                 "status=PASS",
                 f"count={len(final_names)}",
                 f"edges={edge_count}",
-                f"cycle_breaks={cycle_breaks}",
+                "cycle_breaks=0",
                 f"first={final_names[0]}",
                 f"last={final_names[-1]}",
             ]
