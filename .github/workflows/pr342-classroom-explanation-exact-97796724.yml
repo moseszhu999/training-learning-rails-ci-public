@@ -1,0 +1,218 @@
+name: PR342 Classroom Explanation exact-head CI
+
+on:
+  push:
+    branches:
+      - ci/pr342-classroom-explanation-97796724
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-classroom-explanation-exact-97796724
+  cancel-in-progress: false
+
+jobs:
+  exact-head-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      PRIVATE_SHA: 977967243264c23f377570d3658f97cc5b3a6703
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+
+      - name: Install dependencies with sealed output
+        id: install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/pr342-install.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Check Gateway syntax with sealed output
+        id: syntax
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check lib/trainingos-agent-gateway/classroom-explanation-runtime.mjs
+            node --check lib/trainingos-agent-gateway/classroom-explanation-mcp-layer.mjs
+          } > "$RUNNER_TEMP/pr342-syntax.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run explanation Node contracts with sealed output
+        id: node_contract
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs > "$RUNNER_TEMP/pr342-node.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python - "$RUNNER_TEMP/pr342-node.log" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          tests = sum(int(value) for value in re.findall(r'# tests\s+(\d+)', text))
+          passed = sum(int(value) for value in re.findall(r'# pass\s+(\d+)', text))
+          with open(sys.argv[2], 'a', encoding='utf-8') as out:
+              out.write(f'tests={tests}\n')
+              out.write(f'passed={passed}\n')
+          PY
+          exit 0
+
+      - name: Run Python static contracts with sealed output
+        id: python_contract
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest -v tests.test_trainingos_classroom_explanation_contract > "$RUNNER_TEMP/pr342-python.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python - "$RUNNER_TEMP/pr342-python.log" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          with open(sys.argv[2], 'a', encoding='utf-8') as out:
+              out.write(f'tests={match.group(1) if match else 0}\n')
+          PY
+          exit 0
+
+      - name: Run merged Window 3 Intelligence tests with sealed output
+        id: intelligence
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm --prefix packages/training-classroom-intelligence test > "$RUNNER_TEMP/pr342-intelligence.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run repository typecheck with sealed output
+        id: typecheck
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/pr342-typecheck.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run production build with sealed output
+        id: build
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/pr342-build.log" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized exact-head result
+        if: always()
+        shell: bash
+        env:
+          INSTALL_CODE: ${{ steps.install.outputs.exit_code }}
+          SYNTAX_CODE: ${{ steps.syntax.outputs.exit_code }}
+          NODE_CODE: ${{ steps.node_contract.outputs.exit_code }}
+          NODE_TESTS: ${{ steps.node_contract.outputs.tests }}
+          NODE_PASSED: ${{ steps.node_contract.outputs.passed }}
+          PYTHON_CODE: ${{ steps.python_contract.outputs.exit_code }}
+          PYTHON_TESTS: ${{ steps.python_contract.outputs.tests }}
+          INTELLIGENCE_CODE: ${{ steps.intelligence.outputs.exit_code }}
+          TYPECHECK_CODE: ${{ steps.typecheck.outputs.exit_code }}
+          BUILD_CODE: ${{ steps.build.outputs.exit_code }}
+        run: |
+          status() { [[ "${1:-1}" == "0" ]] && printf PASS || printf FAIL; }
+          report="$GITHUB_WORKSPACE/pr342-classroom-explanation-exact.txt"
+          {
+            echo 'Private PR #342 Classroom Explanation exact-head validation'
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "npm_ci=$(status "$INSTALL_CODE")"
+            echo "gateway_syntax=$(status "$SYNTAX_CODE")"
+            echo "node_contract=$(status "$NODE_CODE")"
+            echo "node_tests=${NODE_PASSED:-0}/${NODE_TESTS:-0}"
+            echo "python_contract=$(status "$PYTHON_CODE")"
+            echo "python_tests=${PYTHON_TESTS:-0}"
+            echo "window3_intelligence=$(status "$INTELLIGENCE_CODE")"
+            echo "typecheck=$(status "$TYPECHECK_CODE")"
+            echo "production_build=$(status "$BUILD_CODE")"
+            echo 'private_checkout_raw_logs_and_build_output=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized exact-head result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr342-classroom-explanation-exact-97796724
+          path: pr342-classroom-explanation-exact.txt
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-*.log "$GITHUB_WORKSPACE/pr342-classroom-explanation-exact.txt"
+
+      - name: Enforce exact-head result
+        if: always()
+        shell: bash
+        env:
+          INSTALL_CODE: ${{ steps.install.outputs.exit_code }}
+          SYNTAX_CODE: ${{ steps.syntax.outputs.exit_code }}
+          NODE_CODE: ${{ steps.node_contract.outputs.exit_code }}
+          PYTHON_CODE: ${{ steps.python_contract.outputs.exit_code }}
+          INTELLIGENCE_CODE: ${{ steps.intelligence.outputs.exit_code }}
+          TYPECHECK_CODE: ${{ steps.typecheck.outputs.exit_code }}
+          BUILD_CODE: ${{ steps.build.outputs.exit_code }}
+        run: |
+          for code in "$INSTALL_CODE" "$SYNTAX_CODE" "$NODE_CODE" "$PYTHON_CODE" "$INTELLIGENCE_CODE" "$TYPECHECK_CODE" "$BUILD_CODE"; do
+            [[ "${code:-1}" == "0" ]]
+          done
