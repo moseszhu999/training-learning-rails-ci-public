@@ -1,0 +1,110 @@
+name: PR340 application diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr340-app-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: b7ef9890d18a97dc501057c51a955a730b62f53e
+  BASE_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run sealed diagnostic
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          syntax_pass=0
+          syntax_total=0
+          for file in \
+            packages/training-classroom-provider/src/provider-adapter.mjs \
+            packages/training-classroom-zoom/src/provider-adapter.mjs \
+            packages/training-classroom-lark/src/lark-adapter.mjs \
+            lib/trainingos-agent-gateway/classroom-zoom-adapter.mjs \
+            lib/trainingos-agent-gateway/classroom-lark-adapter.mjs \
+            scripts/run-trainingos-classroom-lark-adapter-validation.mjs
+          do
+            syntax_total=$((syntax_total+1))
+            node --check "$file" > "$RUNNER_TEMP/pr340-syntax-$syntax_total.log" 2>&1
+            [[ $? == 0 ]] && syntax_pass=$((syntax_pass+1))
+          done
+
+          node scripts/run-trainingos-classroom-lark-adapter-validation.mjs > "$RUNNER_TEMP/pr340-node-diag.log" 2>&1
+          node_code=$?
+          python tests/test_trainingos_classroom_lark_adapter_contract.py > "$RUNNER_TEMP/pr340-python-diag.log" 2>&1
+          python_code=$?
+
+          read -r node_tests node_pass node_fail <<< "$(python - "$RUNNER_TEMP/pr340-node-diag.log" <<'PY'
+          import pathlib,re,sys
+          t=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          def n(p,d):
+              m=re.search(p,t); return int(m.group(1)) if m else d
+          print(n(r'# tests\s+(\d+)',0),n(r'# pass\s+(\d+)',0),n(r'# fail\s+(\d+)',-1))
+          PY
+          )"
+          read -r py_tests py_ok <<< "$(python - "$RUNNER_TEMP/pr340-python-diag.log" <<'PY'
+          import pathlib,re,sys
+          t=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          m=re.search(r'Ran\s+(\d+)\s+tests?',t)
+          ok=bool(re.search(r'(?:^|\n)OK(?:\s|\n|$)',t))
+          print(int(m.group(1)) if m else 0,str(ok).lower())
+          PY
+          )"
+
+          node_failure_kind=none
+          [[ $node_code != 0 ]] && node_failure_kind=test_failure
+          grep -qi 'ERR_MODULE_NOT_FOUND' "$RUNNER_TEMP/pr340-node-diag.log" && node_failure_kind=module_not_found
+          grep -qi 'AssertionError' "$RUNNER_TEMP/pr340-node-diag.log" && node_failure_kind=assertion
+          grep -qi 'SyntaxError' "$RUNNER_TEMP/pr340-node-diag.log" && node_failure_kind=syntax
+          python_failure_kind=none
+          [[ $python_code != 0 ]] && python_failure_kind=test_failure
+          grep -qi 'FAILED (' "$RUNNER_TEMP/pr340-python-diag.log" && python_failure_kind=assertion
+          grep -qi 'ImportError\|ModuleNotFoundError' "$RUNNER_TEMP/pr340-python-diag.log" && python_failure_kind=module_not_found
+
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
+            echo "syntax_pass=$syntax_pass/$syntax_total"
+            echo "node_exit=$node_code"
+            echo "node_tests=$node_tests"
+            echo "node_pass=$node_pass"
+            echo "node_fail=$node_fail"
+            echo "node_failure_kind=$node_failure_kind"
+            echo "python_exit=$python_code"
+            echo "python_tests=$py_tests"
+            echo "python_ok=$py_ok"
+            echo "python_failure_kind=$python_failure_kind"
+            echo "raw_private_output=SEALED_AND_DELETED"
+          } | tee "$GITHUB_WORKSPACE/pr340-app-diagnostic.txt" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr340-app-diagnostic
+          path: pr340-app-diagnostic.txt
+          retention-days: 3
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP"/pr340-*.log pr340-app-diagnostic.txt
