@@ -1,0 +1,308 @@
+name: Classroom Agent Queue PR338 database replay
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-agent-queue-pr338-db.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-agent-queue-pr338-db-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  exact-database-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      PRIVATE_SHA: 7751ec7d0e0535036c500e315078646ef1dc81f2
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify exact private head and migration scope
+        id: scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          actual_merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+          migration="supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql"
+          [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+          [[ "$actual_merge_base" == "$BASE_SHA" ]]
+          [[ -f "$migration" ]]
+          [[ ! -e supabase/migrations/20260728180100_trainingos_classroom_agent_queue_integration_v1.sql ]]
+          echo PASS > "$RUNNER_TEMP/caq-db-scope.status"
+          echo "actual_sha=$actual_sha" >> "$GITHUB_OUTPUT"
+          echo "merge_base=$actual_merge_base" >> "$GITHUB_OUTPUT"
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Prepare isolated full migration replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          cp -R ../private-repo/supabase/migrations supabase/migrations
+          rm -f supabase/seed.sql
+          migration_count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          [[ "$migration_count" -gt 0 ]]
+          echo "$migration_count" > "$RUNNER_TEMP/caq-db-migration-count.txt"
+          echo PASS > "$RUNNER_TEMP/caq-db-prepare.status"
+
+      - name: First fresh migration replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase db start > "$RUNNER_TEMP/caq-db-first.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-first.log" || true)"
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-first.status" || echo FAIL > "$RUNNER_TEMP/caq-db-first.status"
+          echo "$applied" > "$RUNNER_TEMP/caq-db-first-count.txt"
+          exit "$code"
+
+      - name: Second deterministic migration replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/caq-db-second.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-second.log" || true)"
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-second.status" || echo FAIL > "$RUNNER_TEMP/caq-db-second.status"
+          echo "$applied" > "$RUNNER_TEMP/caq-db-second-count.txt"
+          exit "$code"
+
+      - name: Run existing Persistent Agent SQL regression
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_persistent_teacher_agent_e2e.sql \
+            > "$RUNNER_TEMP/caq-db-persistent-e2e.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-persistent-e2e.status" || echo FAIL > "$RUNNER_TEMP/caq-db-persistent-e2e.status"
+          exit "$code"
+
+      - name: Verify Queue projection, canonical ownership, RLS and ACL
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/caq-db-acl.log" 2>&1 <<'SQL'
+          do $verify$
+          declare
+            v_functions integer;
+            v_disallowed_tables integer;
+            v_canonical_tables integer;
+            v_policy_forced integer;
+            v_policy_direct_acl integer;
+            v_private_acl integer;
+            v_public_acl integer;
+            v_public_execute boolean;
+            v_anon_execute boolean;
+            v_service_execute boolean;
+            v_workflow_constraints integer;
+            v_provider jsonb;
+          begin
+            select count(*) into v_functions
+            from pg_proc p
+            join pg_namespace n on n.oid=p.pronamespace
+            where (n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)) in (
+              ('private','trainingos_classroom_agent_queue_provider','p_class_id uuid, p_as_of timestamp with time zone, p_horizon_end timestamp with time zone'),
+              ('private','trainingos_native_classroom_agent_queue_candidates','p_class_id uuid, p_as_of timestamp with time zone, p_horizon_end timestamp with time zone'),
+              ('private','trainingos_classroom_agent_queue_candidates','p_class_id uuid, p_as_of timestamp with time zone, p_horizon_end timestamp with time zone'),
+              ('private','trainingos_teacher_agent_workflow_for_queue_item','p_item jsonb'),
+              ('public','get_trainingos_teacher_action_queue_v2','p_class_id uuid, p_as_of timestamp with time zone, p_horizon_days integer, p_limit integer')
+            );
+
+            select count(*) into v_disallowed_tables
+            from information_schema.tables
+            where table_schema='public' and table_name in (
+              'teacher_queue_items',
+              'trainingos_classroom_agent_queue_items',
+              'trainingos_classroom_agent_executions',
+              'trainingos_classroom_agent_execution_events'
+            );
+
+            select count(*) into v_canonical_tables
+            from information_schema.tables
+            where table_schema='public' and table_name in (
+              'trainingos_agent_executions',
+              'trainingos_agent_execution_events',
+              'trainingos_teacher_agent_policies'
+            );
+
+            select count(*) into v_policy_forced
+            from pg_class c
+            join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public'
+              and c.relname='trainingos_teacher_agent_policies'
+              and c.relrowsecurity
+              and c.relforcerowsecurity;
+
+            select count(*) into v_policy_direct_acl
+            from information_schema.role_table_grants
+            where table_schema='public'
+              and table_name='trainingos_teacher_agent_policies'
+              and grantee in ('PUBLIC','anon','authenticated','service_role');
+
+            select count(*) into v_private_acl
+            from information_schema.routine_privileges
+            where specific_schema='private'
+              and routine_name in (
+                'trainingos_classroom_agent_queue_provider',
+                'trainingos_native_classroom_agent_queue_candidates',
+                'trainingos_classroom_agent_queue_candidates'
+              )
+              and grantee in ('PUBLIC','anon','authenticated','service_role')
+              and privilege_type='EXECUTE';
+
+            select count(*) into v_public_acl
+            from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+            join pg_proc p on true
+            join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='public'
+              and p.proname='get_trainingos_teacher_action_queue_v2'
+              and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_as_of timestamp with time zone, p_horizon_days integer, p_limit integer'
+              and a.grantee=0
+              and a.privilege_type='EXECUTE';
+
+            select has_function_privilege(
+              'authenticated',
+              'public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)',
+              'EXECUTE'
+            ) into v_public_execute;
+            select has_function_privilege(
+              'anon',
+              'public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)',
+              'EXECUTE'
+            ) into v_anon_execute;
+            select has_function_privilege(
+              'service_role',
+              'public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)',
+              'EXECUTE'
+            ) into v_service_execute;
+
+            select count(*) into v_workflow_constraints
+            from pg_constraint c
+            join pg_class t on t.oid=c.conrelid
+            join pg_namespace n on n.oid=t.relnamespace
+            where n.nspname='public'
+              and t.relname in ('trainingos_teacher_agent_policies','trainingos_agent_executions')
+              and pg_get_constraintdef(c.oid) like '%classroom_plan_draft%'
+              and pg_get_constraintdef(c.oid) like '%classroom_explanation_analysis%'
+              and pg_get_constraintdef(c.oid) like '%classroom_follow_up_draft%';
+
+            v_provider := private.trainingos_classroom_agent_queue_provider(
+              extensions.gen_random_uuid(),clock_timestamp(),clock_timestamp()+interval '1 day'
+            );
+
+            if v_functions<>5
+               or v_disallowed_tables<>0
+               or v_canonical_tables<>3
+               or v_policy_forced<>1
+               or v_policy_direct_acl<>0
+               or v_private_acl<>0
+               or v_public_acl<>0
+               or not v_public_execute
+               or v_anon_execute
+               or v_service_execute
+               or v_workflow_constraints<>2
+               or v_provider<>'[]'::jsonb then
+              raise exception 'CLASSROOM_AGENT_QUEUE_DB_CONTRACT_INVALID functions=% disallowed_tables=% canonical_tables=% policy_forced=% policy_acl=% private_acl=% public_acl=% auth_exec=% anon_exec=% service_exec=% workflow_constraints=% provider=%',
+                v_functions,v_disallowed_tables,v_canonical_tables,v_policy_forced,v_policy_direct_acl,
+                v_private_acl,v_public_acl,v_public_execute,v_anon_execute,v_service_execute,
+                v_workflow_constraints,v_provider;
+            end if;
+          end;
+          $verify$;
+          SQL
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-acl.status" || echo FAIL > "$RUNNER_TEMP/caq-db-acl.status"
+          exit "$code"
+
+      - name: Publish sanitized database result
+        if: always()
+        shell: bash
+        env:
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+        run: |
+          read_status() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf NOT_RUN; }
+          read_count() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf 0; }
+          {
+            echo '## Classroom Agent Queue PR338 database replay'
+            echo
+            echo "- Exact private SHA: \`${ACTUAL_SHA:-$PRIVATE_SHA}\`"
+            echo "- Exact merge base: \`${MERGE_BASE:-$BASE_SHA}\`"
+            echo "- Scope: **$(read_status caq-db-scope.status)**"
+            echo "- Replay preparation: **$(read_status caq-db-prepare.status)**"
+            echo "- First fresh replay: **$(read_status caq-db-first.status)** ($(read_count caq-db-first-count.txt) migrations)"
+            echo "- Second deterministic replay: **$(read_status caq-db-second.status)** ($(read_count caq-db-second-count.txt) migrations)"
+            echo "- Persistent Agent SQL regression: **$(read_status caq-db-persistent-e2e.status)**"
+            echo "- Queue ownership / RLS / ACL: **$(read_status caq-db-acl.status)**"
+            echo
+            echo 'Raw private source, migration output, SQL output, fixture identifiers and database URLs remain sealed and are deleted.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stop isolated database and remove sealed files
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          supabase stop --no-backup || true
+          rm -rf ../private-repo
+          rm -f "$RUNNER_TEMP"/caq-db-*.log
+
+      - name: Enforce exact database result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in \
+            caq-db-scope.status \
+            caq-db-prepare.status \
+            caq-db-first.status \
+            caq-db-second.status \
+            caq-db-persistent-e2e.status \
+            caq-db-acl.status; do
+            [[ -f "$RUNNER_TEMP/$file" ]]
+            [[ "$(cat "$RUNNER_TEMP/$file")" == PASS ]]
+          done
