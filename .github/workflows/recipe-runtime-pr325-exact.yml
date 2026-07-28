@@ -114,3 +114,123 @@ jobs:
         if: always()
         shell: bash
         run: rm -rf private-repo "$RUNNER_TEMP/recipe-python.log" "$RUNNER_TEMP/recipe-node.log" "$RUNNER_TEMP/recipe-syntax.log"
+
+  fresh-database-and-sql-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Prepare isolated Supabase project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          cp -R ../private-repo/supabase/migrations supabase/migrations
+          rm -f supabase/seed.sql
+          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          echo "RECIPE_DB_PREP status=PASS migration_files=$count sha=$PRIVATE_SHA"
+
+      - name: First fresh migration replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/recipe-db-first.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_DB_FIRST status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
+
+      - name: Second deterministic migration replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase db reset --local > "$RUNNER_TEMP/recipe-db-second.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_DB_SECOND status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
+
+      - name: Run transactional Recipe SQL E2E
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
+            > "$RUNNER_TEMP/recipe-sql-e2e.log" 2>&1
+          python - "$RUNNER_TEMP/recipe-sql-e2e.log" <<'PY'
+          import json, pathlib, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          payloads = []
+          for line in text.splitlines():
+              line = line.strip()
+              if not line.startswith('{'):
+                  continue
+              try:
+                  payloads.append(json.loads(line))
+              except json.JSONDecodeError:
+                  pass
+          payload = payloads[-1] if payloads else {}
+          residue = payload.get('residue') or {}
+          ok = (
+              payload.get('status') == 'PASS'
+              and payload.get('canonicalExecutionReused') is True
+              and payload.get('canonicalExecutionCount') == 1
+              and payload.get('triggerReceiptCount') == 2
+              and payload.get('formalWritePerformed') is False
+              and payload.get('badSourceDigestDenied') is True
+              and payload.get('humanInitialTriggerDenied') is True
+              and payload.get('humanReplayDenied') is True
+              and payload.get('changedExecutorProvenanceDenied') is True
+              and residue
+              and all(int(value) == 0 for value in residue.values())
+          )
+          print('RECIPE_SQL_E2E status=%s execution=%s receipts=%s cleanup=%s' % (
+              'PASS' if ok else 'FAIL',
+              payload.get('canonicalExecutionCount', 0),
+              payload.get('triggerReceiptCount', 0),
+              'PASS' if residue and all(int(value) == 0 for value in residue.values()) else 'FAIL',
+          ))
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Stop isolated database and remove sealed logs
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          supabase stop --no-backup || true
+          rm -f "$RUNNER_TEMP/recipe-db-first.log" "$RUNNER_TEMP/recipe-db-second.log" "$RUNNER_TEMP/recipe-sql-e2e.log"
+          rm -rf ../private-repo
