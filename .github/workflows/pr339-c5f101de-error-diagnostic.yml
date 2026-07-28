@@ -1,0 +1,163 @@
+name: PR339 c5f101de bounded error diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-c5f101de-error-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: c5f101def0853baebbe27f8ec256698b3b44a6ed
+  BASE_SHA: e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      ex_code: ${{ steps.probe.outputs.ex_code }}
+      ex_state: ${{ steps.probe.outputs.ex_state }}
+      ex_token: ${{ steps.probe.outputs.ex_token }}
+      as_code: ${{ steps.probe.outputs.as_code }}
+      as_state: ${{ steps.probe.outputs.as_state }}
+      as_token: ${{ steps.probe.outputs.as_token }}
+      gr_code: ${{ steps.probe.outputs.gr_code }}
+      gr_state: ${{ steps.probe.outputs.gr_state }}
+      gr_token: ${{ steps.probe.outputs.gr_token }}
+    steps:
+      - name: Validate exact inputs and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Checkout exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run verbose bounded probes with sealed output
+        id: probe
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr339-error-diag"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/pr339-error-init.log" 2>&1
+          init=$?
+          if [[ "$init" == 0 ]]; then
+            python scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root "$PWD" \
+              --output-dir "$workdir/supabase/migrations" \
+              --commit-sha "$PRIVATE_SHA" \
+              > "$RUNNER_TEMP/pr339-error-bootstrap.log" 2>&1
+            build=$?
+          else
+            build=1
+          fi
+          if [[ "$build" == 0 ]]; then
+            supabase --workdir "$workdir" start > "$RUNNER_TEMP/pr339-error-start.log" 2>&1
+            start=$?
+          else
+            start=1
+          fi
+
+          run_probe() {
+            local file="$1" log="$2"
+            { printf '\\set VERBOSITY verbose\n'; cat "$file"; } | \
+              psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f - > "$log" 2>&1
+            return $?
+          }
+
+          parse_error() {
+            python - "$1" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          states=re.findall(r'ERROR:\s+([0-9A-Z]{5}):',text)
+          errors=re.findall(r'ERROR:\s+(?:[0-9A-Z]{5}:\s*)?([^\r\n]+)',text)
+          message=errors[-1] if errors else ''
+          tokens=[t for t in re.findall(r'\b[A-Z][A-Z0-9_]{3,}\b',message) if t not in {'ERROR','DETAIL','CONTEXT','NOTICE','WARNING'}]
+          if tokens:
+              token=tokens[0][:80]
+          else:
+              lower=message.lower()
+              if 'does not exist' in lower and 'function' in lower: token='MISSING_FUNCTION'
+              elif 'does not exist' in lower and 'column' in lower: token='MISSING_COLUMN'
+              elif 'does not exist' in lower: token='MISSING_OBJECT'
+              elif 'violates' in lower: token='CONSTRAINT_VIOLATION'
+              elif 'syntax error' in lower: token='SQL_SYNTAX'
+              else: token='UNCLASSIFIED'
+          print(states[-1] if states else 'NONE')
+          print(token)
+          PY
+          }
+
+          ex_code=99; as_code=99; gr_code=99
+          ex_state=NOT_RUN; as_state=NOT_RUN; gr_state=NOT_RUN
+          ex_token=NOT_RUN; as_token=NOT_RUN; gr_token=NOT_RUN
+          if [[ "$start" == 0 ]]; then
+            run_probe tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql "$RUNNER_TEMP/pr339-error-ex.log"
+            ex_code=$?
+            readarray -t parsed < <(parse_error "$RUNNER_TEMP/pr339-error-ex.log")
+            ex_state="${parsed[0]:-NONE}"; ex_token="${parsed[1]:-UNCLASSIFIED}"
+
+            run_probe tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql "$RUNNER_TEMP/pr339-error-as.log"
+            as_code=$?
+            readarray -t parsed < <(parse_error "$RUNNER_TEMP/pr339-error-as.log")
+            as_state="${parsed[0]:-NONE}"; as_token="${parsed[1]:-UNCLASSIFIED}"
+
+            run_probe tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql "$RUNNER_TEMP/pr339-error-gr.log"
+            gr_code=$?
+            readarray -t parsed < <(parse_error "$RUNNER_TEMP/pr339-error-gr.log")
+            gr_state="${parsed[0]:-NONE}"; gr_token="${parsed[1]:-UNCLASSIFIED}"
+          fi
+
+          {
+            echo "ex_code=$ex_code"
+            echo "ex_state=$ex_state"
+            echo "ex_token=$ex_token"
+            echo "as_code=$as_code"
+            echo "as_state=$as_state"
+            echo "as_token=$as_token"
+            echo "gr_code=$gr_code"
+            echo "gr_state=$gr_state"
+            echo "gr_token=$gr_token"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-error-diag" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-error-*
+
+  sanitized-disposition:
+    if: always()
+    needs: diagnose
+    name: errors-ex${{ needs.diagnose.outputs.ex_code }}-${{ needs.diagnose.outputs.ex_state }}-${{ needs.diagnose.outputs.ex_token }}-as${{ needs.diagnose.outputs.as_code }}-${{ needs.diagnose.outputs.as_state }}-${{ needs.diagnose.outputs.as_token }}-gr${{ needs.diagnose.outputs.gr_code }}-${{ needs.diagnose.outputs.gr_state }}-${{ needs.diagnose.outputs.gr_token }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "bounded_error_diagnostic=published" >> "$GITHUB_STEP_SUMMARY"
