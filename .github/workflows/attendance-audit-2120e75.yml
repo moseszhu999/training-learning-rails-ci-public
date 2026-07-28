@@ -1,0 +1,189 @@
+name: Attendance canonical audit 2120e75
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/attendance-audit-2120e75.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attendance-audit-2120e75-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_EXACT_SHA: 2120e75e41a7de65c6bd91bfc240e5ed50d9b40e
+  EXPECTED_BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+  VALIDATION_PROFILE: generic-owned
+  EXPECTED_CHANGED_FILE_COUNT: '1'
+  EXPECTED_MIGRATION_RANGE: none
+  EXPECTED_FOCUSED_TEST_COUNTS: node=0;python=0
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Check out public CI controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate locked inputs
+        id: inputs
+        shell: bash
+        run: |
+          set +e
+          node scripts/exact-head-inputs.mjs > "$RUNNER_TEMP/attendance-audit-inputs.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate read-only private credential presence
+        id: credential
+        if: steps.inputs.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          if [[ -n "$PRIVATE_TOKEN" ]]; then
+            echo 'status=PASS' >> "$GITHUB_OUTPUT"
+          else
+            echo 'status=FAIL' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out exact private commit
+        id: private_checkout
+        if: steps.inputs.outputs.status == 'PASS' && steps.credential.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_EXACT_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify exact scope and audit-only boundary
+        id: scope
+        if: steps.private_checkout.outcome == 'success'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          MIGRATION_START: none
+          MIGRATION_END: none
+        run: |
+          set +e
+          node scripts/verify-private-scope.mjs > "$RUNNER_TEMP/attendance-audit-scope.log" 2>&1
+          scope_code=$?
+          actual="$(git -C private-repo diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")"
+          boundary=PASS
+          [[ "$actual" == 'docs/testing/trainingos-attendance-canonical-gap-audit-v1.md' ]] || boundary=FAIL
+          if printf '%s\n' "$actual" | grep -Eq '^(api/integrations/agents/mcp\.mjs|netlify/functions/trainingos-mcp\.mjs|extensions/trainingos-classroom-vscode/|packages/training-learning-workspace/|packages/training-classroom/|packages/training-classroom-zoom/|packages/training-classroom-lark/|packages/training-scheduling/|lib/trainingos-agent-gateway/|supabase/migrations/)'; then
+            boundary=FAIL
+          fi
+          echo "boundary_status=$boundary" >> "$GITHUB_OUTPUT"
+          echo "runner_code=$scope_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run generic-owned profile with sealed output
+        id: profile
+        if: steps.scope.outputs.status == 'PASS' && steps.scope.outputs.boundary_status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          EXPECTED_NODE_COUNT: '0'
+          EXPECTED_PYTHON_COUNT: '0'
+        run: |
+          set +e
+          node scripts/run-private-profile.mjs > "$RUNNER_TEMP/attendance-audit-profile.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized status
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          BOUNDARY_STATUS: ${{ steps.scope.outputs.boundary_status }}
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
+          MIGRATION_COUNT: ${{ steps.scope.outputs.migration_count }}
+          PROFILE_STATUS: ${{ steps.profile.outputs.status }}
+          PASSED_STEPS: ${{ steps.profile.outputs.passed_step_count }}
+          STEP_COUNT: ${{ steps.profile.outputs.step_count }}
+          NODE_PASSED: ${{ steps.profile.outputs.node_passed }}
+          NODE_TESTS: ${{ steps.profile.outputs.node_tests }}
+          PYTHON_TESTS: ${{ steps.profile.outputs.python_tests }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const value = (input) => input || 'NOT_RUN';
+          const lines = [
+            '## TrainingOS Attendance canonical audit exact-head CI',
+            '',
+            `- Validation profile: **generic-owned**`,
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_EXACT_SHA}\``,
+            `- Exact merge base: \`${process.env.MERGE_BASE || process.env.EXPECTED_BASE_SHA}\``,
+            `- Input validation: **${value(process.env.INPUT_STATUS)}**`,
+            `- Read-only credential present: **${value(process.env.CREDENTIAL_STATUS)}**`,
+            `- Scope verification: **${value(process.env.SCOPE_STATUS)}**`,
+            `- Audit-only forbidden-path boundary: **${value(process.env.BOUNDARY_STATUS)}**`,
+            `- Changed files: **${process.env.CHANGED_FILE_COUNT || '0'}**`,
+            `- Migrations: **${process.env.MIGRATION_COUNT || '0'}**`,
+            `- Generic-owned result: **${value(process.env.PROFILE_STATUS)}**`,
+            `- Profile stages: **${process.env.PASSED_STEPS || '0'}/${process.env.STEP_COUNT || '0'}**`,
+            `- Focused Node tests: **${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'}**`,
+            `- Focused Python tests: **${process.env.PYTHON_TESTS || '0'}**`,
+            '- Database replay: **NOT_RUN — docs-only, no migration**',
+            '',
+            'Private checkout and raw command output remain sealed and are deleted. No artifact is uploaded.',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`TRAININGOS_ATTENDANCE_AUDIT profile=generic-owned scope=${value(process.env.SCOPE_STATUS)} boundary=${value(process.env.BOUNDARY_STATUS)} validation=${value(process.env.PROFILE_STATUS)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'}`);
+          NODE
+
+      - name: Enforce exact-head result
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          INPUT_RUNNER_CODE: ${{ steps.inputs.outputs.runner_code }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          SCOPE_RUNNER_CODE: ${{ steps.scope.outputs.runner_code }}
+          BOUNDARY_STATUS: ${{ steps.scope.outputs.boundary_status }}
+          PROFILE_STATUS: ${{ steps.profile.outputs.status }}
+          PROFILE_RUNNER_CODE: ${{ steps.profile.outputs.runner_code }}
+        run: |
+          [[ "${INPUT_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${INPUT_RUNNER_CODE:-1}" == '0' ]]
+          [[ "${CREDENTIAL_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${SCOPE_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${SCOPE_RUNNER_CODE:-1}" == '0' ]]
+          [[ "${BOUNDARY_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${PROFILE_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${PROFILE_RUNNER_CODE:-1}" == '0' ]]
+
+      - name: Remove private checkout and sealed files
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/attendance-audit-*.log
