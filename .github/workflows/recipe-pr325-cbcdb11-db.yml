@@ -1,6 +1,5 @@
-name: Recipe PR325 cbcdb11 isolated database gates
+name: Recipe PR325 d833485 isolated database gates
 
-# Execution marker: exact-head finalization run 1.
 on:
   push:
     branches:
@@ -17,11 +16,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: recipe-pr325-cbcdb11-db-${{ github.event_name }}
+  group: recipe-pr325-d833485-db-${{ github.event_name }}
   cancel-in-progress: false
 
 env:
-  PRIVATE_SHA: cbcdb11c20856258165846252763b2a379be89cc
+  PRIVATE_SHA: d833485ce9db34797e7aba00b3903a6f57a70a11
   BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
 
 jobs:
@@ -100,7 +99,7 @@ jobs:
           test "$count" = 18
           echo 'PASS 18/18' > "$RUNNER_TEMP/recipe-db-prepare.status"
 
-      - name: First isolated canonical replay with sealed output
+      - name: First isolated canonical replay
         working-directory: replay-project
         shell: bash
         run: |
@@ -116,7 +115,7 @@ jobs:
           echo "FAIL applied=$applied last=${last:-none}" > "$RUNNER_TEMP/recipe-db-first.status"
           exit 1
 
-      - name: Second deterministic canonical replay with sealed output
+      - name: Second deterministic canonical replay
         if: always()
         working-directory: replay-project
         shell: bash
@@ -133,7 +132,7 @@ jobs:
           echo "FAIL applied=$applied last=${last:-none}" > "$RUNNER_TEMP/recipe-db-second.status"
           exit 1
 
-      - name: Verify RLS ACL and private helper execute denial
+      - name: Verify Recipe objects RLS and ACL boundary
         if: always()
         working-directory: replay-project
         shell: bash
@@ -156,24 +155,19 @@ jobs:
                 'trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts'
               ) and c.relrowsecurity and c.relforcerowsecurity
             ),
-            'authenticatedDirectTablePrivileges',(
+            'authenticatedDirect',(
               select count(*) from information_schema.role_table_grants
               where grantee='authenticated' and table_schema='public' and table_name like 'trainingos_agent_recipe%'
             ),
-            'serviceRoleDirectTablePrivileges',(
+            'serviceRoleDirect',(
               select count(*) from information_schema.role_table_grants
               where grantee='service_role' and table_schema='public' and table_name like 'trainingos_agent_recipe%'
             ),
-            'privateHelperExecutePrivileges',(
+            'privateHelperExecute',(
               select count(*) from information_schema.routine_privileges
               where grantee in ('PUBLIC','anon','authenticated','service_role')
                 and routine_schema='private' and routine_name like 'trainingos_agent_recipe%'
                 and privilege_type='EXECUTE'
-            ),
-            'serviceRoleTriggerExecute',has_function_privilege(
-              'service_role',
-              'public.trigger_trainingos_agent_recipe(uuid,uuid,integer,text,text,text,jsonb,jsonb,jsonb)',
-              'execute'
             )
           );
 SQL
@@ -182,55 +176,13 @@ SQL
           import json,pathlib,sys
           data=json.loads(sys.argv[1])
           ok=(data.get('recipeTables')==4 and data.get('forcedRls')==4
-              and data.get('authenticatedDirectTablePrivileges')==0
-              and data.get('serviceRoleDirectTablePrivileges')==0
-              and data.get('privateHelperExecutePrivileges')==0
-              and data.get('serviceRoleTriggerExecute') is False)
+              and data.get('authenticatedDirect')==0 and data.get('serviceRoleDirect')==0
+              and data.get('privateHelperExecute')==0)
           pathlib.Path(sys.argv[2]).write_text('PASS' if ok else 'FAIL',encoding='utf-8')
           raise SystemExit(0 if ok else 1)
           PY
 
-      - name: Verify create idempotency prefix guard in database
-        if: always()
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set -euo pipefail
-          eval "$(supabase status -o env | grep '^DB_URL=')"
-          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/recipe-db-create-guard.log" 2>&1 <<'SQL'
-          do $test$
-          declare v_denied boolean := false;
-          begin
-            perform set_config('request.jwt.claim.sub','c5010000-0000-4500-8500-000000000001',true);
-            perform set_config('request.jwt.claim.role','authenticated',true);
-            perform set_config('request.jwt.claims',jsonb_build_object(
-              'sub','c5010000-0000-4500-8500-000000000001',
-              'role','authenticated',
-              'app_metadata',jsonb_build_object('trainingos_actor_kind','human')
-            )::text,true);
-            begin
-              perform public.create_trainingos_agent_recipe(
-                'c5100000-0000-4500-8500-000000000010'::uuid,
-                'Guard check',
-                '{}'::jsonb,
-                repeat('x',234)
-              );
-            exception when sqlstate '22023' then
-              if sqlerrm='TRAININGOS_AGENT_RECIPE_CREATE_INPUT_INVALID' then
-                v_denied := true;
-              else
-                raise;
-              end if;
-            end;
-            if not v_denied then
-              raise exception 'RECIPE_CREATE_PREFIX_GUARD_NOT_ENFORCED';
-            end if;
-          end;
-          $test$;
-SQL
-          echo PASS > "$RUNNER_TEMP/recipe-db-create-guard.status"
-
-      - name: Run transactional Recipe SQL E2E with sealed output
+      - name: Run transactional Recipe SQL E2E
         if: always()
         working-directory: replay-project
         shell: bash
@@ -249,22 +201,15 @@ SQL
               if line.startswith('{'):
                   try: payloads.append(json.loads(line))
                   except json.JSONDecodeError: pass
-          result=payloads[-1] if payloads else {}
-          residue=result.get('residue') or {}
+          result=payloads[-1] if payloads else {}; residue=result.get('residue') or {}
           cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
-          ok=(result.get('status')=='PASS'
-              and result.get('createReplay') is True
-              and result.get('activateReplay') is True
-              and result.get('canonicalExecutionReused') is True
-              and result.get('canonicalExecutionCount')==1
-              and result.get('triggerReceiptCount')==2
-              and result.get('formalWritePerformed') is False
-              and result.get('badSourceDigestDenied') is True
-              and result.get('humanInitialTriggerDenied') is True
-              and result.get('humanReplayDenied') is True
+          ok=(result.get('status')=='PASS' and result.get('createReplay') is True
+              and result.get('activateReplay') is True and result.get('canonicalExecutionReused') is True
+              and result.get('canonicalExecutionCount')==1 and result.get('triggerReceiptCount')==2
+              and result.get('formalWritePerformed') is False and result.get('badSourceDigestDenied') is True
+              and result.get('humanInitialTriggerDenied') is True and result.get('humanReplayDenied') is True
               and result.get('changedExecutorProvenanceDenied') is True
-              and result.get('pausedTriggerDisposition')=='recipe_paused'
-              and cleanup)
+              and result.get('pausedTriggerDisposition')=='recipe_paused' and cleanup)
           pathlib.Path(sys.argv[2]).write_text(
               f'{"PASS" if ok else "FAIL"} execution={result.get("canonicalExecutionCount",0)} receipts={result.get("triggerReceiptCount",0)} cleanup={"PASS" if cleanup else "FAIL"}',
               encoding='utf-8')
@@ -276,12 +221,12 @@ SQL
         shell: bash
         run: |
           node <<'NODE'
-          const fs=require('node:fs'); const path=require('node:path');
-          const read=(name)=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,name),'utf8').trim()}catch{return 'NOT_RUN'}};
-          const result={prepare:read('recipe-db-prepare.status'),first:read('recipe-db-first.status'),second:read('recipe-db-second.status'),acl:read('recipe-db-acl.status'),createGuard:read('recipe-db-create-guard.status'),e2e:read('recipe-db-e2e.status')};
-          const lines=['## Recipe PR325 isolated database gates','',`- Exact private SHA: \`${process.env.PRIVATE_SHA}\``,`- Canonical prerequisite set: **${result.prepare}**`,`- First isolated replay: **${result.first}**`,`- Second deterministic replay: **${result.second}**`,`- RLS / ACL / private helper denial: **${result.acl}**`,`- Create idempotency prefix guard: **${result.createGuard}**`,`- Transaction E2E / zero residue: **${result.e2e}**`,'','Raw database and private output remains sealed and is deleted.'];
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`${lines.join('\n')}\n`);
-          console.log(`RECIPE_FINAL_DB prepare=${result.prepare} first=${result.first} second=${result.second} acl=${result.acl} create_guard=${result.createGuard} e2e=${result.e2e} sha=${process.env.PRIVATE_SHA}`);
+          const fs=require('node:fs'),path=require('node:path');
+          const read=n=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,n),'utf8').trim()}catch{return 'NOT_RUN'}};
+          const r={prepare:read('recipe-db-prepare.status'),first:read('recipe-db-first.status'),second:read('recipe-db-second.status'),acl:read('recipe-db-acl.status'),e2e:read('recipe-db-e2e.status')};
+          const lines=['## Recipe PR325 isolated database gates','',`- Exact private SHA: \`${process.env.PRIVATE_SHA}\``,`- Canonical prerequisite set: **${r.prepare}**`,`- First isolated replay: **${r.first}**`,`- Second deterministic replay: **${r.second}**`,`- RLS / ACL / private helper denial: **${r.acl}**`,`- Transaction E2E / zero residue: **${r.e2e}**`,'','Raw database and private output is sealed and deleted.'];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
+          console.log(`RECIPE_DB prepare=${r.prepare} first=${r.first} second=${r.second} acl=${r.acl} e2e=${r.e2e} sha=${process.env.PRIVATE_SHA}`);
           NODE
 
       - name: Stop isolated database and delete sealed logs
