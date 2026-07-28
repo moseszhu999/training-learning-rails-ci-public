@@ -1,0 +1,82 @@
+name: PR342 database replay diagnosis v3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-db-diagnostic-v3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 7c575a2e42e76d564e4ba15dfe8f682da8dee366
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Execute sealed replay and classify
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/pr342-v3.log"
+          supabase start --debug > "$log" 2>&1
+          code=$?
+          set -e
+
+          last_line="$(grep -E 'Applying migration ' "$log" | tail -1 || true)"
+          last_migration="$(printf '%s' "$last_line" | sed -E 's/.*Applying migration[[:space:]]+([^[:space:]]+).*/\1/' | tr -cd 'A-Za-z0-9_.-')"
+          failed_migration="$(grep -E 'failed to apply migration|migration .* failed|ERROR:' "$log" | tail -12 | grep -Eo '[0-9]{8,14}_[A-Za-z0-9_.-]+\.sql' | tail -1 || true)"
+          sqlstate="$(grep -Eo '(SQLSTATE|SQL state:|code:)[ =:]+[0-9A-Z]{5}' "$log" | tail -1 | grep -Eo '[0-9A-Z]{5}' | tail -1 || true)"
+          error_kind=unknown
+          grep -qi 'unexpected end of function definition' "$log" && error_kind=unexpected_function_end
+          grep -qi 'syntax error' "$log" && error_kind=sql_syntax_error
+          grep -qi 'does not exist' "$log" && error_kind=dependency_object_missing
+          grep -qi 'already exists' "$log" && error_kind=duplicate_object
+          grep -qi 'violates.*constraint' "$log" && error_kind=constraint_violation
+          grep -qi 'permission denied' "$log" && error_kind=permission_denied
+          grep -qiE 'docker|container|port is already allocated|health check' "$log" && error_kind=container_infrastructure
+          error_text="$(grep -Ei 'unexpected end of function definition|syntax error|does not exist|already exists|violates.*constraint|permission denied|failed to apply migration|ERROR:' "$log" | tail -1 | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}/<uuid>/g; s#/home/runner/[^ :]+#<runner-path>#g; s#postgresql://[^ ]+#<database-url>#g; s/[[:cntrl:]]//g' | cut -c1-360)"
+
+          report="$GITHUB_WORKSPACE/pr342-db-diagnostic-v3.txt"
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
+            echo "replay_exit_code=$code"
+            echo "last_migration=${last_migration:-NONE}"
+            echo "failed_migration=${failed_migration:-NONE}"
+            echo "sqlstate=${sqlstate:-NONE}"
+            echo "error_kind=$error_kind"
+            echo "error_text=${error_text:-NONE}"
+            echo "raw_private_output=SEALED_AND_DELETED"
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+          [[ $code -ne 0 ]]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr342-db-diagnostic-v3
+          path: pr342-db-diagnostic-v3.txt
+          retention-days: 3
+      - name: Cleanup
+        if: always()
+        run: |
+          (cd private-repo && supabase stop --no-backup >/dev/null 2>&1) || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-v3.log pr342-db-diagnostic-v3.txt
