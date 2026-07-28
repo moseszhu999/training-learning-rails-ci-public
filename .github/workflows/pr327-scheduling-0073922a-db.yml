@@ -1,0 +1,207 @@
+name: PR327 Scheduling Runtime fresh database E2E
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr327-scheduling-0073922a-db-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  fresh-database-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: 0073922ae1ebda5f19e3c6b22d84324976e9a691
+      LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - name: Validate private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run two sealed fresh database passes
+        id: database
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr327-supabase"
+          log="$RUNNER_TEMP/pr327-db.log"
+          first_replay="$RUNNER_TEMP/pr327-first-replay.txt"
+          first_e2e="$RUNNER_TEMP/pr327-first-e2e.txt"
+          second_replay="$RUNNER_TEMP/pr327-second-replay.txt"
+          second_e2e="$RUNNER_TEMP/pr327-second-e2e.txt"
+          first_history="$RUNNER_TEMP/pr327-first-history.txt"
+          second_history="$RUNNER_TEMP/pr327-second-history.txt"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          {
+            [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+            docker version >/dev/null
+            psql --version >/dev/null
+            supabase --workdir "$workdir" init --force --yes
+            python scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root "$PWD" \
+              --output-dir "$workdir/supabase/migrations" \
+              --commit-sha "$PRIVATE_SHA"
+            supabase --workdir "$workdir" start
+
+            supabase --workdir "$workdir" db reset --local --no-seed
+            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_scheduling_delivery_runtime_v2_replay.sql > "$first_replay"
+            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_scheduling_delivery_runtime_v2_e2e.sql > "$first_e2e"
+            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc \
+              "select jsonb_build_object('count',count(*),'min',min(version),'max',max(version)) from supabase_migrations.schema_migrations where version between '20260728130000' and '20260728135999';" > "$first_history"
+
+            supabase --workdir "$workdir" db reset --local --no-seed
+            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_scheduling_delivery_runtime_v2_replay.sql > "$second_replay"
+            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_scheduling_delivery_runtime_v2_e2e.sql > "$second_e2e"
+            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc \
+              "select jsonb_build_object('count',count(*),'min',min(version),'max',max(version)) from supabase_migrations.schema_migrations where version between '20260728130000' and '20260728135999';" > "$second_history"
+          } > "$log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python - "$first_replay" "$first_e2e" "$first_history" "$second_replay" "$second_e2e" "$second_history" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          paths = list(map(pathlib.Path, sys.argv[1:7]))
+          output = sys.argv[7]
+          def load(path):
+              if not path.exists(): return {}
+              for line in reversed(path.read_text(encoding='utf-8', errors='replace').splitlines()):
+                  line = line.strip()
+                  if line.startswith('{'):
+                      try: return json.loads(line)
+                      except json.JSONDecodeError: pass
+              return {}
+          required = (
+              'recurrence','generationIdempotency','previewNonMutating','agentSpoofRejected',
+              'staleVersionRejected','exactIdempotentReplay','changedIdempotencyReuseRejected',
+              'cancellation','rescheduleRelation','makeupRelation','teacherReplacement',
+              'locationChange','physicalLocationConflict','duplicateOccurrenceRejected',
+          )
+          def replay_ok(value):
+              return (value.get('status') == 'PASS'
+                      and value.get('transactionRolledBack') is True
+                      and value.get('remainingProbeRows') == 0
+                      and value.get('crossMidnightSeconds') == 5400
+                      and value.get('dstFallbackSeconds') == 10800
+                      and value.get('privateMutationEngineExposed') is False
+                      and value.get('classroomSessionsUsedAsHistory') is False)
+          def e2e_ok(value):
+              return (value.get('status') == 'PASS'
+                      and value.get('fixtureCleanup') == 'PLPGSQL_SUBTRANSACTION_ROLLBACK'
+                      and all(value.get(key) is True for key in required)
+                      and all(value.get(key) == 0 for key in value if key.startswith('remaining')))
+          def history_ok(value):
+              return (value.get('count') == 10
+                      and value.get('min') == '20260728130000'
+                      and value.get('max') == '20260728132500')
+          values = [load(path) for path in paths]
+          first_ok = replay_ok(values[0]) and e2e_ok(values[1]) and history_ok(values[2])
+          second_ok = replay_ok(values[3]) and e2e_ok(values[4]) and history_ok(values[5])
+          with open(output, 'a', encoding='utf-8') as out:
+              out.write(f'first_pass={str(first_ok).lower()}\n')
+              out.write(f'second_pass={str(second_ok).lower()}\n')
+              out.write(f'first_replay_status={values[0].get("status","MISSING")}\n')
+              out.write(f'first_e2e_status={values[1].get("status","MISSING")}\n')
+              out.write(f'first_migration_count={values[2].get("count",0)}\n')
+              out.write(f'second_replay_status={values[3].get("status","MISSING")}\n')
+              out.write(f'second_e2e_status={values[4].get("status","MISSING")}\n')
+              out.write(f'second_migration_count={values[5].get("count",0)}\n')
+              out.write(f'first_zero_residue={str(bool(values[1]) and all(values[1].get(k)==0 for k in values[1] if k.startswith("remaining"))).lower()}\n')
+              out.write(f'second_zero_residue={str(bool(values[4]) and all(values[4].get(k)==0 for k in values[4] if k.startswith("remaining"))).lower()}\n')
+          PY
+          exit 0
+
+      - name: Publish sanitized database result
+        if: always()
+        shell: bash
+        env:
+          CODE: ${{ steps.database.outputs.exit_code }}
+          FIRST: ${{ steps.database.outputs.first_pass }}
+          SECOND: ${{ steps.database.outputs.second_pass }}
+          FIRST_REPLAY: ${{ steps.database.outputs.first_replay_status }}
+          FIRST_E2E: ${{ steps.database.outputs.first_e2e_status }}
+          FIRST_COUNT: ${{ steps.database.outputs.first_migration_count }}
+          SECOND_REPLAY: ${{ steps.database.outputs.second_replay_status }}
+          SECOND_E2E: ${{ steps.database.outputs.second_e2e_status }}
+          SECOND_COUNT: ${{ steps.database.outputs.second_migration_count }}
+          FIRST_ZERO: ${{ steps.database.outputs.first_zero_residue }}
+          SECOND_ZERO: ${{ steps.database.outputs.second_zero_residue }}
+        run: |
+          status=FAIL
+          if [[ "${CODE:-1}" == 0 && "$FIRST" == true && "$SECOND" == true ]]; then status=PASS; fi
+          report=pr327-scheduling-fresh-db.txt
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "fresh_database_e2e=$status"
+            echo "first_replay=${FIRST_REPLAY:-MISSING}"
+            echo "first_business_e2e=${FIRST_E2E:-MISSING}"
+            echo "first_migration_count=${FIRST_COUNT:-0}"
+            echo "first_zero_residue=${FIRST_ZERO:-false}"
+            echo "second_replay=${SECOND_REPLAY:-MISSING}"
+            echo "second_business_e2e=${SECOND_E2E:-MISSING}"
+            echo "second_migration_count=${SECOND_COUNT:-0}"
+            echo "second_zero_residue=${SECOND_ZERO:-false}"
+            echo "destructive_reset_count=2"
+            echo "raw_logs_private_source_database_and_fixture_evidence=SEALED_AND_DELETED"
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized database result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr327-scheduling-fresh-db
+          path: pr327-scheduling-fresh-db.txt
+          retention-days: 3
+
+      - name: Cleanup and enforce database gates
+        if: always()
+        shell: bash
+        env:
+          CODE: ${{ steps.database.outputs.exit_code }}
+          FIRST: ${{ steps.database.outputs.first_pass }}
+          SECOND: ${{ steps.database.outputs.second_pass }}
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr327-supabase" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP/pr327-supabase" "$RUNNER_TEMP"/pr327-db.log \
+            "$RUNNER_TEMP"/pr327-first-* "$RUNNER_TEMP"/pr327-second-* pr327-scheduling-fresh-db.txt
+          [[ "${CODE:-1}" == 0 ]]
+          [[ "$FIRST" == true ]]
+          [[ "$SECOND" == true ]]
