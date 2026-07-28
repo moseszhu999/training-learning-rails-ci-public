@@ -31,9 +31,9 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           path: private-repo
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Locate canonical classroom session migration owner
+      - name: Locate legacy migration creation order
         id: scan
         working-directory: private-repo
         shell: bash
@@ -41,28 +41,35 @@ jobs:
           diagnostic="$(python <<'PY'
           from pathlib import Path
           import re
+          import subprocess
 
           root = Path('supabase/migrations')
           create_pattern = re.compile(
               r'create\s+table(?:\s+if\s+not\s+exists)?\s+(?:public\.)?classroom_sessions\b',
               re.I,
           )
-          reference_pattern = re.compile(r'\bclassroom_sessions\b', re.I)
           creators = []
-          references = []
+          legacy = []
           for path in sorted(root.glob('*.sql')):
               text = path.read_text(encoding='utf-8', errors='replace')
               if create_pattern.search(text):
                   creators.append(path.name)
-              if reference_pattern.search(text):
-                  references.append(path.name)
-          legacy = [path.name for path in sorted(root.glob('*.sql')) if re.match(r'^\d{8}_', path.name)]
+              if re.match(r'^\d{8}_', path.name):
+                  result = subprocess.run(
+                      ['git', 'log', '--diff-filter=A', '--format=%ct', '--', str(path)],
+                      check=False,
+                      capture_output=True,
+                      text=True,
+                  )
+                  timestamps = [int(item) for item in result.stdout.split() if item.isdigit()]
+                  created_at = min(timestamps) if timestamps else 0
+                  legacy.append((created_at, path.name))
+          git_order = [name for _, name in sorted(legacy, key=lambda item: (item[0], item[1]))]
           print(
-              'MIGRATION_OWNER_DIAGNOSTIC '
+              'MIGRATION_ORDER_DIAGNOSTIC '
               f'creators={",".join(creators) if creators else "none"} '
-              f'first_reference={references[0] if references else "none"} '
-              f'reference_count={len(references)} legacy_count={len(legacy)} '
-              f'legacy_first={legacy[0] if legacy else "none"} legacy_last={legacy[-1] if legacy else "none"}'
+              f'legacy_count={len(legacy)} '
+              f'git_order={",".join(git_order)}'
           )
           PY
           )"
@@ -72,7 +79,7 @@ jobs:
     needs: discover
     runs-on: ubuntu-24.04
     steps:
-      - name: Print migration-owner diagnostic
+      - name: Print migration-order diagnostic
         shell: bash
         env:
           DIAGNOSTIC: ${{ needs.discover.outputs.diagnostic }}
