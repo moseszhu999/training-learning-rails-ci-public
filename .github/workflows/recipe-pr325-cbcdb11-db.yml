@@ -1,0 +1,293 @@
+name: Recipe PR325 cbcdb11 isolated database gates
+
+on:
+  push:
+    branches:
+      - ci/recipe-pr325-cbcdb11-final
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/recipe-pr325-cbcdb11-app.yml
+      - .github/workflows/recipe-pr325-cbcdb11-db.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recipe-pr325-cbcdb11-db-${{ github.event_name }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: cbcdb11c20856258165846252763b2a379be89cc
+  BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+jobs:
+  isolated-replay-and-transaction-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Verify exact private head and merge base
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+
+      - name: Prepare canonical prerequisite migration set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          mkdir -p supabase/migrations
+          cp ../private-repo/tests/sql/trainingos_agent_recipe_prerequisite_harness.sql \
+            supabase/migrations/00000000000000_trainingos_agent_recipe_prerequisite_harness.sql
+          for migration in \
+            20260714_jhc_source_bundle_reference_assets.sql \
+            20260719233000_trainingos_agent_devices.sql \
+            20260724153000_trainingos_agent_execution_envelope.sql \
+            20260724154500_trainingos_agent_execution_envelope_hardening.sql \
+            20260724160000_trainingos_agent_execution_progress.sql \
+            20260727240000_trainingos_persistent_teacher_agent_schema_v1.sql \
+            20260727240100_trainingos_persistent_teacher_agent_policy_rpc_v1.sql \
+            20260728120000_trainingos_agent_recipe_schema_v1.sql \
+            20260728120100_trainingos_agent_recipe_management_v1.sql \
+            20260728120200_trainingos_agent_recipe_execution_v1.sql \
+            20260728120300_trainingos_agent_recipe_security_hardening_v1.sql \
+            20260728120400_trainingos_agent_recipe_actor_access_hardening_v1.sql \
+            20260728120500_trainingos_agent_recipe_trigger_entry_guard_v1.sql \
+            20260728120600_trainingos_agent_recipe_source_digest_guard_v1.sql \
+            20260728120700_trainingos_agent_recipe_executor_provenance_v1.sql \
+            20260728120800_trainingos_agent_recipe_review_hardening_v1.sql \
+            20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql
+          do
+            cp "../private-repo/supabase/migrations/$migration" "supabase/migrations/$migration"
+          done
+          rm -f supabase/seed.sql
+          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          test "$count" = 18
+          echo 'PASS 18/18' > "$RUNNER_TEMP/recipe-db-prepare.status"
+
+      - name: First isolated canonical replay with sealed output
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/recipe-db-first.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          if [[ "$code" == 0 && "$applied" == 18 && "$last" == '20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql' ]]; then
+            echo 'PASS 18/18' > "$RUNNER_TEMP/recipe-db-first.status"
+            exit 0
+          fi
+          echo "FAIL applied=$applied last=${last:-none}" > "$RUNNER_TEMP/recipe-db-first.status"
+          exit 1
+
+      - name: Second deterministic canonical replay with sealed output
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/recipe-db-second.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          if [[ "$code" == 0 && "$applied" == 18 && "$last" == '20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql' ]]; then
+            echo 'PASS 18/18' > "$RUNNER_TEMP/recipe-db-second.status"
+            exit 0
+          fi
+          echo "FAIL applied=$applied last=${last:-none}" > "$RUNNER_TEMP/recipe-db-second.status"
+          exit 1
+
+      - name: Verify RLS ACL and private helper execute denial
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          result="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          select jsonb_build_object(
+            'recipeTables',(
+              select count(*) from information_schema.tables
+              where table_schema='public' and table_name in (
+                'trainingos_agent_recipes','trainingos_agent_recipe_versions',
+                'trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts'
+              )
+            ),
+            'forcedRls',(
+              select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
+              where n.nspname='public' and c.relname in (
+                'trainingos_agent_recipes','trainingos_agent_recipe_versions',
+                'trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts'
+              ) and c.relrowsecurity and c.relforcerowsecurity
+            ),
+            'authenticatedDirectTablePrivileges',(
+              select count(*) from information_schema.role_table_grants
+              where grantee='authenticated' and table_schema='public' and table_name like 'trainingos_agent_recipe%'
+            ),
+            'serviceRoleDirectTablePrivileges',(
+              select count(*) from information_schema.role_table_grants
+              where grantee='service_role' and table_schema='public' and table_name like 'trainingos_agent_recipe%'
+            ),
+            'privateHelperExecutePrivileges',(
+              select count(*) from information_schema.routine_privileges
+              where grantee in ('PUBLIC','anon','authenticated','service_role')
+                and routine_schema='private' and routine_name like 'trainingos_agent_recipe%'
+                and privilege_type='EXECUTE'
+            ),
+            'serviceRoleTriggerExecute',has_function_privilege(
+              'service_role',
+              'public.trigger_trainingos_agent_recipe(uuid,uuid,integer,text,text,text,jsonb,jsonb,jsonb)',
+              'execute'
+            )
+          );
+SQL
+          )"
+          python - "$result" "$RUNNER_TEMP/recipe-db-acl.status" <<'PY'
+          import json,pathlib,sys
+          data=json.loads(sys.argv[1])
+          ok=(data.get('recipeTables')==4 and data.get('forcedRls')==4
+              and data.get('authenticatedDirectTablePrivileges')==0
+              and data.get('serviceRoleDirectTablePrivileges')==0
+              and data.get('privateHelperExecutePrivileges')==0
+              and data.get('serviceRoleTriggerExecute') is False)
+          pathlib.Path(sys.argv[2]).write_text('PASS' if ok else 'FAIL',encoding='utf-8')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Verify create idempotency prefix guard in database
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/recipe-db-create-guard.log" 2>&1 <<'SQL'
+          do $test$
+          declare v_denied boolean := false;
+          begin
+            perform set_config('request.jwt.claim.sub','c5010000-0000-4500-8500-000000000001',true);
+            perform set_config('request.jwt.claim.role','authenticated',true);
+            perform set_config('request.jwt.claims',jsonb_build_object(
+              'sub','c5010000-0000-4500-8500-000000000001',
+              'role','authenticated',
+              'app_metadata',jsonb_build_object('trainingos_actor_kind','human')
+            )::text,true);
+            begin
+              perform public.create_trainingos_agent_recipe(
+                'c5100000-0000-4500-8500-000000000010'::uuid,
+                'Guard check',
+                '{}'::jsonb,
+                repeat('x',234)
+              );
+            exception when sqlstate '22023' then
+              if sqlerrm='TRAININGOS_AGENT_RECIPE_CREATE_INPUT_INVALID' then
+                v_denied := true;
+              else
+                raise;
+              end if;
+            end;
+            if not v_denied then
+              raise exception 'RECIPE_CREATE_PREFIX_GUARD_NOT_ENFORCED';
+            end if;
+          end;
+          $test$;
+SQL
+          echo PASS > "$RUNNER_TEMP/recipe-db-create-guard.status"
+
+      - name: Run transactional Recipe SQL E2E with sealed output
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -1 -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
+            > "$RUNNER_TEMP/recipe-db-e2e.log" 2>&1
+          python - "$RUNNER_TEMP/recipe-db-e2e.log" "$RUNNER_TEMP/recipe-db-e2e.status" <<'PY'
+          import json,pathlib,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          payloads=[]
+          for line in text.splitlines():
+              line=line.strip()
+              if line.startswith('{'):
+                  try: payloads.append(json.loads(line))
+                  except json.JSONDecodeError: pass
+          result=payloads[-1] if payloads else {}
+          residue=result.get('residue') or {}
+          cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
+          ok=(result.get('status')=='PASS'
+              and result.get('createReplay') is True
+              and result.get('activateReplay') is True
+              and result.get('canonicalExecutionReused') is True
+              and result.get('canonicalExecutionCount')==1
+              and result.get('triggerReceiptCount')==2
+              and result.get('formalWritePerformed') is False
+              and result.get('badSourceDigestDenied') is True
+              and result.get('humanInitialTriggerDenied') is True
+              and result.get('humanReplayDenied') is True
+              and result.get('changedExecutorProvenanceDenied') is True
+              and result.get('pausedTriggerDisposition')=='recipe_paused'
+              and cleanup)
+          pathlib.Path(sys.argv[2]).write_text(
+              f'{"PASS" if ok else "FAIL"} execution={result.get("canonicalExecutionCount",0)} receipts={result.get("triggerReceiptCount",0)} cleanup={"PASS" if cleanup else "FAIL"}',
+              encoding='utf-8')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Publish sanitized database result
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'); const path=require('node:path');
+          const read=(name)=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,name),'utf8').trim()}catch{return 'NOT_RUN'}};
+          const result={prepare:read('recipe-db-prepare.status'),first:read('recipe-db-first.status'),second:read('recipe-db-second.status'),acl:read('recipe-db-acl.status'),createGuard:read('recipe-db-create-guard.status'),e2e:read('recipe-db-e2e.status')};
+          const lines=['## Recipe PR325 isolated database gates','',`- Exact private SHA: \`${process.env.PRIVATE_SHA}\``,`- Canonical prerequisite set: **${result.prepare}**`,`- First isolated replay: **${result.first}**`,`- Second deterministic replay: **${result.second}**`,`- RLS / ACL / private helper denial: **${result.acl}**`,`- Create idempotency prefix guard: **${result.createGuard}**`,`- Transaction E2E / zero residue: **${result.e2e}**`,'','Raw database and private output remains sealed and is deleted.'];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`${lines.join('\n')}\n`);
+          console.log(`RECIPE_FINAL_DB prepare=${result.prepare} first=${result.first} second=${result.second} acl=${result.acl} create_guard=${result.createGuard} e2e=${result.e2e} sha=${process.env.PRIVATE_SHA}`);
+          NODE
+
+      - name: Stop isolated database and delete sealed logs
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          supabase stop --no-backup || true
+          rm -f "$RUNNER_TEMP"/recipe-db-*.log "$RUNNER_TEMP"/recipe-db-*.status
+          rm -rf ../private-repo
