@@ -1,0 +1,241 @@
+name: Classroom Lark 0df28f3d exact-head application
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/classroom-lark-0df28f3d-app.yml
+      - .github/workflows/classroom-lark-0df28f3d-db.yml
+      - carriers/classroom-lark-0df28f3d.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-lark-0df28f3d-app-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 0df28f3d4056cc8aa2b65baa30981713a02f5b6a
+  BASE_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+
+jobs:
+  exact-head-application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Validate exact inputs and credential
+        id: credential
+        continue-on-error: true
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        if: always()
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        if: always()
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact head base scope and migrations
+        id: scope
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+          behind="$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")"
+          actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'docs/architecture/trainingos-classroom-lark-adapter-v1.md\ndocs/architecture/trainingos-classroom-provider-adapter-contract-v1.md\ndocs/testing/trainingos-classroom-lark-adapter-validation-v1.md\nlib/trainingos-agent-gateway/classroom-lark-adapter.mjs\npackages/training-classroom-lark/src/lark-adapter.d.mts\npackages/training-classroom-lark/src/lark-adapter.mjs\npackages/training-classroom-provider/src/provider-adapter.d.mts\npackages/training-classroom-provider/src/provider-adapter.mjs\npackages/training-classroom-zoom/src/provider-adapter.d.mts\npackages/training-classroom-zoom/src/provider-adapter.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-lark-adapter.test.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-provider-adapter-contract.test.mjs\nscripts/run-trainingos-classroom-lark-adapter-validation.mjs\nsupabase/migrations/20260728195000_trainingos_classroom_lark_schema_v1.sql\nsupabase/migrations/20260728195100_trainingos_classroom_lark_rpc_v1.sql\nsupabase/migrations/20260728195200_trainingos_classroom_lark_projection_v1.sql\nsupabase/migrations/20260728195300_trainingos_classroom_lark_security_hardening_v1.sql\nsupabase/migrations/20260728195400_trainingos_database_replay_source_assets_catalog_metadata_v1.sql\ntests/sql/trainingos_classroom_lark_adapter_e2e.sql\ntests/test_trainingos_classroom_lark_adapter_contract.py'
+          changed_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+          migration_count="$(printf '%s\n' "$actual_files" | grep -Ec '^supabase/migrations/2026072819[0-9]{4}_.*\.sql$' || true)"
+          [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+          [[ "$merge_base" == "$BASE_SHA" ]]
+          [[ "$behind" == 0 ]]
+          [[ "$actual_files" == "$expected_files" ]]
+          [[ "$changed_count" == 20 ]]
+          [[ "$migration_count" == 5 ]]
+          {
+            echo "actual_sha=$actual_sha"
+            echo "merge_base=$merge_base"
+            echo "behind=$behind"
+            echo "changed_count=$changed_count"
+            echo "migration_count=$migration_count"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run JavaScript syntax checks with sealed output
+        id: syntax
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check packages/training-classroom-provider/src/provider-adapter.mjs
+            node --check packages/training-classroom-zoom/src/provider-adapter.mjs
+            node --check packages/training-classroom-lark/src/lark-adapter.mjs
+            node --check lib/trainingos-agent-gateway/classroom-zoom-adapter.mjs
+            node --check lib/trainingos-agent-gateway/classroom-lark-adapter.mjs
+            node --check scripts/run-trainingos-classroom-lark-adapter-validation.mjs
+          } > "$RUNNER_TEMP/lark-0df-syntax.log" 2>&1
+          code=$?
+          echo "count=6" >> "$GITHUB_OUTPUT"
+          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      - name: Run focused provider contracts with sealed output
+        id: node_contracts
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/lark-0df-node.log"
+          node scripts/run-trainingos-classroom-lark-adapter-validation.mjs > "$log" 2>&1
+          code=$?
+          python - "$log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          def value(pattern, default):
+              match=re.search(pattern,text)
+              return int(match.group(1)) if match else default
+          count=value(r'# tests\s+(\d+)',0)
+          passed=value(r'# pass\s+(\d+)',0)
+          failed=value(r'# fail\s+(\d+)',-1)
+          ok=int(sys.argv[2])==0 and count==16 and passed==16 and failed==0
+          with open(sys.argv[3],'a',encoding='utf-8') as out:
+              out.write(f'count={count}\npassed={passed}\nfailed={failed}\nstatus={"PASS" if ok else "FAIL"}\n')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Run Python static and security contracts with sealed output
+        id: python_contracts
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/lark-0df-python.log"
+          python tests/test_trainingos_classroom_lark_adapter_contract.py > "$log" 2>&1
+          code=$?
+          python - "$log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          match=re.search(r'Ran\s+(\d+)\s+tests?',text)
+          count=int(match.group(1)) if match else 0
+          ok=int(sys.argv[2])==0 and count==11 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
+          with open(sys.argv[3],'a',encoding='utf-8') as out:
+              out.write(f'count={count}\nstatus={"PASS" if ok else "FAIL"}\n')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Install dependencies with sealed output
+        id: install
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: npm ci > "$RUNNER_TEMP/lark-0df-install.log" 2>&1
+
+      - name: Run repository typecheck with sealed output
+        id: typecheck
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: npm run typecheck > "$RUNNER_TEMP/lark-0df-typecheck.log" 2>&1
+
+      - name: Run production build with sealed output
+        id: build
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: npm run build > "$RUNNER_TEMP/lark-0df-build.log" 2>&1
+
+      - name: Publish sanitized application result
+        if: always()
+        env:
+          SCOPE: ${{ steps.scope.outcome }}
+          CHANGED: ${{ steps.scope.outputs.changed_count }}
+          MIGRATIONS: ${{ steps.scope.outputs.migration_count }}
+          SYNTAX: ${{ steps.syntax.outputs.status }}
+          NODE_STATUS: ${{ steps.node_contracts.outputs.status }}
+          NODE_PASS: ${{ steps.node_contracts.outputs.passed }}
+          NODE_COUNT: ${{ steps.node_contracts.outputs.count }}
+          PYTHON_STATUS: ${{ steps.python_contracts.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_contracts.outputs.count }}
+          INSTALL: ${{ steps.install.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        shell: bash
+        run: |
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
+            echo "scope=${SCOPE:-missing}"
+            echo "changed_files=${CHANGED:-0}"
+            echo "migrations=${MIGRATIONS:-0}"
+            echo "syntax=${SYNTAX:-MISSING}:6/6"
+            echo "node=${NODE_STATUS:-MISSING}:${NODE_PASS:-0}/${NODE_COUNT:-0}"
+            echo "python=${PYTHON_STATUS:-MISSING}:${PYTHON_COUNT:-0}/11"
+            echo "install=${INSTALL:-missing}"
+            echo "typecheck=${TYPECHECK:-missing}"
+            echo "build=${BUILD:-missing}"
+            echo "raw_private_output=SEALED_AND_DELETED"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: rm -rf private-repo "$RUNNER_TEMP"/lark-0df-*.log
+
+      - name: Final application enforcement
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          SCOPE: ${{ steps.scope.outcome }}
+          SYNTAX: ${{ steps.syntax.outcome }}
+          NODE: ${{ steps.node_contracts.outcome }}
+          PYTHON: ${{ steps.python_contracts.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CREDENTIAL" == success && "$CHECKOUT" == success && "$SCOPE" == success ]]
+          [[ "$SYNTAX" == success && "$NODE" == success && "$PYTHON" == success ]]
+          [[ "$INSTALL" == success && "$TYPECHECK" == success && "$BUILD" == success ]]
