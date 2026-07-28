@@ -1,4 +1,4 @@
-name: Classroom Agent Queue PR338 database replay
+name: Classroom Agent Queue PR338 canonical database replay
 
 on:
   pull_request:
@@ -18,7 +18,7 @@ concurrency:
 jobs:
   exact-database-replay:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       PRIVATE_SHA: 7751ec7d0e0535036c500e315078646ef1dc81f2
       BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
@@ -45,7 +45,7 @@ jobs:
           fetch-depth: 0
           clean: true
 
-      - name: Verify exact private head and migration scope
+      - name: Verify exact private head, merge base and migration scope
         id: scope
         working-directory: private-repo
         shell: bash
@@ -67,60 +67,96 @@ jobs:
           version: latest
           github-token: ${{ github.token }}
 
-      - name: Prepare isolated full migration replay
+      - name: Build canonical fresh-database bootstrap
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir replay-project
-          cd replay-project
-          supabase init
-          rm -rf supabase/migrations
-          cp -R ../private-repo/supabase/migrations supabase/migrations
-          rm -f supabase/seed.sql
-          migration_count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          [[ "$migration_count" -gt 0 ]]
+          set +e
+          mkdir -p replay-project sanitized
+          supabase --workdir replay-project init --force --yes > "$RUNNER_TEMP/caq-db-init.log" 2>&1
+          init_code=$?
+          rm -rf replay-project/supabase/migrations
+          python private-repo/scripts/build-trainingos-fresh-bootstrap.py \
+            --repo-root private-repo \
+            --output-dir replay-project/supabase/migrations \
+            --commit-sha "$PRIVATE_SHA" \
+            > "$RUNNER_TEMP/caq-db-builder.log" 2>&1
+          builder_code=$?
+          migration_count="$(find replay-project/supabase/migrations -maxdepth 1 -type f -name '*.sql' 2>/dev/null | wc -l | tr -d ' ')"
+          latest="$(find replay-project/supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' 2>/dev/null | sort | tail -1 || true)"
+          if [[ "$init_code" == 0 && "$builder_code" == 0 \
+                && -f replay-project/supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql \
+                && "$migration_count" -gt 0 ]]; then
+            echo PASS > "$RUNNER_TEMP/caq-db-bootstrap.status"
+          else
+            echo FAIL > "$RUNNER_TEMP/caq-db-bootstrap.status"
+          fi
           echo "$migration_count" > "$RUNNER_TEMP/caq-db-migration-count.txt"
-          echo PASS > "$RUNNER_TEMP/caq-db-prepare.status"
+          echo "${latest:-none}" > "$RUNNER_TEMP/caq-db-latest.txt"
+          exit 0
 
-      - name: First fresh migration replay with sanitized classification
+      - name: Initial canonical fresh migration replay
         working-directory: replay-project
         shell: bash
         run: |
           set +e
-          supabase db start > "$RUNNER_TEMP/caq-db-first.log" 2>&1
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-bootstrap.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-db-start.status"
+            echo 0 > "$RUNNER_TEMP/caq-db-start-count.txt"
+            echo none > "$RUNNER_TEMP/caq-db-start-last.txt"
+            echo bootstrap_failed > "$RUNNER_TEMP/caq-db-start-classification.txt"
+            exit 0
+          fi
+          supabase start > "$RUNNER_TEMP/caq-db-start.log" 2>&1
           code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-first.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/caq-db-first.log" | tail -1 | sed -E 's/.*Applying migration ([A-Za-z0-9_.-]+).*/\1/' || true)"
-          marker="$(grep -oE 'TRAININGOS_[A-Z0-9_]+' "$RUNNER_TEMP/caq-db-first.log" | tail -1 || true)"
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-start.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/caq-db-start.log" | tail -1 | sed -E 's/.*Applying migration ([A-Za-z0-9_.-]+).*/\1/' || true)"
+          marker="$(grep -oE 'TRAININGOS_[A-Z0-9_]+' "$RUNNER_TEMP/caq-db-start.log" | tail -1 || true)"
           classification=none
           if [[ "$code" != 0 ]]; then
             classification="${marker:-unclassified_migration_failure}"
-            grep -qi 'does not exist' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-dependency_object_missing}"
-            grep -qi 'syntax error' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-sql_syntax_error}"
-            grep -qi 'duplicate' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-duplicate_object_or_key}"
-            grep -qi 'permission denied' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-permission_denied}"
+            grep -qi 'does not exist' "$RUNNER_TEMP/caq-db-start.log" && classification="${marker:-dependency_object_missing}"
+            grep -qi 'syntax error' "$RUNNER_TEMP/caq-db-start.log" && classification="${marker:-sql_syntax_error}"
+            grep -qi 'duplicate' "$RUNNER_TEMP/caq-db-start.log" && classification="${marker:-duplicate_object_or_key}"
+            grep -qi 'permission denied' "$RUNNER_TEMP/caq-db-start.log" && classification="${marker:-permission_denied}"
           fi
-          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-first.status" || echo FAIL > "$RUNNER_TEMP/caq-db-first.status"
-          echo "$applied" > "$RUNNER_TEMP/caq-db-first-count.txt"
-          echo "${last:-none}" > "$RUNNER_TEMP/caq-db-first-last.txt"
-          echo "$classification" > "$RUNNER_TEMP/caq-db-first-classification.txt"
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-start.status" || echo FAIL > "$RUNNER_TEMP/caq-db-start.status"
+          echo "$applied" > "$RUNNER_TEMP/caq-db-start-count.txt"
+          echo "${last:-none}" > "$RUNNER_TEMP/caq-db-start-last.txt"
+          echo "$classification" > "$RUNNER_TEMP/caq-db-start-classification.txt"
           exit 0
 
-      - name: Second deterministic migration replay
+      - name: First destructive canonical replay
         working-directory: replay-project
         shell: bash
         run: |
           set +e
-          if [[ "$(cat "$RUNNER_TEMP/caq-db-first.status")" != PASS ]]; then
-            echo NOT_RUN > "$RUNNER_TEMP/caq-db-second.status"
-            echo 0 > "$RUNNER_TEMP/caq-db-second-count.txt"
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-start.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-db-reset1.status"
+            echo 0 > "$RUNNER_TEMP/caq-db-reset1-count.txt"
             exit 0
           fi
-          supabase db reset --local --no-seed > "$RUNNER_TEMP/caq-db-second.log" 2>&1
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/caq-db-reset1.log" 2>&1
           code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-second.log" || true)"
-          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-second.status" || echo FAIL > "$RUNNER_TEMP/caq-db-second.status"
-          echo "$applied" > "$RUNNER_TEMP/caq-db-second-count.txt"
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-reset1.log" || true)"
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-reset1.status" || echo FAIL > "$RUNNER_TEMP/caq-db-reset1.status"
+          echo "$applied" > "$RUNNER_TEMP/caq-db-reset1-count.txt"
+          exit 0
+
+      - name: Second destructive canonical replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-reset1.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-db-reset2.status"
+            echo 0 > "$RUNNER_TEMP/caq-db-reset2-count.txt"
+            exit 0
+          fi
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/caq-db-reset2.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-reset2.log" || true)"
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-reset2.status" || echo FAIL > "$RUNNER_TEMP/caq-db-reset2.status"
+          echo "$applied" > "$RUNNER_TEMP/caq-db-reset2-count.txt"
           exit 0
 
       - name: Run existing Persistent Agent SQL regression
@@ -128,7 +164,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          if [[ "$(cat "$RUNNER_TEMP/caq-db-second.status")" != PASS ]]; then
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-reset2.status")" != PASS ]]; then
             echo NOT_RUN > "$RUNNER_TEMP/caq-db-persistent-e2e.status"
             exit 0
           fi
@@ -145,7 +181,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          if [[ "$(cat "$RUNNER_TEMP/caq-db-second.status")" != PASS ]]; then
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-reset2.status")" != PASS ]]; then
             echo NOT_RUN > "$RUNNER_TEMP/caq-db-acl.status"
             exit 0
           fi
@@ -160,7 +196,7 @@ jobs:
             v_policy_direct_acl integer;
             v_private_acl integer;
             v_public_acl integer;
-            v_public_execute boolean;
+            v_authenticated_execute boolean;
             v_anon_execute boolean;
             v_service_execute boolean;
             v_workflow_constraints integer;
@@ -233,7 +269,7 @@ jobs:
               'authenticated',
               'public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)',
               'EXECUTE'
-            ) into v_public_execute;
+            ) into v_authenticated_execute;
             select has_function_privilege(
               'anon',
               'public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)',
@@ -266,7 +302,7 @@ jobs:
                or v_policy_direct_acl<>0
                or v_private_acl<>0
                or v_public_acl<>0
-               or not v_public_execute
+               or not v_authenticated_execute
                or v_anon_execute
                or v_service_execute
                or v_workflow_constraints<>2
@@ -287,33 +323,51 @@ jobs:
           ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
           MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
         run: |
+          set -euo pipefail
           read_status() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf NOT_RUN; }
           read_count() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf 0; }
           read_value() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf none; }
           {
-            echo '## Classroom Agent Queue PR338 database replay'
+            echo "private_sha=${ACTUAL_SHA:-$PRIVATE_SHA}"
+            echo "merge_base=${MERGE_BASE:-$BASE_SHA}"
+            echo "scope=$(read_status caq-db-scope.status)"
+            echo "canonical_bootstrap=$(read_status caq-db-bootstrap.status)"
+            echo "migration_count=$(read_count caq-db-migration-count.txt)"
+            echo "latest_bootstrap_migration=$(read_value caq-db-latest.txt)"
+            echo "initial_replay=$(read_status caq-db-start.status)"
+            echo "initial_applied=$(read_count caq-db-start-count.txt)"
+            echo "initial_last=$(read_value caq-db-start-last.txt)"
+            echo "initial_classification=$(read_value caq-db-start-classification.txt)"
+            echo "destructive_replay_1=$(read_status caq-db-reset1.status)"
+            echo "destructive_replay_1_applied=$(read_count caq-db-reset1-count.txt)"
+            echo "destructive_replay_2=$(read_status caq-db-reset2.status)"
+            echo "destructive_replay_2_applied=$(read_count caq-db-reset2-count.txt)"
+            echo "persistent_agent_sql=$(read_status caq-db-persistent-e2e.status)"
+            echo "queue_rls_acl=$(read_status caq-db-acl.status)"
+          } | tee sanitized/pr338-db-result.txt
+          {
+            echo '## Classroom Agent Queue PR338 canonical database replay'
             echo
-            echo "- Exact private SHA: \`${ACTUAL_SHA:-$PRIVATE_SHA}\`"
-            echo "- Exact merge base: \`${MERGE_BASE:-$BASE_SHA}\`"
-            echo "- Scope: **$(read_status caq-db-scope.status)**"
-            echo "- Replay preparation: **$(read_status caq-db-prepare.status)**"
-            echo "- First fresh replay: **$(read_status caq-db-first.status)** ($(read_count caq-db-first-count.txt) migrations)"
-            echo "- Last applying migration: \`$(read_value caq-db-first-last.txt)\`"
-            echo "- Sanitized failure classification: \`$(read_value caq-db-first-classification.txt)\`"
-            echo "- Second deterministic replay: **$(read_status caq-db-second.status)** ($(read_count caq-db-second-count.txt) migrations)"
-            echo "- Persistent Agent SQL regression: **$(read_status caq-db-persistent-e2e.status)**"
-            echo "- Queue ownership / RLS / ACL: **$(read_status caq-db-acl.status)**"
+            sed 's/^/- `/' sanitized/pr338-db-result.txt | sed 's/=/`: `/' | sed 's/$/`/'
             echo
             echo 'Raw private source, migration output, SQL output, fixture identifiers and database URLs remain sealed and are deleted.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Upload sanitized database result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classroom-agent-queue-pr338-db-result
+          path: sanitized/pr338-db-result.txt
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Stop isolated database and remove sealed files
         if: always()
-        working-directory: replay-project
         shell: bash
         run: |
-          supabase stop --no-backup || true
-          rm -rf ../private-repo
+          supabase --workdir replay-project stop --no-backup || true
+          rm -rf private-repo replay-project
           rm -f "$RUNNER_TEMP"/caq-db-*.log
 
       - name: Enforce exact database result
@@ -323,9 +377,10 @@ jobs:
           set -euo pipefail
           for file in \
             caq-db-scope.status \
-            caq-db-prepare.status \
-            caq-db-first.status \
-            caq-db-second.status \
+            caq-db-bootstrap.status \
+            caq-db-start.status \
+            caq-db-reset1.status \
+            caq-db-reset2.status \
             caq-db-persistent-e2e.status \
             caq-db-acl.status; do
             [[ -f "$RUNNER_TEMP/$file" ]]
