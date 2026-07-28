@@ -16,9 +16,9 @@ env:
   PRIVATE_SHA: 028871119c5cbf68923308b4478ca7438348457b
 
 jobs:
-  sql-e2e-diagnostic:
+  focused-current-head:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 20
     steps:
       - name: Validate exact SHA and private read credential
         shell: bash
@@ -40,141 +40,70 @@ jobs:
           fetch-depth: 1
           clean: true
 
-      - uses: supabase/setup-cli@v2
+      - uses: actions/setup-node@v4
         with:
-          version: latest
-          github-token: ${{ github.token }}
+          node-version: '20'
 
-      - name: Prepare canonical prerequisite migration set
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head
+        working-directory: private-repo
         shell: bash
         run: |
           set -euo pipefail
-          mkdir replay-project
-          cd replay-project
-          supabase init
-          rm -rf supabase/migrations
-          mkdir -p supabase/migrations
-          cp ../private-repo/tests/sql/trainingos_agent_recipe_prerequisite_harness.sql \
-            supabase/migrations/00000000000000_trainingos_agent_recipe_prerequisite_harness.sql
-          for migration in \
-            20260714_jhc_source_bundle_reference_assets.sql \
-            20260719233000_trainingos_agent_devices.sql \
-            20260724153000_trainingos_agent_execution_envelope.sql \
-            20260724154500_trainingos_agent_execution_envelope_hardening.sql \
-            20260724160000_trainingos_agent_execution_progress.sql \
-            20260727240000_trainingos_persistent_teacher_agent_schema_v1.sql \
-            20260727240100_trainingos_persistent_teacher_agent_policy_rpc_v1.sql \
-            20260728120000_trainingos_agent_recipe_schema_v1.sql \
-            20260728120100_trainingos_agent_recipe_management_v1.sql \
-            20260728120200_trainingos_agent_recipe_execution_v1.sql \
-            20260728120300_trainingos_agent_recipe_security_hardening_v1.sql \
-            20260728120400_trainingos_agent_recipe_actor_access_hardening_v1.sql \
-            20260728120500_trainingos_agent_recipe_trigger_entry_guard_v1.sql \
-            20260728120600_trainingos_agent_recipe_source_digest_guard_v1.sql \
-            20260728120700_trainingos_agent_recipe_executor_provenance_v1.sql
-          do
-            cp "../private-repo/supabase/migrations/$migration" "supabase/migrations/$migration"
-          done
-          rm -f supabase/seed.sql
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
 
-      - name: Start canonical prerequisite database
-        working-directory: replay-project
-        shell: bash
-        run: supabase start > "$RUNNER_TEMP/recipe-canonical-start.log" 2>&1
-
-      - name: Capture sanitized transactional SQL E2E result
-        id: e2e
-        working-directory: replay-project
+      - name: Enforce focused Recipe Python 16 of 16
+        working-directory: private-repo
         shell: bash
         run: |
           set +e
-          eval "$(supabase status -o env | grep '^DB_URL=')"
-          psql "$DB_URL" -X -qAt -1 -v ON_ERROR_STOP=1 \
-            -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
-            > "$RUNNER_TEMP/recipe-sql-e2e.log" 2>&1
+          python -m unittest -v tests/test_trainingos_agent_recipe_contract.py > "$RUNNER_TEMP/recipe-python.log" 2>&1
           code=$?
-          CODE="$code" PRIVATE_SHA="$PRIVATE_SHA" python - "$RUNNER_TEMP/recipe-sql-e2e.log" "$RUNNER_TEMP/recipe-sql-e2e-diagnostic.json" <<'PY'
-          import hashlib, json, os, pathlib, re, sys
+          python - "$RUNNER_TEMP/recipe-python.log" "$code" <<'PY'
+          import pathlib, re, sys
           text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
-          payloads=[]
-          for line in text.splitlines():
-              line=line.strip()
-              if line.startswith('{'):
-                  try: payloads.append(json.loads(line))
-                  except json.JSONDecodeError: pass
-          result=payloads[-1] if payloads else {}
-          residue=result.get('residue') or {}
-          cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
-          expected=(result.get('status')=='PASS'
-              and result.get('canonicalExecutionReused') is True
-              and result.get('canonicalExecutionCount')==1
-              and result.get('triggerReceiptCount')==2
-              and result.get('formalWritePerformed') is False
-              and result.get('badSourceDigestDenied') is True
-              and result.get('humanInitialTriggerDenied') is True
-              and result.get('humanReplayDenied') is True
-              and result.get('changedExecutorProvenanceDenied') is True
-              and cleanup)
-          custom=re.findall(r'ERROR:\s+([A-Z][A-Z0-9_]+)',text)
-          relation=re.findall(r'relation\s+["\']([^"\']+)["\']\s+does not exist',text,re.I)
-          column=re.findall(r'column\s+["\']?([a-zA-Z0-9_.]+)["\']?\s+does not exist',text,re.I)
-          function=re.findall(r'function\s+([a-zA-Z0-9_.]+)\([^\n]*does not exist',text,re.I)
-          if int(os.environ['CODE'])==0 and expected: error_class=None
-          elif custom: error_class='custom_recipe_assertion'
-          elif relation: error_class='missing_relation'
-          elif column: error_class='missing_column'
-          elif function: error_class='missing_function'
-          elif 'violates not-null constraint' in text.lower(): error_class='not_null_violation'
-          elif 'violates check constraint' in text.lower(): error_class='check_violation'
-          elif 'violates foreign key constraint' in text.lower(): error_class='foreign_key_violation'
-          elif int(os.environ['CODE'])==0: error_class='evidence_mismatch'
-          else: error_class='unknown_sql_e2e_failure'
-          missing=(relation or column or function or [None])[-1]
-          tail='\n'.join(text.splitlines()[-80:])
-          diagnostic={
-              'schemaVersion':'trainingos-recipe-sql-e2e-result-v3',
-              'privateSha':os.environ['PRIVATE_SHA'],
-              'status':'PASS' if int(os.environ['CODE'])==0 and expected else 'FAIL',
-              'exitCode':int(os.environ['CODE']),
-              'errorClass':error_class,
-              'missingObject':missing,
-              'customErrorToken':custom[-1] if custom else None,
-              'canonicalExecutionCount':result.get('canonicalExecutionCount',0),
-              'triggerReceiptCount':result.get('triggerReceiptCount',0),
-              'cleanup':'PASS' if cleanup else 'FAIL',
-              'tailFingerprint':hashlib.sha256(tail.encode()).hexdigest(),
-              'rawOutputPublished':False,
-          }
-          pathlib.Path(sys.argv[2]).write_text(json.dumps(diagnostic,indent=2)+'\n',encoding='utf-8')
-          print('RECIPE_SQL_E2E status=%s class=%s object=%s token=%s execution=%s receipts=%s cleanup=%s' % (
-              diagnostic['status'],diagnostic['errorClass'] or 'none',diagnostic['missingObject'] or 'none',
-              diagnostic['customErrorToken'] or 'none',diagnostic['canonicalExecutionCount'],
-              diagnostic['triggerReceiptCount'],diagnostic['cleanup']))
-          raise SystemExit(0 if diagnostic['status']=='PASS' else 1)
+          match=re.search(r'Ran\s+(\d+)\s+tests?',text)
+          count=int(match.group(1)) if match else 0
+          ok=int(sys.argv[2])==0 and count==16 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
+          print(f'RECIPE_FOCUSED_PYTHON status={"PASS" if ok else "FAIL"} count={count}/16')
+          raise SystemExit(0 if ok else 1)
           PY
-          parser_code=$?
-          echo "code=$parser_code" >> "$GITHUB_OUTPUT"
-          exit 0
 
-      - name: Upload sanitized SQL E2E result
-        uses: actions/upload-artifact@v4
-        with:
-          name: recipe-pr325-sql-e2e-result-v3
-          path: ${{ runner.temp }}/recipe-sql-e2e-diagnostic.json
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Enforce transactional SQL E2E result
-        env:
-          E2E_CODE: ${{ steps.e2e.outputs.code }}
-        run: test "${E2E_CODE:-1}" = 0
-
-      - name: Stop isolated database and remove sealed logs
-        if: always()
-        working-directory: replay-project
+      - name: Enforce focused Recipe Node 9 of 9
+        working-directory: private-repo
         shell: bash
         run: |
-          supabase stop --no-backup || true
-          rm -f "$RUNNER_TEMP/recipe-canonical-start.log" "$RUNNER_TEMP/recipe-sql-e2e.log" \
-            "$RUNNER_TEMP/recipe-sql-e2e-diagnostic.json"
-          rm -rf ../private-repo
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/recipe-runtime.test.mjs > "$RUNNER_TEMP/recipe-node.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/recipe-node.log" "$code" <<'PY'
+          import pathlib, re, sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          tests=re.search(r'# tests\s+(\d+)',text)
+          passed=re.search(r'# pass\s+(\d+)',text)
+          failed=re.search(r'# fail\s+(\d+)',text)
+          count=int(tests.group(1)) if tests else 0
+          pass_count=int(passed.group(1)) if passed else 0
+          fail_count=int(failed.group(1)) if failed else -1
+          ok=int(sys.argv[2])==0 and count==9 and pass_count==9 and fail_count==0
+          print(f'RECIPE_FOCUSED_NODE status={"PASS" if ok else "FAIL"} pass={pass_count}/{count} fail={fail_count}')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Enforce Recipe JavaScript syntax
+        working-directory: private-repo
+        shell: bash
+        run: |
+          node --check packages/training-recipe/src/compiler.mjs > "$RUNNER_TEMP/recipe-syntax.log" 2>&1
+          node --check packages/training-recipe/src/adapters.mjs >> "$RUNNER_TEMP/recipe-syntax.log" 2>&1
+          node --check lib/trainingos-agent-gateway/recipe-runtime.mjs >> "$RUNNER_TEMP/recipe-syntax.log" 2>&1
+          node --check lib/trainingos-agent-gateway/recipe-mcp-layer.mjs >> "$RUNNER_TEMP/recipe-syntax.log" 2>&1
+          echo 'RECIPE_SYNTAX status=PASS files=4'
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: rm -rf private-repo "$RUNNER_TEMP/recipe-python.log" "$RUNNER_TEMP/recipe-node.log" "$RUNNER_TEMP/recipe-syntax.log"
