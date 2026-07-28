@@ -1,0 +1,3 @@
+privateExactSha=26fc34af65b9489985aa9a5cbe45c9d1590826bf
+expectedBaseSha=26fc34af65b9489985aa9a5cbe45c9d1590826bf
+purpose=compare raw historical source replay with canonical bootstrap replay for Issue #355
