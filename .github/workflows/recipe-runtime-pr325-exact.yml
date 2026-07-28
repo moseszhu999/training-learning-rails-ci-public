@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PRIVATE_SHA: 028871119c5cbf68923308b4478ca7438348457b
+  PRIVATE_SHA: 02549ed61bfce9715aa3293d1b42e54a2f9bd4c8
 
 jobs:
   focused-current-head:
@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
 
-      - name: Enforce focused Recipe Python 16 of 16
+      - name: Enforce focused Recipe Python 17 of 17
         working-directory: private-repo
         shell: bash
         run: |
@@ -67,12 +67,12 @@ jobs:
           text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
           match=re.search(r'Ran\s+(\d+)\s+tests?',text)
           count=int(match.group(1)) if match else 0
-          ok=int(sys.argv[2])==0 and count==16 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
-          print(f'RECIPE_FOCUSED_PYTHON status={"PASS" if ok else "FAIL"} count={count}/16')
+          ok=int(sys.argv[2])==0 and count==17 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
+          print(f'RECIPE_FOCUSED_PYTHON status={"PASS" if ok else "FAIL"} count={count}/17')
           raise SystemExit(0 if ok else 1)
           PY
 
-      - name: Enforce focused Recipe Node 9 of 9
+      - name: Enforce focused Recipe Node 10 of 10
         working-directory: private-repo
         shell: bash
         run: |
@@ -88,7 +88,7 @@ jobs:
           count=int(tests.group(1)) if tests else 0
           pass_count=int(passed.group(1)) if passed else 0
           fail_count=int(failed.group(1)) if failed else -1
-          ok=int(sys.argv[2])==0 and count==9 and pass_count==9 and fail_count==0
+          ok=int(sys.argv[2])==0 and count==10 and pass_count==10 and fail_count==0
           print(f'RECIPE_FOCUSED_NODE status={"PASS" if ok else "FAIL"} pass={pass_count}/{count} fail={fail_count}')
           raise SystemExit(0 if ok else 1)
           PY
@@ -98,12 +98,149 @@ jobs:
         shell: bash
         run: |
           node --check packages/training-recipe/src/compiler.mjs > "$RUNNER_TEMP/recipe-syntax.log" 2>&1
+          node --check packages/training-recipe/src/review-hardening.mjs >> "$RUNNER_TEMP/recipe-syntax.log" 2>&1
           node --check packages/training-recipe/src/adapters.mjs >> "$RUNNER_TEMP/recipe-syntax.log" 2>&1
           node --check lib/trainingos-agent-gateway/recipe-runtime.mjs >> "$RUNNER_TEMP/recipe-syntax.log" 2>&1
           node --check lib/trainingos-agent-gateway/recipe-mcp-layer.mjs >> "$RUNNER_TEMP/recipe-syntax.log" 2>&1
-          echo 'RECIPE_SYNTAX status=PASS files=4'
+          echo 'RECIPE_SYNTAX status=PASS files=5'
 
       - name: Remove private checkout and sealed logs
         if: always()
         shell: bash
         run: rm -rf private-repo "$RUNNER_TEMP/recipe-python.log" "$RUNNER_TEMP/recipe-node.log" "$RUNNER_TEMP/recipe-syntax.log"
+
+  canonical-replay-and-sql-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Prepare canonical prerequisite migration set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          mkdir -p supabase/migrations
+          cp ../private-repo/tests/sql/trainingos_agent_recipe_prerequisite_harness.sql \
+            supabase/migrations/00000000000000_trainingos_agent_recipe_prerequisite_harness.sql
+          for migration in \
+            20260714_jhc_source_bundle_reference_assets.sql \
+            20260719233000_trainingos_agent_devices.sql \
+            20260724153000_trainingos_agent_execution_envelope.sql \
+            20260724154500_trainingos_agent_execution_envelope_hardening.sql \
+            20260724160000_trainingos_agent_execution_progress.sql \
+            20260727240000_trainingos_persistent_teacher_agent_schema_v1.sql \
+            20260727240100_trainingos_persistent_teacher_agent_policy_rpc_v1.sql \
+            20260728120000_trainingos_agent_recipe_schema_v1.sql \
+            20260728120100_trainingos_agent_recipe_management_v1.sql \
+            20260728120200_trainingos_agent_recipe_execution_v1.sql \
+            20260728120300_trainingos_agent_recipe_security_hardening_v1.sql \
+            20260728120400_trainingos_agent_recipe_actor_access_hardening_v1.sql \
+            20260728120500_trainingos_agent_recipe_trigger_entry_guard_v1.sql \
+            20260728120600_trainingos_agent_recipe_source_digest_guard_v1.sql \
+            20260728120700_trainingos_agent_recipe_executor_provenance_v1.sql \
+            20260728120800_trainingos_agent_recipe_review_hardening_v1.sql
+          do
+            cp "../private-repo/supabase/migrations/$migration" "supabase/migrations/$migration"
+          done
+          rm -f supabase/seed.sql
+          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          test "$count" = 17
+          echo "RECIPE_CANONICAL_REPLAY_PREP status=PASS migrations=$count sha=$PRIVATE_SHA"
+
+      - name: First canonical prerequisite replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/recipe-canonical-first.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_CANONICAL_FIRST status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
+
+      - name: Second deterministic canonical replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase db reset --local > "$RUNNER_TEMP/recipe-canonical-second.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-second.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-canonical-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          echo "RECIPE_CANONICAL_SECOND status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
+          exit "$code"
+
+      - name: Run transactional Recipe SQL E2E
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -1 -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
+            > "$RUNNER_TEMP/recipe-sql-e2e.log" 2>&1
+          python - "$RUNNER_TEMP/recipe-sql-e2e.log" <<'PY'
+          import json, pathlib, sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          payloads=[]
+          for line in text.splitlines():
+              line=line.strip()
+              if line.startswith('{'):
+                  try: payloads.append(json.loads(line))
+                  except json.JSONDecodeError: pass
+          result=payloads[-1] if payloads else {}
+          residue=result.get('residue') or {}
+          cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
+          ok=(result.get('status')=='PASS'
+              and result.get('canonicalExecutionReused') is True
+              and result.get('canonicalExecutionCount')==1
+              and result.get('triggerReceiptCount')==2
+              and result.get('formalWritePerformed') is False
+              and result.get('badSourceDigestDenied') is True
+              and result.get('humanInitialTriggerDenied') is True
+              and result.get('humanReplayDenied') is True
+              and result.get('changedExecutorProvenanceDenied') is True
+              and cleanup)
+          print('RECIPE_SQL_E2E status=%s execution=%s receipts=%s cleanup=%s' % (
+              'PASS' if ok else 'FAIL',result.get('canonicalExecutionCount',0),
+              result.get('triggerReceiptCount',0),'PASS' if cleanup else 'FAIL'))
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Stop isolated database and remove sealed logs
+        if: always()
+        working-directory: replay-project
+        shell: bash
+        run: |
+          supabase stop --no-backup || true
+          rm -f "$RUNNER_TEMP/recipe-canonical-first.log" "$RUNNER_TEMP/recipe-canonical-second.log" \
+            "$RUNNER_TEMP/recipe-sql-e2e.log"
+          rm -rf ../private-repo
