@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PRIVATE_SHA: 8670b6cbc20154985c51e344cdd83eece6997e17
+  PRIVATE_SHA: cbcdb11c20856258165846252763b2a379be89cc
 
 jobs:
   focused-current-head:
