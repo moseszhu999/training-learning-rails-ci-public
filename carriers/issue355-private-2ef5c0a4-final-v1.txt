@@ -1,0 +1,9 @@
+private_pr=358
+issue=355
+private_exact_sha=2ef5c0a427b378a3bbbd4bad5e161175f9a6f9b1
+expected_base_sha=30a9c267e1a07078dcbf150a9ef363995db65de1
+changed_files=6
+migration_files=0
+reserved_migration_range=20260729100000-20260729105999
+database_profile=full-history-empty-replay
+policy=evidence-only-never-merge
