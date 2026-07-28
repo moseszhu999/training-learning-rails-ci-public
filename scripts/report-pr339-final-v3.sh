@@ -13,7 +13,8 @@ read_status() {
 
 for name in \
   exact node python install typecheck vscode workspace zero_permission build review \
-  db_first db_second db_acl exercise_e2e assessment_e2e result_e2e
+  db_first db_second db_acl exercise_e2e assessment_e2e result_e2e \
+  python_diag typecheck_diag workspace_diag zero_permission_diag build_diag review_diag
 do
   value="$(read_status "$name")"
   printf '%s=%s\n' "$name" "$value" >> "$GITHUB_OUTPUT"
