@@ -1,0 +1,337 @@
+name: Classroom Agent Queue exact-head CI
+
+on:
+  push:
+    branches:
+      - ci/classroom-agent-queue-b91c3135
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-agent-queue-b91c3135.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-agent-queue-b91c3135-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: b91c31350d5e7182330cc1745f3750f6be3de5d8
+      BASE_SHA: 604631a96f01fb76d123072168c165cc699d9e8e
+
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          for value in "$PRIVATE_SHA" "$BASE_SHA"; do
+            if [[ ! "$value" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::Exact private and base SHAs must be lowercase 40-character commit SHAs"
+              exit 2
+            fi
+          done
+          if [[ -z "$PRIVATE_TOKEN" ]]; then
+            echo "::error::PRIVATE_REPO_READ_TOKEN is not configured"
+            exit 2
+          fi
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head, merge base and file scope
+        id: scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          status=PASS
+          actual_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+          actual_merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA" 2>/dev/null || true)"
+          if [[ "$actual_sha" != "$PRIVATE_SHA" || "$actual_merge_base" != "$BASE_SHA" ]]; then
+            status=FAIL
+          fi
+          actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'docs/product/trainingos-classroom-agent-queue-integration-v1.md\nlib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs\nlib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs\nlib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs\nlib/trainingos-agent-gateway/persistent-teacher-agent.mjs\nlib/trainingos-agent-gateway/teacher-action-queue.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs\nsupabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql\ntests/test_trainingos_classroom_agent_queue_integration_contract.py'
+          if [[ "$actual_files" != "$expected_files" ]]; then
+            status=FAIL
+          fi
+          {
+            echo "status=$status"
+            echo "actual_sha=$actual_sha"
+            echo "merge_base=$actual_merge_base"
+            echo "changed_file_count=$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run Gateway syntax checks with sealed output
+        id: syntax
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check lib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs
+            node --check lib/trainingos-agent-gateway/persistent-teacher-agent.mjs
+            node --check lib/trainingos-agent-gateway/teacher-action-queue.mjs
+            node --check lib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs
+            node --check lib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs
+          } > "$RUNNER_TEMP/classroom-agent-queue-syntax.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run focused Node contracts with sealed output
+        id: node_focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs \
+            > "$RUNNER_TEMP/classroom-agent-queue-node-focused.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/classroom-agent-queue-node-focused.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          output = pathlib.Path(sys.argv[3])
+          tests = re.search(r'# tests\s+(\d+)', text)
+          passed = re.search(r'# pass\s+(\d+)', text)
+          failed = re.search(r'# fail\s+(\d+)', text)
+          test_count = int(tests.group(1)) if tests else 0
+          pass_count = int(passed.group(1)) if passed else 0
+          fail_count = int(failed.group(1)) if failed else -1
+          ok = code == 0 and test_count == 5 and pass_count == 5 and fail_count == 0
+          with output.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={code}\n')
+              handle.write(f'test_count={test_count}\n')
+              handle.write(f'pass_count={pass_count}\n')
+              handle.write(f'fail_count={fail_count}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run focused Python contracts with sealed output
+        id: python_focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python tests/test_trainingos_classroom_agent_queue_integration_contract.py \
+            > "$RUNNER_TEMP/classroom-agent-queue-python-focused.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/classroom-agent-queue-python-focused.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          output = pathlib.Path(sys.argv[3])
+          count_match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          test_count = int(count_match.group(1)) if count_match else 0
+          ok = code == 0 and test_count == 8 and '\nOK' in text
+          with output.open('a', encoding='utf-8') as handle:
+              handle.write(f'exit_code={code}\n')
+              handle.write(f'test_count={test_count}\n')
+              handle.write(f'pass_count={test_count if ok else 0}\n')
+              handle.write(f'status={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Run merged queue and Persistent Agent regression contracts
+        id: regressions
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --test prototypes/trainingos-agent-mvp-v1/teacher-action-queue.test.mjs
+            node --test prototypes/trainingos-agent-mvp-v1/persistent-teacher-agent.test.mjs
+            python tests/test_trainingos_teacher_action_queue_contract.py
+            python tests/test_trainingos_persistent_teacher_agent_contract.py
+            python tests/test_trainingos_persistent_teacher_agent_draft_execution_contract.py
+          } > "$RUNNER_TEMP/classroom-agent-queue-regressions.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Install private repository dependencies with sealed output
+        id: install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/classroom-agent-queue-install.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run repository typecheck with sealed output
+        id: typecheck
+        if: steps.install.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/classroom-agent-queue-typecheck.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run production build with sealed output
+        id: build
+        if: steps.install.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/classroom-agent-queue-build.log" 2>&1
+          code=$?
+          {
+            echo "exit_code=$code"
+            if [[ "$code" == "0" ]]; then echo "status=PASS"; else echo "status=FAIL"; fi
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized exact-head result
+        if: always()
+        shell: bash
+        env:
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          NODE_STATUS: ${{ steps.node_focused.outputs.status }}
+          NODE_COUNT: ${{ steps.node_focused.outputs.test_count }}
+          NODE_PASS: ${{ steps.node_focused.outputs.pass_count }}
+          PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_focused.outputs.test_count }}
+          PYTHON_PASS: ${{ steps.python_focused.outputs.pass_count }}
+          REGRESSION_STATUS: ${{ steps.regressions.outputs.status }}
+          INSTALL_STATUS: ${{ steps.install.outputs.status }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const value = (input) => input || 'NOT_RUN';
+          const lines = [
+            '## Classroom Agent Queue exact-head CI',
+            '',
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}\``,
+            `- Exact merge base: \`${process.env.MERGE_BASE || process.env.BASE_SHA}\``,
+            `- Merge scope: **${value(process.env.SCOPE_STATUS)} (${process.env.CHANGED_FILE_COUNT || '0'} files)**`,
+            `- Gateway syntax checks: **${value(process.env.SYNTAX_STATUS)}**`,
+            `- Focused Node contracts: **${value(process.env.NODE_STATUS)} ${process.env.NODE_PASS || '0'}/${process.env.NODE_COUNT || '0'}**`,
+            `- Focused Python contracts: **${value(process.env.PYTHON_STATUS)} ${process.env.PYTHON_PASS || '0'}/${process.env.PYTHON_COUNT || '0'}**`,
+            `- Existing queue / Persistent Agent regressions: **${value(process.env.REGRESSION_STATUS)}**`,
+            `- Dependency install: **${value(process.env.INSTALL_STATUS)}**`,
+            `- Repository typecheck: **${value(process.env.TYPECHECK_STATUS)}**`,
+            `- Production build: **${value(process.env.BUILD_STATUS)}**`,
+            '',
+            'Raw private output is sealed and deleted. No private source, fixtures, identifiers, or logs are published.',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(
+            `CLASSROOM_AGENT_QUEUE_EXACT_CI scope=${value(process.env.SCOPE_STATUS)} ` +
+            `syntax=${value(process.env.SYNTAX_STATUS)} ` +
+            `node=${value(process.env.NODE_STATUS)}:${process.env.NODE_PASS || '0'}/${process.env.NODE_COUNT || '0'} ` +
+            `python=${value(process.env.PYTHON_STATUS)}:${process.env.PYTHON_PASS || '0'}/${process.env.PYTHON_COUNT || '0'} ` +
+            `regressions=${value(process.env.REGRESSION_STATUS)} install=${value(process.env.INSTALL_STATUS)} ` +
+            `typecheck=${value(process.env.TYPECHECK_STATUS)} build=${value(process.env.BUILD_STATUS)} ` +
+            `sha=${process.env.ACTUAL_SHA || process.env.PRIVATE_SHA}`,
+          );
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/classroom-agent-queue-syntax.log" \
+            "$RUNNER_TEMP/classroom-agent-queue-node-focused.log" \
+            "$RUNNER_TEMP/classroom-agent-queue-python-focused.log" \
+            "$RUNNER_TEMP/classroom-agent-queue-regressions.log" \
+            "$RUNNER_TEMP/classroom-agent-queue-install.log" \
+            "$RUNNER_TEMP/classroom-agent-queue-typecheck.log" \
+            "$RUNNER_TEMP/classroom-agent-queue-build.log"
+
+      - name: Enforce exact-head result
+        if: always()
+        shell: bash
+        env:
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          NODE_STATUS: ${{ steps.node_focused.outputs.status }}
+          NODE_COUNT: ${{ steps.node_focused.outputs.test_count }}
+          NODE_PASS: ${{ steps.node_focused.outputs.pass_count }}
+          PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
+          PYTHON_COUNT: ${{ steps.python_focused.outputs.test_count }}
+          PYTHON_PASS: ${{ steps.python_focused.outputs.pass_count }}
+          REGRESSION_STATUS: ${{ steps.regressions.outputs.status }}
+          INSTALL_STATUS: ${{ steps.install.outputs.status }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+        run: |
+          failed=0
+          [[ "${SCOPE_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${SYNTAX_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${NODE_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${NODE_COUNT:-0}" == "5" ]] || failed=1
+          [[ "${NODE_PASS:-0}" == "5" ]] || failed=1
+          [[ "${PYTHON_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${PYTHON_COUNT:-0}" == "8" ]] || failed=1
+          [[ "${PYTHON_PASS:-0}" == "8" ]] || failed=1
+          [[ "${REGRESSION_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${INSTALL_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${TYPECHECK_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          [[ "${BUILD_STATUS:-FAIL}" == "PASS" ]] || failed=1
+          if [[ "$failed" != "0" ]]; then
+            echo "::error::Classroom Agent Queue exact-head validation failed. Review the sanitized step summary."
+          fi
+          exit "$failed"
