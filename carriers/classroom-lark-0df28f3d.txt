@@ -1,0 +1,8 @@
+private_pr=340
+private_exact_sha=0df28f3d4056cc8aa2b65baa30981713a02f5b6a
+expected_base_sha=542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+validation_profile=classroom-lark
+expected_changed_file_count=20
+expected_migration_range=20260728195000-20260728199999
+expected_focused_test_counts=node=16;python=11
+merge_policy=never_merge_evidence_carrier
