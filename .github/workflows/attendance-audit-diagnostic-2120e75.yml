@@ -1,0 +1,109 @@
+name: Attendance audit generic-owned diagnostic 2120e75
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/attendance-audit-diagnostic-2120e75.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_EXACT_SHA: 2120e75e41a7de65c6bd91bfc240e5ed50d9b40e
+  EXPECTED_BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Check out public controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_EXACT_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact one-document scope
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-repo rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
+          [[ "$(git -C private-repo merge-base "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")" == "$EXPECTED_BASE_SHA" ]]
+          actual="$(git -C private-repo diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")"
+          [[ "$actual" == 'docs/testing/trainingos-attendance-canonical-gap-audit-v1.md' ]]
+          [[ "$(git -C private-repo diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA" | wc -l | tr -d ' ')" == '1' ]]
+          [[ "$(git -C private-repo diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA" | grep -c '^supabase/migrations/' || true)" == '0' ]]
+
+      - name: Install dependencies with sealed output
+        working-directory: private-repo
+        run: npm ci > "$RUNNER_TEMP/attendance-audit-diagnostic-install.log" 2>&1
+
+      - name: Run generic-owned and retain only bounded diagnostic
+        id: owned
+        working-directory: private-repo
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/attendance-audit-diagnostic-owned.log" 2>&1
+          code=$?
+          node - "$GITHUB_OUTPUT" "$code" <<'NODE'
+          const fs = require('node:fs');
+          const [output, code] = process.argv.slice(2);
+          const path = '.trainingos-ci/owned-container-ci-report.json';
+          let report = { status: 'NOT_AVAILABLE', failedOrLastStep: 'unknown', exitCode: Number(code) };
+          if (fs.existsSync(path)) {
+            const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
+            report = {
+              status: String(parsed.status || 'UNKNOWN'),
+              failedOrLastStep: String(parsed.failedOrLastStep || 'unknown').replace(/[^a-zA-Z0-9_.-]/g, '_'),
+              exitCode: Number(parsed.exitCode ?? code),
+            };
+          }
+          fs.appendFileSync(output, `status=${report.status}\nfailed_step=${report.failedOrLastStep}\nexit_code=${report.exitCode}\n`);
+          NODE
+          exit 0
+
+      - name: Publish bounded diagnostic
+        if: always()
+        env:
+          OWNED_STATUS: ${{ steps.owned.outputs.status }}
+          FAILED_STEP: ${{ steps.owned.outputs.failed_step }}
+          EXIT_CODE: ${{ steps.owned.outputs.exit_code }}
+        run: |
+          {
+            echo '## Attendance audit generic-owned diagnostic'
+            echo "- exact private SHA: \`$PRIVATE_EXACT_SHA\`"
+            echo "- exact base SHA: \`$EXPECTED_BASE_SHA\`"
+            echo '- exact one-document scope: **PASS**'
+            echo "- generic-owned status: **${OWNED_STATUS:-NOT_RUN}**"
+            echo "- failed or last owned stage: **${FAILED_STEP:-NOT_RUN}**"
+            echo "- owned exit code: **${EXIT_CODE:-NOT_RUN}**"
+            echo '- raw output: **sealed / deleted**'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "TRAININGOS_ATTENDANCE_DIAGNOSTIC status=${OWNED_STATUS:-NOT_RUN} step=${FAILED_STEP:-NOT_RUN} exit=${EXIT_CODE:-NOT_RUN}"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/attendance-audit-diagnostic-*.log
