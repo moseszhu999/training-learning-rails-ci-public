@@ -1,0 +1,107 @@
+name: PR339 isolated final migration diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-isolated-final-migration-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: dddfec403fad343ce22af1c61dc1b7c5e1ad6215
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+  FINAL_MIGRATION: 20260728100300_trainingos_student_learning_execution_canonical_reconciliation_v1.sql
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Start canonical database through prior migration
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/pr339-isolated"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/pr339-isolated-init.log" 2>&1
+          python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/pr339-isolated-build.log" 2>&1
+          test -f "$workdir/supabase/migrations/$FINAL_MIGRATION"
+          mv "$workdir/supabase/migrations/$FINAL_MIGRATION" "$RUNNER_TEMP/$FINAL_MIGRATION"
+          test "$(find "$workdir/supabase/migrations" -type f -name '*.sql' | wc -l | tr -d ' ')" = 297
+          supabase --workdir "$workdir" start > "$RUNNER_TEMP/pr339-isolated-start.log" 2>&1
+      - name: Execute final migration with native psql diagnostics
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          wrapper="$RUNNER_TEMP/pr339-isolated-wrapper.sql"
+          {
+            echo '\set VERBOSITY verbose'
+            printf '\i %s\n' "$RUNNER_TEMP/$FINAL_MIGRATION"
+          } > "$wrapper"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f "$wrapper" > "$RUNNER_TEMP/pr339-isolated-stdout.log" 2> "$RUNNER_TEMP/pr339-isolated-stderr.log"
+          code=$?
+          set -e
+          python - "$RUNNER_TEMP/pr339-isolated-stderr.log" "$code" <<'PY' | tee "$GITHUB_WORKSPACE/pr339-isolated-final-migration.txt" >> "$GITHUB_STEP_SUMMARY"
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          text=re.sub(r'\x1b\[[0-9;]*[A-Za-z]','',text)
+          state='NONE'; message='NONE'; hint='NONE'; detail='NONE'; line='NONE'; routine='NONE'
+          m=re.search(r'ERROR:\s+([0-9A-Z]{5}):\s*(.+)',text)
+          if m: state=m.group(1); message=' '.join(m.group(2).split())[:300]
+          else:
+              m=re.search(r'ERROR:\s*(.+)',text)
+              if m: message=' '.join(m.group(1).split())[:300]
+          for label,var in (('HINT', 'hint'),('DETAIL','detail'),('CONTEXT','routine')):
+              m=re.search(rf'{label}:\s*(.+)',text)
+              if m:
+                  value=' '.join(m.group(1).split())[:300]
+                  if var=='hint': hint=value
+                  elif var=='detail': detail=value
+                  else: routine=value
+          m=re.search(r':(\d+):\s*ERROR:',text)
+          if m: line=m.group(1)
+          def safe(value):
+              value=re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}','<uuid>',value,flags=re.I)
+              value=re.sub(r'/home/runner/[^ :]+','<runner-path>',value)
+              value=re.sub(r'postgresql://\S+','<database-url>',value)
+              return value
+          print('exact_private_sha=dddfec403fad343ce22af1c61dc1b7c5e1ad6215')
+          print(f'psql_exit={sys.argv[2]}')
+          print(f'sqlstate={safe(state)}')
+          print(f'line={safe(line)}')
+          print(f'error={safe(message)}')
+          print(f'hint={safe(hint)}')
+          print(f'detail={safe(detail)}')
+          print(f'context={safe(routine)}')
+          print('raw_sql_and_private_output=SEALED_AND_DELETED')
+          PY
+          [[ $code -ne 0 ]]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr339-isolated-final-migration
+          path: pr339-isolated-final-migration.txt
+          retention-days: 3
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-isolated" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-isolated* "$RUNNER_TEMP/$FINAL_MIGRATION" pr339-isolated-final-migration.txt
