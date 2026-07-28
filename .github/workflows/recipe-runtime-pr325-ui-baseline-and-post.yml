@@ -1,0 +1,181 @@
+name: Recipe Runtime PR325 UI baseline and post stages
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recipe-runtime-pr325-ui-post-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100
+  PRIVATE_SHA: 7f8118afd2e8a5d12154d678cab9fa929a76d079
+
+jobs:
+  agent-ui-baseline-comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact base
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.BASE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Check out exact candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-candidate
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install exact base dependencies
+        working-directory: private-base
+        shell: bash
+        run: npm ci > "$RUNNER_TEMP/ui-base-npm.log" 2>&1
+
+      - name: Install exact candidate dependencies
+        working-directory: private-candidate
+        shell: bash
+        run: npm ci > "$RUNNER_TEMP/ui-candidate-npm.log" 2>&1
+
+      - name: Capture sanitized Agent UI comparison
+        shell: bash
+        run: |
+          set +e
+          (cd private-base && npm run test:agent-ui) > "$RUNNER_TEMP/ui-base.log" 2>&1
+          base_code=$?
+          (cd private-candidate && npm run test:agent-ui) > "$RUNNER_TEMP/ui-candidate.log" 2>&1
+          candidate_code=$?
+          python - "$RUNNER_TEMP/ui-base.log" "$base_code" "$RUNNER_TEMP/ui-candidate.log" "$candidate_code" "$RUNNER_TEMP/recipe-agent-ui-comparison.json" <<'PY'
+          import json, pathlib, re, sys
+          def summarize(path, code):
+              text = pathlib.Path(path).read_text(encoding='utf-8', errors='replace')
+              messages = re.findall(r'^Error:\s+(.+)$', text, flags=re.M)
+              return {
+                  'status': 'PASS' if int(code) == 0 else 'FAIL',
+                  'errorMessage': messages[0].strip() if messages else None,
+              }
+          base = summarize(sys.argv[1], sys.argv[2])
+          candidate = summarize(sys.argv[3], sys.argv[4])
+          same = base['status'] == 'FAIL' and candidate['status'] == 'FAIL' and base['errorMessage'] == candidate['errorMessage'] and base['errorMessage'] is not None
+          payload = {
+              'schemaVersion': 'trainingos-public-ci-agent-ui-comparison-v1',
+              'baseSha': 'bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100',
+              'candidateSha': '7f8118afd2e8a5d12154d678cab9fa929a76d079',
+              'base': base,
+              'candidate': candidate,
+              'sameBaselineFailure': same,
+              'rawOutputPublished': False,
+          }
+          pathlib.Path(sys.argv[5]).write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+          print(f'AGENT_UI_BASELINE_COMPARISON same={same} base={base["status"]} candidate={candidate["status"]}')
+          PY
+          exit 0
+
+      - name: Upload sanitized Agent UI comparison
+        uses: actions/upload-artifact@v4
+        with:
+          name: recipe-pr325-agent-ui-comparison
+          path: ${{ runner.temp }}/recipe-agent-ui-comparison.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce no Agent UI regression beyond base
+        shell: bash
+        run: |
+          python - "$RUNNER_TEMP/recipe-agent-ui-comparison.json" <<'PY'
+          import json, pathlib, sys
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          raise SystemExit(0 if payload.get('sameBaselineFailure') is True else 1)
+          PY
+
+      - name: Remove private checkouts and sealed logs
+        if: always()
+        shell: bash
+        run: rm -rf private-base private-candidate "$RUNNER_TEMP"/ui-*.log "$RUNNER_TEMP/recipe-agent-ui-comparison.json"
+
+  post-agent-ui-stages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: private-repo
+        shell: bash
+        run: npm ci > "$RUNNER_TEMP/post-npm.log" 2>&1
+
+      - name: Stage oauth-redirect
+        working-directory: private-repo
+        shell: bash
+        run: npm run test:oauth-redirect > "$RUNNER_TEMP/post-oauth.log" 2>&1
+
+      - name: Stage production-build
+        working-directory: private-repo
+        shell: bash
+        run: npm run build > "$RUNNER_TEMP/post-build.log" 2>&1
+
+      - name: Stage build-verification
+        working-directory: private-repo
+        shell: bash
+        run: npm run verify:build > "$RUNNER_TEMP/post-verify.log" 2>&1
+
+      - name: Remove candidate checkout and sealed logs
+        if: always()
+        shell: bash
+        run: rm -rf private-repo "$RUNNER_TEMP"/post-*.log
