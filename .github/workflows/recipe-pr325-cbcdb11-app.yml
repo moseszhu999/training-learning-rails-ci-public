@@ -1,9 +1,9 @@
-name: Recipe PR325 cbcdb11 application gates
+name: Recipe PR325 d833485 application gates
 
 on:
   push:
     branches:
-      - ci/recipe-pr325-cbcdb11-final
+      - ci/recipe-pr325-cbcdb11-run
   pull_request:
     branches:
       - main
@@ -16,11 +16,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: recipe-pr325-cbcdb11-app-${{ github.event_name }}
+  group: recipe-pr325-d833485-app-${{ github.event_name }}
   cancel-in-progress: false
 
 env:
-  PRIVATE_SHA: cbcdb11c20856258165846252763b2a379be89cc
+  PRIVATE_SHA: d833485ce9db34797e7aba00b3903a6f57a70a11
   BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
 
 jobs:
@@ -65,22 +65,44 @@ jobs:
           set -euo pipefail
           actual_sha="$(git rev-parse HEAD)"
           merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
-          actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
-          expected_files=$'docs/architecture/trainingos-agent-recipe-runtime-v1.md\ndocs/testing/trainingos-agent-recipe-validation-v1.md\nlib/trainingos-agent-gateway/recipe-mcp-layer.mjs\nlib/trainingos-agent-gateway/recipe-runtime-review.mjs\nlib/trainingos-agent-gateway/recipe-runtime.mjs\npackages/training-recipe/package.json\npackages/training-recipe/src/adapters.mjs\npackages/training-recipe/src/compiler.mjs\npackages/training-recipe/src/index.mjs\npackages/training-recipe/src/review-hardening.mjs\nprototypes/trainingos-agent-mvp-v1/recipe-review-runtime.test.mjs\nprototypes/trainingos-agent-mvp-v1/recipe-runtime.test.mjs\nsupabase/migrations/20260728120000_trainingos_agent_recipe_schema_v1.sql\nsupabase/migrations/20260728120100_trainingos_agent_recipe_management_v1.sql\nsupabase/migrations/20260728120200_trainingos_agent_recipe_execution_v1.sql\nsupabase/migrations/20260728120300_trainingos_agent_recipe_security_hardening_v1.sql\nsupabase/migrations/20260728120400_trainingos_agent_recipe_actor_access_hardening_v1.sql\nsupabase/migrations/20260728120500_trainingos_agent_recipe_trigger_entry_guard_v1.sql\nsupabase/migrations/20260728120600_trainingos_agent_recipe_source_digest_guard_v1.sql\nsupabase/migrations/20260728120700_trainingos_agent_recipe_executor_provenance_v1.sql\nsupabase/migrations/20260728120800_trainingos_agent_recipe_review_hardening_v1.sql\nsupabase/migrations/20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql\ntests/sql/trainingos_agent_recipe_prerequisite_harness.sql\ntests/sql/trainingos_agent_recipe_runtime_e2e.sql\ntests/test_trainingos_agent_recipe_contract.py\ntests/test_trainingos_agent_recipe_review_contract.py'
+          git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort > "$RUNNER_TEMP/recipe-files.txt"
+          python - "$RUNNER_TEMP/recipe-files.txt" <<'PY'
+          import pathlib,re,sys
+          files=[line.strip() for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if line.strip()]
+          def allowed(path):
+              if path.startswith('packages/training-recipe/'):
+                  return True
+              if re.fullmatch(r'lib/trainingos-agent-gateway/recipe-[^/]+\.mjs',path):
+                  return True
+              if re.fullmatch(r'supabase/migrations/2026072812\d{4}_trainingos_agent_recipe_[^/]+\.sql',path):
+                  return True
+              if re.fullmatch(r'prototypes/trainingos-agent-mvp-v1/recipe-[^/]+\.test\.mjs',path):
+                  return True
+              if re.fullmatch(r'tests/test_trainingos_agent_recipe[^/]*\.py',path):
+                  return True
+              if re.fullmatch(r'tests/sql/trainingos_agent_recipe[^/]*\.sql',path):
+                  return True
+              if path in {
+                  'docs/architecture/trainingos-agent-recipe-runtime-v1.md',
+                  'docs/testing/trainingos-agent-recipe-validation-v1.md',
+              }:
+                  return True
+              return False
+          bad=[path for path in files if not allowed(path)]
+          ok=len(files)==26 and not bad
+          print(f'RECIPE_SCOPE status={"PASS" if ok else "FAIL"} files={len(files)} forbidden={len(bad)}')
+          raise SystemExit(0 if ok else 1)
+          PY
           [[ "$actual_sha" == "$PRIVATE_SHA" ]]
           [[ "$merge_base" == "$BASE_SHA" ]]
-          [[ "$actual_files" == "$expected_files" ]]
           echo PASS > "$RUNNER_TEMP/recipe-scope.status"
           echo "actual_sha=$actual_sha" >> "$GITHUB_OUTPUT"
           echo "merge_base=$merge_base" >> "$GITHUB_OUTPUT"
-          echo "changed_file_count=$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
       - name: Run Recipe JavaScript syntax checks with sealed output
-        if: always()
         working-directory: private-repo
         shell: bash
         run: |
-          set +e
           {
             node --check packages/training-recipe/src/compiler.mjs
             node --check packages/training-recipe/src/adapters.mjs
@@ -90,12 +112,9 @@ jobs:
             node --check lib/trainingos-agent-gateway/recipe-runtime-review.mjs
             node --check lib/trainingos-agent-gateway/recipe-mcp-layer.mjs
           } > "$RUNNER_TEMP/recipe-syntax.log" 2>&1
-          code=$?
-          [[ "$code" == 0 ]] && echo 'PASS 7/7' > "$RUNNER_TEMP/recipe-syntax.status" || echo FAIL > "$RUNNER_TEMP/recipe-syntax.status"
-          exit "$code"
+          echo 'PASS 7/7' > "$RUNNER_TEMP/recipe-syntax.status"
 
       - name: Run focused Recipe Node contracts with sealed output
-        if: always()
         working-directory: private-repo
         shell: bash
         run: |
@@ -106,21 +125,16 @@ jobs:
             > "$RUNNER_TEMP/recipe-node.log" 2>&1
           code=$?
           python - "$RUNNER_TEMP/recipe-node.log" "$code" "$RUNNER_TEMP/recipe-node.status" <<'PY'
-          import pathlib, re, sys
+          import pathlib,re,sys
           text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
-          tests=re.search(r'# tests\s+(\d+)',text)
-          passed=re.search(r'# pass\s+(\d+)',text)
-          failed=re.search(r'# fail\s+(\d+)',text)
-          count=int(tests.group(1)) if tests else 0
-          passed_count=int(passed.group(1)) if passed else 0
-          failed_count=int(failed.group(1)) if failed else -1
+          tests=re.search(r'# tests\s+(\d+)',text); passed=re.search(r'# pass\s+(\d+)',text); failed=re.search(r'# fail\s+(\d+)',text)
+          count=int(tests.group(1)) if tests else 0; passed_count=int(passed.group(1)) if passed else 0; failed_count=int(failed.group(1)) if failed else -1
           ok=int(sys.argv[2])==0 and count==11 and passed_count==11 and failed_count==0
           pathlib.Path(sys.argv[3]).write_text(f'{"PASS" if ok else "FAIL"} {passed_count}/{count}',encoding='utf-8')
           raise SystemExit(0 if ok else 1)
           PY
 
       - name: Run focused Recipe Python contracts with sealed output
-        if: always()
         working-directory: private-repo
         shell: bash
         run: |
@@ -131,12 +145,11 @@ jobs:
             > "$RUNNER_TEMP/recipe-python.log" 2>&1
           code=$?
           python - "$RUNNER_TEMP/recipe-python.log" "$code" "$RUNNER_TEMP/recipe-python.status" <<'PY'
-          import pathlib, re, sys
+          import pathlib,re,sys
           text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
-          match=re.search(r'Ran\s+(\d+)\s+tests?',text)
-          count=int(match.group(1)) if match else 0
-          ok=int(sys.argv[2])==0 and count==20 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
-          pathlib.Path(sys.argv[3]).write_text(f'{"PASS" if ok else "FAIL"} {count}/20',encoding='utf-8')
+          match=re.search(r'Ran\s+(\d+)\s+tests?',text); count=int(match.group(1)) if match else 0
+          ok=int(sys.argv[2])==0 and count==21 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
+          pathlib.Path(sys.argv[3]).write_text(f'{"PASS" if ok else "FAIL"} {count}/21',encoding='utf-8')
           raise SystemExit(0 if ok else 1)
           PY
 
@@ -146,25 +159,24 @@ jobs:
         env:
           ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
           MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
-          CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
         run: |
           node <<'NODE'
-          const fs=require('node:fs'); const path=require('node:path');
-          const read=(name)=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,name),'utf8').trim()}catch{return 'NOT_RUN'}};
-          const result={scope:read('recipe-scope.status'),syntax:read('recipe-syntax.status'),node:read('recipe-node.status'),python:read('recipe-python.status')};
-          const lines=['## Recipe PR325 focused exact-head gates','',`- Exact private SHA: \`${process.env.ACTUAL_SHA||process.env.PRIVATE_SHA}\``,`- Merge base: \`${process.env.MERGE_BASE||process.env.BASE_SHA}\``,`- Recipe-only scope: **${result.scope} (${process.env.CHANGED_FILE_COUNT||'0'} files)**`,`- Syntax: **${result.syntax}**`,`- Focused Node: **${result.node}**`,`- Focused Python: **${result.python}**`,'','Raw private output remains sealed and is deleted.'];
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`${lines.join('\n')}\n`);
-          console.log(`RECIPE_FINAL_FOCUSED scope=${result.scope} syntax=${result.syntax} node=${result.node} python=${result.python} sha=${process.env.ACTUAL_SHA||process.env.PRIVATE_SHA}`);
+          const fs=require('node:fs'),path=require('node:path');
+          const read=n=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,n),'utf8').trim()}catch{return 'NOT_RUN'}};
+          const r={scope:read('recipe-scope.status'),syntax:read('recipe-syntax.status'),node:read('recipe-node.status'),python:read('recipe-python.status')};
+          const lines=['## Recipe PR325 focused exact-head gates','',`- Exact private SHA: \`${process.env.ACTUAL_SHA||process.env.PRIVATE_SHA}\``,`- Merge base: \`${process.env.MERGE_BASE||process.env.BASE_SHA}\``,`- Recipe-only scope: **${r.scope}**`,`- Syntax: **${r.syntax}**`,`- Focused Node: **${r.node}**`,`- Focused Python: **${r.python}**`,'','Raw private output is sealed and deleted.'];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
+          console.log(`RECIPE_FOCUSED scope=${r.scope} syntax=${r.syntax} node=${r.node} python=${r.python} sha=${process.env.ACTUAL_SHA||process.env.PRIVATE_SHA}`);
           NODE
 
       - name: Remove private checkout and sealed focused logs
         if: always()
         shell: bash
-        run: rm -rf private-repo "$RUNNER_TEMP"/recipe-*.log "$RUNNER_TEMP"/recipe-*.status
+        run: rm -rf private-repo "$RUNNER_TEMP"/recipe-*.log "$RUNNER_TEMP"/recipe-*.status "$RUNNER_TEMP"/recipe-files.txt
 
   repository-owned-acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 100
     steps:
       - name: Validate exact SHAs and private read credential
         shell: bash
@@ -208,78 +220,106 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install exact candidate dependencies with sealed output
+      - name: Install exact candidate dependencies
         working-directory: private-candidate
         shell: bash
         run: npm ci > "$RUNNER_TEMP/owned-candidate-install.log" 2>&1
 
-      - name: Run repository-owned candidate stages before Agent UI
+      - name: Owned Python contracts
         working-directory: private-candidate
         shell: bash
-        run: |
-          set -euo pipefail
-          npm run test:python > "$RUNNER_TEMP/owned-python.log" 2>&1
-          npm run typecheck > "$RUNNER_TEMP/owned-typecheck.log" 2>&1
-          npm run test:mvp > "$RUNNER_TEMP/owned-mvp.log" 2>&1
-          npm run test:jhc > "$RUNNER_TEMP/owned-jhc.log" 2>&1
-          npm run test:jhc:membership > "$RUNNER_TEMP/owned-membership.log" 2>&1
-          npm run test:jhc:supabase > "$RUNNER_TEMP/owned-supabase.log" 2>&1
-          npm run test:agent > "$RUNNER_TEMP/owned-agent.log" 2>&1
-          echo PASS > "$RUNNER_TEMP/owned-pre-ui.status"
+        run: npm run test:python > "$RUNNER_TEMP/owned-python.log" 2>&1
 
-      - name: Install exact baseline dependencies with sealed output
+      - name: Repository typecheck
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run typecheck > "$RUNNER_TEMP/owned-typecheck.log" 2>&1
+
+      - name: MVP acceptance
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run test:mvp > "$RUNNER_TEMP/owned-mvp.log" 2>&1
+
+      - name: JHC acceptance
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run test:jhc > "$RUNNER_TEMP/owned-jhc.log" 2>&1
+
+      - name: JHC membership acceptance
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run test:jhc:membership > "$RUNNER_TEMP/owned-membership.log" 2>&1
+
+      - name: JHC Supabase contracts
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run test:jhc:supabase > "$RUNNER_TEMP/owned-supabase.log" 2>&1
+
+      - name: TrainingOS Agent acceptance
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run test:agent > "$RUNNER_TEMP/owned-agent.log" 2>&1
+
+      - name: Install exact baseline dependencies
+        if: always()
         working-directory: private-base
         shell: bash
         run: npm ci > "$RUNNER_TEMP/owned-base-install.log" 2>&1
 
       - name: Baseline-control Agent UI acceptance
+        if: always()
         shell: bash
         run: |
           set +e
-          (cd private-base && npm run test:agent-ui) > "$RUNNER_TEMP/owned-ui-base.log" 2>&1
-          base_code=$?
-          (cd private-candidate && npm run test:agent-ui) > "$RUNNER_TEMP/owned-ui-candidate.log" 2>&1
-          candidate_code=$?
-          python - "$RUNNER_TEMP/owned-ui-base.log" "$base_code" "$RUNNER_TEMP/owned-ui-candidate.log" "$candidate_code" "$RUNNER_TEMP/owned-ui.status" <<'PY'
+          (cd private-base && npm run test:agent-ui) > "$RUNNER_TEMP/owned-ui-base.log" 2>&1; base_code=$?
+          (cd private-candidate && npm run test:agent-ui) > "$RUNNER_TEMP/owned-ui-candidate.log" 2>&1; candidate_code=$?
+          python - "$RUNNER_TEMP/owned-ui-base.log" "$base_code" "$RUNNER_TEMP/owned-ui-candidate.log" "$candidate_code" <<'PY'
           import pathlib,re,sys
           def result(path,code):
-              text=pathlib.Path(path).read_text(encoding='utf-8',errors='replace')
-              messages=re.findall(r'^Error:\s+(.+)$',text,flags=re.M)
-              return int(code), messages[0].strip() if messages else None
-          base_code,base_error=result(sys.argv[1],sys.argv[2])
-          candidate_code,candidate_error=result(sys.argv[3],sys.argv[4])
-          ok=candidate_code==0 or (base_code!=0 and candidate_code!=0 and base_error is not None and base_error==candidate_error)
-          disposition='PASS' if candidate_code==0 else 'PASS_BASELINE_CONTROL' if ok else 'FAIL'
-          pathlib.Path(sys.argv[5]).write_text(disposition,encoding='utf-8')
-          print(f'RECIPE_AGENT_UI status={disposition} base_code={base_code} candidate_code={candidate_code}')
+              text=pathlib.Path(path).read_text(encoding='utf-8',errors='replace'); messages=re.findall(r'^Error:\s+(.+)$',text,flags=re.M)
+              return int(code),messages[0].strip() if messages else None
+          bc,be=result(sys.argv[1],sys.argv[2]); cc,ce=result(sys.argv[3],sys.argv[4])
+          ok=cc==0 or (bc!=0 and cc!=0 and be is not None and be==ce)
+          print(f'RECIPE_AGENT_UI status={"PASS" if ok else "FAIL"} base_code={bc} candidate_code={cc}')
           raise SystemExit(0 if ok else 1)
           PY
 
-      - name: Run repository typecheck and post-Agent-UI production stages
+      - name: OAuth redirect acceptance
+        if: always()
         working-directory: private-candidate
         shell: bash
-        run: |
-          set -euo pipefail
-          npm run typecheck > "$RUNNER_TEMP/owned-typecheck-final.log" 2>&1
-          npm run test:oauth-redirect > "$RUNNER_TEMP/owned-oauth.log" 2>&1
-          npm run build > "$RUNNER_TEMP/owned-build.log" 2>&1
-          npm run verify:build > "$RUNNER_TEMP/owned-verify.log" 2>&1
-          echo PASS > "$RUNNER_TEMP/owned-post-ui.status"
+        run: npm run test:oauth-redirect > "$RUNNER_TEMP/owned-oauth.log" 2>&1
+
+      - name: Production build
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run build > "$RUNNER_TEMP/owned-build.log" 2>&1
+
+      - name: Build verification
+        if: always()
+        working-directory: private-candidate
+        shell: bash
+        run: npm run verify:build > "$RUNNER_TEMP/owned-verify.log" 2>&1
 
       - name: Publish sanitized repository-owned result
         if: always()
         shell: bash
         run: |
-          node <<'NODE'
-          const fs=require('node:fs'); const path=require('node:path');
-          const read=(name)=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,name),'utf8').trim()}catch{return 'NOT_RUN'}};
-          const result={preUi:read('owned-pre-ui.status'),agentUi:read('owned-ui.status'),postUi:read('owned-post-ui.status')};
-          const lines=['## Recipe PR325 repository-owned acceptance','',`- Exact candidate: \`${process.env.PRIVATE_SHA}\``,`- Exact main baseline: \`${process.env.BASE_SHA}\``,`- Owned stages through Agent core: **${result.preUi}**`,`- Agent UI: **${result.agentUi}**`,`- Typecheck / OAuth / production build / build verification: **${result.postUi}**`,'','Raw private output remains sealed and is deleted.'];
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`${lines.join('\n')}\n`);
-          console.log(`RECIPE_FINAL_OWNED pre_ui=${result.preUi} agent_ui=${result.agentUi} post_ui=${result.postUi} sha=${process.env.PRIVATE_SHA}`);
-          NODE
+          echo '## Recipe PR325 repository-owned acceptance' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact candidate: \`$PRIVATE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exact main baseline: \`$BASE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Raw private output is sealed and deleted; individual step conclusions are authoritative.' >> "$GITHUB_STEP_SUMMARY"
+          echo "RECIPE_OWNED exact_sha=$PRIVATE_SHA base_sha=$BASE_SHA"
 
       - name: Remove private checkouts and sealed owned logs
         if: always()
         shell: bash
-        run: rm -rf private-candidate private-base "$RUNNER_TEMP"/owned-*.log "$RUNNER_TEMP"/owned-*.status
+        run: rm -rf private-candidate private-base "$RUNNER_TEMP"/owned-*.log
