@@ -10,10 +10,10 @@ permissions:
 
 concurrency:
   group: recipe-runtime-pr325-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
-  PRIVATE_SHA: 9328a7f64f76d2ce05a746d56a5e7919ebb6cbf5
+  PRIVATE_SHA: 8670b6cbc20154985c51e344cdd83eece6997e17
 
 jobs:
   focused-current-head:
@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
 
-      - name: Enforce focused Recipe Python 20 of 20
+      - name: Enforce focused Recipe Python 21 of 21
         working-directory: private-repo
         shell: bash
         run: |
@@ -70,8 +70,8 @@ jobs:
           text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
           match=re.search(r'Ran\s+(\d+)\s+tests?',text)
           count=int(match.group(1)) if match else 0
-          ok=int(sys.argv[2])==0 and count==20 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
-          print(f'RECIPE_FOCUSED_PYTHON status={"PASS" if ok else "FAIL"} count={count}/20')
+          ok=int(sys.argv[2])==0 and count==21 and re.search(r'(?:^|\n)OK(?:\s|\n|$)',text) is not None
+          print(f'RECIPE_FOCUSED_PYTHON status={"PASS" if ok else "FAIL"} count={count}/21')
           raise SystemExit(0 if ok else 1)
           PY
 
@@ -172,13 +172,14 @@ jobs:
             20260728120500_trainingos_agent_recipe_trigger_entry_guard_v1.sql \
             20260728120600_trainingos_agent_recipe_source_digest_guard_v1.sql \
             20260728120700_trainingos_agent_recipe_executor_provenance_v1.sql \
-            20260728120800_trainingos_agent_recipe_review_hardening_v1.sql
+            20260728120800_trainingos_agent_recipe_review_hardening_v1.sql \
+            20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql
           do
             cp "../private-repo/supabase/migrations/$migration" "supabase/migrations/$migration"
           done
           rm -f supabase/seed.sql
           count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          test "$count" = 17
+          test "$count" = 18
           echo "RECIPE_CANONICAL_REPLAY_PREP status=PASS migrations=$count sha=$PRIVATE_SHA"
 
       - name: First canonical prerequisite replay
