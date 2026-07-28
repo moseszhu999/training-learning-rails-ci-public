@@ -1,0 +1,63 @@
+name: Classroom Agent Queue PR338 regression diagnosis
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/classroom-agent-queue-pr338-regression-diagnose.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 94a84422a0ef047324ff9a0013d1c4ee8b6686bc
+  BASE_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+
+jobs:
+  isolated-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact head and base
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+      - name: Existing Teacher Queue Node
+        working-directory: private-repo
+        run: node --test prototypes/trainingos-agent-mvp-v1/teacher-action-queue.test.mjs
+      - name: Existing Persistent Agent Node
+        working-directory: private-repo
+        run: node --test prototypes/trainingos-agent-mvp-v1/persistent-teacher-agent.test.mjs
+      - name: Canonical Explanation Node
+        working-directory: private-repo
+        run: node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs
+      - name: Existing Teacher Queue Python
+        working-directory: private-repo
+        run: python tests/test_trainingos_teacher_action_queue_contract.py
+      - name: Existing Persistent Agent Python
+        working-directory: private-repo
+        run: python tests/test_trainingos_persistent_teacher_agent_contract.py
+      - name: Existing Persistent Draft Python
+        working-directory: private-repo
+        run: python tests/test_trainingos_persistent_teacher_agent_draft_execution_contract.py
+      - name: Canonical Explanation Python
+        working-directory: private-repo
+        run: python tests/test_trainingos_classroom_explanation_contract.py
