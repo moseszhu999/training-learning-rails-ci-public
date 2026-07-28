@@ -1,0 +1,92 @@
+name: PR342 database replay diagnosis v2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-db-diagnostic-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 7c575a2e42e76d564e4ba15dfe8f682da8dee366
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Validate private credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Run sealed replay diagnosis
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/pr342-diagnostic.log" 2>&1
+          code=$?
+          set -e
+
+          applied_count="$(grep -c 'Applying migration ' "$RUNNER_TEMP/pr342-diagnostic.log" || true)"
+          last_migration="$(grep 'Applying migration ' "$RUNNER_TEMP/pr342-diagnostic.log" | tail -1 | sed -E 's/.*Applying migration ([^ ]+).*/\1/' || true)"
+          failed_migration="$(grep -E 'failed to apply migration|ERROR:' "$RUNNER_TEMP/pr342-diagnostic.log" | tail -1 | grep -Eo '[0-9]{14}_[A-Za-z0-9_.-]+\.sql' || true)"
+          sqlstate="$(grep -Eo 'SQLSTATE[ =:]+[0-9A-Z]{5}' "$RUNNER_TEMP/pr342-diagnostic.log" | tail -1 | grep -Eo '[0-9A-Z]{5}' || true)"
+          line_number="$(grep -Eo 'LINE [0-9]+' "$RUNNER_TEMP/pr342-diagnostic.log" | tail -1 | awk '{print $2}' || true)"
+
+          classification=unknown
+          grep -qi 'unexpected end of function definition' "$RUNNER_TEMP/pr342-diagnostic.log" && classification=unexpected_function_end
+          grep -qi 'syntax error' "$RUNNER_TEMP/pr342-diagnostic.log" && classification=sql_syntax_error
+          grep -qi 'does not exist' "$RUNNER_TEMP/pr342-diagnostic.log" && classification=dependency_object_missing
+          grep -qi 'already exists' "$RUNNER_TEMP/pr342-diagnostic.log" && classification=duplicate_object
+          grep -qi 'permission denied' "$RUNNER_TEMP/pr342-diagnostic.log" && classification=permission_denied
+          grep -qiE 'docker|container|port is already allocated|health check' "$RUNNER_TEMP/pr342-diagnostic.log" && classification=container_infrastructure
+
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
+            echo "replay_exit_code=$code"
+            echo "applied_migration_count=${applied_count:-0}"
+            echo "last_migration=${last_migration:-none}"
+            echo "failed_migration=${failed_migration:-none}"
+            echo "sqlstate=${sqlstate:-none}"
+            echo "line_number=${line_number:-none}"
+            echo "classification=$classification"
+            echo "raw_private_output=SEALED_AND_DELETED"
+          } | tee "$RUNNER_TEMP/pr342-diagnostic-summary.txt" >> "$GITHUB_STEP_SUMMARY"
+
+          [[ $code -ne 0 ]]
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          (cd private-repo && supabase stop --no-backup >/dev/null 2>&1) || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-diagnostic*
