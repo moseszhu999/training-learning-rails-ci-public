@@ -1,0 +1,115 @@
+name: PR342 Classroom Explanation exact-head CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-classroom-explanation-exact-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  exact-head-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      PRIVATE_SHA: 977967243264c23f377570d3658f97cc5b3a6703
+    steps:
+      - name: Validate credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run sealed exact-head validation
+        id: validate
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/pr342-exact.log"
+          {
+            [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+            npm ci
+            node --check lib/trainingos-agent-gateway/classroom-explanation-runtime.mjs
+            node --check lib/trainingos-agent-gateway/classroom-explanation-mcp-layer.mjs
+            node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs
+            python -m unittest -v tests.test_trainingos_classroom_explanation_contract
+            npm --prefix packages/training-classroom-intelligence test
+            npm run typecheck
+            npm run build
+          } > "$log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python - "$log" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          node_tests = sum(map(int, re.findall(r'# tests\s+(\d+)', text)))
+          node_pass = sum(map(int, re.findall(r'# pass\s+(\d+)', text)))
+          py = re.findall(r'Ran\s+(\d+)\s+tests?', text)
+          with open(sys.argv[2], 'a', encoding='utf-8') as out:
+              out.write(f'node_tests={node_tests}\n')
+              out.write(f'node_pass={node_pass}\n')
+              out.write(f'python_tests={py[-1] if py else 0}\n')
+          PY
+          exit 0
+
+      - name: Publish sanitized result
+        if: always()
+        env:
+          CODE: ${{ steps.validate.outputs.exit_code }}
+          NODE_TESTS: ${{ steps.validate.outputs.node_tests }}
+          NODE_PASS: ${{ steps.validate.outputs.node_pass }}
+          PYTHON_TESTS: ${{ steps.validate.outputs.python_tests }}
+        run: |
+          status=FAIL; [[ "${CODE:-1}" == "0" ]] && status=PASS
+          report=pr342-classroom-explanation-exact.txt
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_head_validation=$status"
+            echo "node_tests=${NODE_PASS:-0}/${NODE_TESTS:-0}"
+            echo "python_tests=${PYTHON_TESTS:-0}"
+            echo 'raw_logs_source_and_build_output=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr342-classroom-explanation-exact
+          path: pr342-classroom-explanation-exact.txt
+          retention-days: 3
+
+      - name: Cleanup and enforce
+        if: always()
+        env:
+          CODE: ${{ steps.validate.outputs.exit_code }}
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP/pr342-exact.log" pr342-classroom-explanation-exact.txt
+          [[ "${CODE:-1}" == "0" ]]
