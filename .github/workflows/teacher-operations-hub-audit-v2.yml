@@ -1,0 +1,268 @@
+name: Teacher Operations Hub audit exact-head v2
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/teacher-operations-hub-audit-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: teacher-operations-hub-audit-v2-1176b63d
+  cancel-in-progress: false
+
+jobs:
+  audit-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    env:
+      PRIVATE_EXACT_SHA: 1176b63db591dcb58524b185db0476fbffd9b4c0
+      EXPECTED_BASE_SHA: 30a9c267e1a07078dcbf150a9ef363995db65de1
+      VALIDATION_PROFILE: generic-owned
+      EXPECTED_CHANGED_FILE_COUNT: '1'
+      EXPECTED_MIGRATION_RANGE: none
+      EXPECTED_FOCUSED_TEST_COUNTS: node=0;python=0
+      AUDIT_DOCUMENT: docs/testing/trainingos-teacher-operations-hub-contract-audit-v1.md
+    steps:
+      - name: Check out public CI controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate fixed exact-head inputs
+        id: inputs
+        shell: bash
+        run: |
+          set +e
+          node scripts/exact-head-inputs.mjs > "$RUNNER_TEMP/trainingos-inputs.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate read-only private credential
+        id: credential
+        if: steps.inputs.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          if [[ -n "$PRIVATE_TOKEN" ]]; then
+            echo 'status=PASS' >> "$GITHUB_OUTPUT"
+          else
+            echo 'status=FAIL' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out exact private commit
+        id: private_checkout
+        if: steps.inputs.outputs.status == 'PASS' && steps.credential.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: 1176b63db591dcb58524b185db0476fbffd9b4c0
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify exact head, base, one-file scope, and no migrations
+        id: scope
+        if: steps.private_checkout.outcome == 'success'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          MIGRATION_START: ${{ steps.inputs.outputs.migration_start }}
+          MIGRATION_END: ${{ steps.inputs.outputs.migration_end }}
+        run: |
+          set +e
+          node scripts/verify-private-scope.mjs > "$RUNNER_TEMP/trainingos-scope.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run generic-owned diagnostic with sealed output
+        id: generic
+        if: steps.scope.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          EXPECTED_NODE_COUNT: ${{ steps.inputs.outputs.expected_node_count }}
+          EXPECTED_PYTHON_COUNT: ${{ steps.inputs.outputs.expected_python_count }}
+        run: |
+          set +e
+          node scripts/run-private-profile.mjs > "$RUNNER_TEMP/trainingos-generic-controller.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Read sanitized generic-owned result
+        id: generic_report
+        if: always() && steps.private_checkout.outcome == 'success'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const output = process.env.GITHUB_OUTPUT;
+          const reportPath = path.join(process.env.PRIVATE_REPO_PATH, '.trainingos-ci', 'owned-container-ci-report.json');
+          let status = 'NOT_RUN';
+          let step = 'NOT_RUN';
+          let code = 'NOT_RUN';
+          if (fs.existsSync(reportPath)) {
+            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+            status = String(report.status || 'UNKNOWN').replace(/[^A-Z_]/g, '');
+            step = String(report.failedOrLastStep || 'UNKNOWN').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
+            code = String(report.exitCode ?? 'UNKNOWN').replace(/[^0-9-]/g, '');
+          }
+          fs.appendFileSync(output, `status=${status}\nfailed_step=${step}\nexit_code=${code}\n`);
+          console.log(`GENERIC_OWNED_DIAGNOSTIC status=${status} failed_step=${step} exit_code=${code}`);
+          NODE
+
+      - name: Validate audit Markdown and source contracts
+        id: audit
+        if: steps.scope.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+        run: |
+          set +e
+          (
+            cd "$PRIVATE_REPO_PATH"
+            python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('docs/testing/trainingos-teacher-operations-hub-contract-audit-v1.md')
+          text = p.read_text(encoding='utf-8')
+          lines = text.splitlines()
+          assert len(lines) >= 500
+          assert sum(line.startswith('```') for line in lines) % 2 == 0
+          assert all(line.rstrip() == line for line in lines)
+          last = 0
+          for line in lines:
+              m = re.match(r'^(#{1,6})\s+\S', line)
+              if m:
+                  level = len(m.group(1))
+                  assert not last or level <= last + 1
+                  last = level
+          required = [
+              '/jhc/training/advanced', 'TrainingOsTeacherLiveClassroomConsole',
+              'TrainingOsClassroomFocusMode', 'get_trainingos_teacher_action_queue_v2',
+              'trainingos_agent_executions', 'trainingos_delivery_occurrences_v2',
+              'TEACHER_ONLY', 'EXTERNAL_PROVIDER_EVENT', 'PR A', 'PR B', 'PR C',
+              'Migration count', 'Runtime changed files',
+          ]
+          for value in required:
+              assert value in text, value
+          print(f'AUDIT_MARKDOWN status=PASS lines={len(lines)}')
+          PY
+            required_paths=(
+              apps/training-web/src/App.tsx
+              apps/training-web/src/lib/jhc-routes.ts
+              apps/training-web/src/components/JhcTrainingEntrySurface.tsx
+              apps/training-web/src/components/TrainingOsAdvancedManagementSurface.tsx
+              apps/training-web/src/components/JhcTrainingLightSurface.tsx
+              apps/training-web/src/components/TrainingOsAdvancedOverview.tsx
+              apps/training-web/src/components/TrainingOsClassroomFocusMode.tsx
+              apps/training-web/src/components/TrainingOsTeacherLiveClassroomConsole.tsx
+              apps/training-web/src/lib/trainingos-teacher-live-classroom-console-view-model.ts
+              apps/training-web/src/lib/trainingos-teacher-live-classroom-console-adapter.ts
+              apps/training-web/src/lib/trainingos-classroom-runtime.ts
+              apps/training-web/src/components/TrainingOsAgentOperations.tsx
+              apps/training-web/src/components/TrainingOsAdvancedRiskIntervention.tsx
+              apps/training-web/src/lib/jhc-lifecycle-operations.ts
+              lib/trainingos-agent-gateway/teacher-action-queue.mjs
+              lib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs
+              lib/trainingos-agent-gateway/persistent-teacher-agent.mjs
+              lib/trainingos-agent-gateway/classroom-explanation-runtime.mjs
+              packages/training-classroom-provider/src/provider-adapter.mjs
+            )
+            for file in "${required_paths[@]}"; do test -f "$file"; done
+            grep -q '/jhc/training/advanced' apps/training-web/src/lib/jhc-routes.ts
+            grep -q 'TrainingOsClassroomFocusMode' apps/training-web/src/components/TrainingOsAdvancedOperations.tsx
+            grep -q 'SAMPLE_TEACHER_LIVE_CLASSROOM_CONSOLE' apps/training-web/src/lib/trainingos-teacher-live-classroom-console-adapter.ts
+            grep -q 'get_trainingos_teacher_action_queue_v2' lib/trainingos-agent-gateway/teacher-action-queue.mjs
+            grep -q 'trainingos_agent_executions' lib/trainingos-agent-gateway/persistent-teacher-agent.mjs
+            grep -q 'agentCanStartRecording: false' lib/trainingos-agent-gateway/classroom-explanation-runtime.mjs
+            grep -q 'attendanceInference' packages/training-classroom-provider/src/provider-adapter.mjs
+            test "$(git diff --name-only 30a9c267e1a07078dcbf150a9ef363995db65de1..1176b63db591dcb58524b185db0476fbffd9b4c0 | wc -l | tr -d ' ')" = '1'
+            test "$(git diff --name-only 30a9c267e1a07078dcbf150a9ef363995db65de1..1176b63db591dcb58524b185db0476fbffd9b4c0)" = "$AUDIT_DOCUMENT"
+            test "$(git diff --name-only 30a9c267e1a07078dcbf150a9ef363995db65de1..1176b63db591dcb58524b185db0476fbffd9b4c0 -- 'supabase/migrations/**' | wc -l | tr -d ' ')" = '0'
+            test "$(git diff --name-only 30a9c267e1a07078dcbf150a9ef363995db65de1..1176b63db591dcb58524b185db0476fbffd9b4c0 -- 'apps/**' 'api/**' 'netlify/**' 'lib/**' 'packages/**' 'extensions/**' | wc -l | tr -d ' ')" = '0'
+          ) > "$RUNNER_TEMP/trainingos-audit-contract.log" 2>&1
+          code=$?
+          if [[ $code -eq 0 ]]; then echo 'status=PASS' >> "$GITHUB_OUTPUT"; else echo 'status=FAIL' >> "$GITHUB_OUTPUT"; fi
+          echo "runner_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized status
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
+          MIGRATION_COUNT: ${{ steps.scope.outputs.migration_count }}
+          GENERIC_STATUS: ${{ steps.generic_report.outputs.status }}
+          GENERIC_FAILED_STEP: ${{ steps.generic_report.outputs.failed_step }}
+          AUDIT_STATUS: ${{ steps.audit.outputs.status }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const v = (x) => x || 'NOT_RUN';
+          const lines = [
+            '## Teacher Operations Hub audit exact-head v2', '',
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || '1176b63db591dcb58524b185db0476fbffd9b4c0'}\``,
+            `- Exact merge base: \`${process.env.MERGE_BASE || '30a9c267e1a07078dcbf150a9ef363995db65de1'}\``,
+            `- Input validation: **${v(process.env.INPUT_STATUS)}**`,
+            `- Read-only credential: **${v(process.env.CREDENTIAL_STATUS)}**`,
+            `- Scope verification: **${v(process.env.SCOPE_STATUS)}**`,
+            `- Changed files: **${process.env.CHANGED_FILE_COUNT || '0'}**`,
+            `- Migration count: **${process.env.MIGRATION_COUNT || '0'}**`,
+            `- Audit contract gate: **${v(process.env.AUDIT_STATUS)}**`,
+            `- Generic-owned diagnostic: **${v(process.env.GENERIC_STATUS)}**`,
+            `- Generic-owned failed/last step: **${v(process.env.GENERIC_FAILED_STEP)}**`,
+            '- Raw private output: **SEALED_AND_DELETED**',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`TEACHER_HUB_AUDIT_V2 scope=${v(process.env.SCOPE_STATUS)} audit=${v(process.env.AUDIT_STATUS)} generic=${v(process.env.GENERIC_STATUS)} generic_step=${v(process.env.GENERIC_FAILED_STEP)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'}`);
+          NODE
+
+      - name: Enforce scope-specific audit result
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          INPUT_RUNNER_CODE: ${{ steps.inputs.outputs.runner_code }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          SCOPE_RUNNER_CODE: ${{ steps.scope.outputs.runner_code }}
+          AUDIT_STATUS: ${{ steps.audit.outputs.status }}
+          AUDIT_RUNNER_CODE: ${{ steps.audit.outputs.runner_code }}
+        run: |
+          [[ "${INPUT_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${INPUT_RUNNER_CODE:-1}" == '0' ]]
+          [[ "${CREDENTIAL_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${SCOPE_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${SCOPE_RUNNER_CODE:-1}" == '0' ]]
+          [[ "${AUDIT_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${AUDIT_RUNNER_CODE:-1}" == '0' ]]
+
+      - name: Remove private checkout and sealed files
+        if: always()
+        shell: bash
+        run: rm -rf private-repo "$RUNNER_TEMP"/trainingos-*.log
