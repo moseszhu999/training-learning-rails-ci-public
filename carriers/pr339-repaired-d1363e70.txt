@@ -1,7 +1,7 @@
 private_pr=339
-private_exact_sha=d1363e70eddd3f7ba10cff702f50353943ffd6e2
+private_exact_sha=c5f101def0853baebbe27f8ec256698b3b44a6ed
 expected_base_sha=e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0
 profile=student-learning-execution
-changed_files=34
-migrations=6
+changed_files=32
+migrations=4
 carrier=evidence-only-never-merge
