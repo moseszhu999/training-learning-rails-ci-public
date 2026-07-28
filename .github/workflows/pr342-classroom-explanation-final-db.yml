@@ -55,17 +55,13 @@ jobs:
           clean: true
 
       - name: Set up Python
-        id: python_setup
         if: always()
-        continue-on-error: true
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Set up Supabase CLI
-        id: supabase_setup
         if: always()
-        continue-on-error: true
         uses: supabase/setup-cli@v1
         with:
           version: latest
@@ -81,6 +77,8 @@ jobs:
           log="$RUNNER_TEMP/pr342-final-db.log"
           first="$RUNNER_TEMP/pr342-final-db-first.txt"
           second="$RUNNER_TEMP/pr342-final-db-second.txt"
+          first_err="$RUNNER_TEMP/pr342-final-db-first.err"
+          second_err="$RUNNER_TEMP/pr342-final-db-second.err"
           rm -rf "$workdir" && mkdir -p "$workdir"
           bootstrap=1; start=1; first_reset=1; first_e2e=1; second_reset=1; second_e2e=1
           {
@@ -109,8 +107,8 @@ jobs:
             first_reset=$?
           fi
           if [[ "$first_reset" == 0 ]]; then
-            (cd private-repo && psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
-              -f tests/sql/trainingos_classroom_explanation_e2e.sql) > "$first" 2>> "$log"
+            (cd private-repo && psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql) > "$first" 2> "$first_err"
             first_e2e=$?
           fi
           if [[ "$first_e2e" == 0 ]]; then
@@ -118,8 +116,8 @@ jobs:
             second_reset=$?
           fi
           if [[ "$second_reset" == 0 ]]; then
-            (cd private-repo && psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
-              -f tests/sql/trainingos_classroom_explanation_e2e.sql) > "$second" 2>> "$log"
+            (cd private-repo && psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql) > "$second" 2> "$second_err"
             second_e2e=$?
           fi
           {
@@ -130,8 +128,9 @@ jobs:
             echo "second_reset_code=$second_reset"
             echo "second_e2e_code=$second_e2e"
           } >> "$GITHUB_OUTPUT"
-          python - "$first" "$second" "$log" "$GITHUB_OUTPUT" <<'PY'
-          import json, pathlib, re, sys
+          python - "$first" "$second" "$first_err" "$second_err" "$log" "$GITHUB_OUTPUT" <<'PY'
+          import hashlib, json, pathlib, re, sys
+          first_path, second_path, first_err_path, second_err_path, log_path, output_path = map(pathlib.Path, sys.argv[1:])
           required_true = (
               'oneActiveExplanationEnforced', 'activeSlotReleasedAfterUpload',
               'secondExplanationStarted', 'classEndedStartRejected',
@@ -144,9 +143,8 @@ jobs:
               'transcriptIdempotencyConflictRejected',
           )
           def load(path):
-              p = pathlib.Path(path)
-              if not p.exists(): return {}
-              for line in reversed(p.read_text(encoding='utf-8', errors='replace').splitlines()):
+              if not path.exists(): return {}
+              for line in reversed(path.read_text(encoding='utf-8', errors='replace').splitlines()):
                   line = line.strip()
                   if line.startswith('{'):
                       try: return json.loads(line)
@@ -160,12 +158,21 @@ jobs:
                       and value.get('fixtureCleanup') == 'PLPGSQL_SUBTRANSACTION_ROLLBACK'
                       and all(value.get(key) is True for key in required_true)
                       and zero(value))
-          first, second = load(sys.argv[1]), load(sys.argv[2])
-          log = pathlib.Path(sys.argv[3]).read_text(encoding='utf-8', errors='replace') if pathlib.Path(sys.argv[3]).exists() else ''
-          markers = re.findall(r'\b(?:TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+\b', log)
-          sqlstates = re.findall(r'SQL state:\s*([A-Z0-9]{5})', log, flags=re.I)
+          first, second = load(first_path), load(second_path)
+          first_err = first_err_path.read_text(encoding='utf-8', errors='replace') if first_err_path.exists() else ''
+          second_err = second_err_path.read_text(encoding='utf-8', errors='replace') if second_err_path.exists() else ''
+          log = log_path.read_text(encoding='utf-8', errors='replace') if log_path.exists() else ''
+          combined = log + '\n' + first_err + '\n' + second_err
+          markers = re.findall(r'\b(?:TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+\b', combined)
+          sqlstates = re.findall(r'(?:ERROR:\s*|SQL state:\s*)([A-Z0-9]{5})', combined, flags=re.I)
           migrations = re.findall(r'Applying migration\s+([0-9]{14}_[A-Za-z0-9_]+\.sql)', log)
-          with open(sys.argv[4], 'a', encoding='utf-8') as out:
+          error_lines = [line.strip() for line in (first_err + '\n' + second_err).splitlines() if 'ERROR:' in line or 'FATAL:' in line]
+          error_line = error_lines[-1] if error_lines else 'NONE'
+          error_line = re.sub(r'\b[0-9a-f]{8}-[0-9a-f-]{27,}\b', '<uuid>', error_line, flags=re.I)
+          error_line = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+', '<email>', error_line)
+          error_line = re.sub(r'/home/runner/[^\s:]+', '<runner-path>', error_line)[:360]
+          error_digest = hashlib.sha256((first_err + '\n' + second_err or 'NONE').encode()).hexdigest()
+          with output_path.open('a', encoding='utf-8') as out:
               out.write(f'first_valid={str(valid(first)).lower()}\n')
               out.write(f'second_valid={str(valid(second)).lower()}\n')
               out.write(f'first_status={first.get("status", "MISSING")}\n')
@@ -175,6 +182,8 @@ jobs:
               out.write(f'failure_marker={markers[-1] if markers else "NONE"}\n')
               out.write(f'sqlstate={sqlstates[-1].upper() if sqlstates else "NONE"}\n')
               out.write(f'last_migration={migrations[-1] if migrations else "NONE"}\n')
+              out.write(f'error_signature={error_line}\n')
+              out.write(f'error_digest={error_digest}\n')
           PY
           all_ok=0
           [[ "$bootstrap" == 0 ]] || all_ok=1
@@ -206,6 +215,8 @@ jobs:
           MARKER: ${{ steps.database.outputs.failure_marker }}
           SQLSTATE: ${{ steps.database.outputs.sqlstate }}
           LAST_MIGRATION: ${{ steps.database.outputs.last_migration }}
+          ERROR_SIGNATURE: ${{ steps.database.outputs.error_signature }}
+          ERROR_DIGEST: ${{ steps.database.outputs.error_digest }}
         run: |
           report=pr342-final-database-result.txt
           {
@@ -230,6 +241,8 @@ jobs:
             echo "failure_marker=${MARKER:-NONE}"
             echo "sqlstate=${SQLSTATE:-NONE}"
             echo "last_migration=${LAST_MIGRATION:-NONE}"
+            echo "error_signature=${ERROR_SIGNATURE:-NONE}"
+            echo "error_digest=${ERROR_DIGEST:-NONE}"
             echo 'raw_logs_private_source_database_and_fixture_evidence=SEALED_AND_DELETED'
           } > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
