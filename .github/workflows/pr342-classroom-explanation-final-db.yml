@@ -1,0 +1,282 @@
+name: PR342 Classroom Explanation final database replay
+
+on:
+  push:
+    branches: [ci/pr342-final-05df0447]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-classroom-explanation-final-exact.yml
+      - .github/workflows/pr342-classroom-explanation-final-db.yml
+      - carriers/pr342-final-05df0447.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-final-db-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  isolated-database-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: 05df044760e9ffb3884319e4b5180a81f9093afb
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+      LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+    steps:
+      - name: Validate exact SHAs and private read credential
+        id: credential
+        if: always()
+        continue-on-error: true
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        id: checkout
+        if: always()
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Python
+        id: python_setup
+        if: always()
+        continue-on-error: true
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Supabase CLI
+        id: supabase_setup
+        if: always()
+        continue-on-error: true
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run two sealed isolated database replay passes
+        id: database
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr342-final-supabase"
+          log="$RUNNER_TEMP/pr342-final-db.log"
+          first="$RUNNER_TEMP/pr342-final-db-first.txt"
+          second="$RUNNER_TEMP/pr342-final-db-second.txt"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          bootstrap=1; start=1; first_reset=1; first_e2e=1; second_reset=1; second_e2e=1
+          {
+            cd private-repo
+            actual_sha="$(git rev-parse HEAD)"
+            merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+            counts="$(git rev-list --left-right --count "$BASE_SHA...$PRIVATE_SHA")"
+            [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+            [[ "$merge_base" == "$BASE_SHA" ]]
+            [[ "$(printf '%s' "$counts" | awk '{print $1}')" == "0" ]]
+            docker version >/dev/null
+            psql --version >/dev/null
+            supabase --workdir "$workdir" init --force --yes
+            python scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root "$PWD" \
+              --output-dir "$workdir/supabase/migrations" \
+              --commit-sha "$PRIVATE_SHA"
+          } > "$log" 2>&1
+          bootstrap=$?
+          if [[ "$bootstrap" == 0 ]]; then
+            supabase --workdir "$workdir" start >> "$log" 2>&1
+            start=$?
+          fi
+          if [[ "$start" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed >> "$log" 2>&1
+            first_reset=$?
+          fi
+          if [[ "$first_reset" == 0 ]]; then
+            (cd private-repo && psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql) > "$first" 2>> "$log"
+            first_e2e=$?
+          fi
+          if [[ "$first_e2e" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed >> "$log" 2>&1
+            second_reset=$?
+          fi
+          if [[ "$second_reset" == 0 ]]; then
+            (cd private-repo && psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql) > "$second" 2>> "$log"
+            second_e2e=$?
+          fi
+          {
+            echo "bootstrap_code=$bootstrap"
+            echo "start_code=$start"
+            echo "first_reset_code=$first_reset"
+            echo "first_e2e_code=$first_e2e"
+            echo "second_reset_code=$second_reset"
+            echo "second_e2e_code=$second_e2e"
+          } >> "$GITHUB_OUTPUT"
+          python - "$first" "$second" "$log" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, re, sys
+          required_true = (
+              'oneActiveExplanationEnforced', 'activeSlotReleasedAfterUpload',
+              'secondExplanationStarted', 'classEndedStartRejected',
+              'agentRecordingRejected', 'agentInferencePersisted',
+              'prohibitedCandidateRejected', 'teacherEvaluationConfirmed',
+              'agentConfirmRejected', 'staleVersionRejected',
+              'staleTranscriptRejected', 'crossClassRejected',
+              'transcriptUpdateRejected', 'transcriptDeleteRejected',
+              'rawAudioHidden', 'idempotencyConflictRejected',
+              'transcriptIdempotencyConflictRejected',
+          )
+          def load(path):
+              p = pathlib.Path(path)
+              if not p.exists(): return {}
+              for line in reversed(p.read_text(encoding='utf-8', errors='replace').splitlines()):
+                  line = line.strip()
+                  if line.startswith('{'):
+                      try: return json.loads(line)
+                      except json.JSONDecodeError: pass
+              return {}
+          def zero(value):
+              remaining = {k: v for k, v in value.items() if k.startswith('remaining')}
+              return bool(remaining) and all(v == 0 for v in remaining.values())
+          def valid(value):
+              return (value.get('status') == 'PASS'
+                      and value.get('fixtureCleanup') == 'PLPGSQL_SUBTRANSACTION_ROLLBACK'
+                      and all(value.get(key) is True for key in required_true)
+                      and zero(value))
+          first, second = load(sys.argv[1]), load(sys.argv[2])
+          log = pathlib.Path(sys.argv[3]).read_text(encoding='utf-8', errors='replace') if pathlib.Path(sys.argv[3]).exists() else ''
+          markers = re.findall(r'\b(?:TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+\b', log)
+          sqlstates = re.findall(r'SQL state:\s*([A-Z0-9]{5})', log, flags=re.I)
+          migrations = re.findall(r'Applying migration\s+([0-9]{14}_[A-Za-z0-9_]+\.sql)', log)
+          with open(sys.argv[4], 'a', encoding='utf-8') as out:
+              out.write(f'first_valid={str(valid(first)).lower()}\n')
+              out.write(f'second_valid={str(valid(second)).lower()}\n')
+              out.write(f'first_status={first.get("status", "MISSING")}\n')
+              out.write(f'second_status={second.get("status", "MISSING")}\n')
+              out.write(f'first_zero={str(zero(first)).lower()}\n')
+              out.write(f'second_zero={str(zero(second)).lower()}\n')
+              out.write(f'failure_marker={markers[-1] if markers else "NONE"}\n')
+              out.write(f'sqlstate={sqlstates[-1].upper() if sqlstates else "NONE"}\n')
+              out.write(f'last_migration={migrations[-1] if migrations else "NONE"}\n')
+          PY
+          all_ok=0
+          [[ "$bootstrap" == 0 ]] || all_ok=1
+          [[ "$start" == 0 ]] || all_ok=1
+          [[ "$first_reset" == 0 ]] || all_ok=1
+          [[ "$first_e2e" == 0 ]] || all_ok=1
+          [[ "$second_reset" == 0 ]] || all_ok=1
+          [[ "$second_e2e" == 0 ]] || all_ok=1
+          exit "$all_ok"
+
+      - name: Publish sanitized database result
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          DATABASE_OUTCOME: ${{ steps.database.outcome }}
+          BOOTSTRAP: ${{ steps.database.outputs.bootstrap_code }}
+          START: ${{ steps.database.outputs.start_code }}
+          FIRST_RESET: ${{ steps.database.outputs.first_reset_code }}
+          FIRST_E2E: ${{ steps.database.outputs.first_e2e_code }}
+          SECOND_RESET: ${{ steps.database.outputs.second_reset_code }}
+          SECOND_E2E: ${{ steps.database.outputs.second_e2e_code }}
+          FIRST_VALID: ${{ steps.database.outputs.first_valid }}
+          SECOND_VALID: ${{ steps.database.outputs.second_valid }}
+          FIRST_STATUS: ${{ steps.database.outputs.first_status }}
+          SECOND_STATUS: ${{ steps.database.outputs.second_status }}
+          FIRST_ZERO: ${{ steps.database.outputs.first_zero }}
+          SECOND_ZERO: ${{ steps.database.outputs.second_zero }}
+          MARKER: ${{ steps.database.outputs.failure_marker }}
+          SQLSTATE: ${{ steps.database.outputs.sqlstate }}
+          LAST_MIGRATION: ${{ steps.database.outputs.last_migration }}
+        run: |
+          report=pr342-final-database-result.txt
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
+            echo "credential=${CREDENTIAL:-missing}"
+            echo "checkout=${CHECKOUT:-missing}"
+            echo "database_stage=${DATABASE_OUTCOME:-missing}"
+            echo "bootstrap_exit=${BOOTSTRAP:-missing}"
+            echo "start_exit=${START:-missing}"
+            echo "first_reset_exit=${FIRST_RESET:-missing}"
+            echo "first_e2e_exit=${FIRST_E2E:-missing}"
+            echo "second_reset_exit=${SECOND_RESET:-missing}"
+            echo "second_e2e_exit=${SECOND_E2E:-missing}"
+            echo "first_status=${FIRST_STATUS:-MISSING}"
+            echo "second_status=${SECOND_STATUS:-MISSING}"
+            echo "first_acceptance_valid=${FIRST_VALID:-false}"
+            echo "second_acceptance_valid=${SECOND_VALID:-false}"
+            echo "first_remaining_zero=${FIRST_ZERO:-false}"
+            echo "second_remaining_zero=${SECOND_ZERO:-false}"
+            echo "destructive_reset_count=2"
+            echo "failure_marker=${MARKER:-NONE}"
+            echo "sqlstate=${SQLSTATE:-NONE}"
+            echo "last_migration=${LAST_MIGRATION:-NONE}"
+            echo 'raw_logs_private_source_database_and_fixture_evidence=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized database evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr342-final-database-result
+          path: pr342-final-database-result.txt
+          retention-days: 3
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr342-final-supabase" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP/pr342-final-supabase" "$RUNNER_TEMP"/pr342-final-db* \
+            pr342-final-database-result.txt
+
+      - name: Final database enforcement
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          DATABASE_OUTCOME: ${{ steps.database.outcome }}
+          BOOTSTRAP: ${{ steps.database.outputs.bootstrap_code }}
+          START: ${{ steps.database.outputs.start_code }}
+          FIRST_RESET: ${{ steps.database.outputs.first_reset_code }}
+          FIRST_E2E: ${{ steps.database.outputs.first_e2e_code }}
+          SECOND_RESET: ${{ steps.database.outputs.second_reset_code }}
+          SECOND_E2E: ${{ steps.database.outputs.second_e2e_code }}
+          FIRST_VALID: ${{ steps.database.outputs.first_valid }}
+          SECOND_VALID: ${{ steps.database.outputs.second_valid }}
+          FIRST_ZERO: ${{ steps.database.outputs.first_zero }}
+          SECOND_ZERO: ${{ steps.database.outputs.second_zero }}
+        run: |
+          failed=0
+          [[ "$CREDENTIAL" == success ]] || failed=1
+          [[ "$CHECKOUT" == success ]] || failed=1
+          [[ "$DATABASE_OUTCOME" == success ]] || failed=1
+          [[ "$BOOTSTRAP" == 0 && "$START" == 0 ]] || failed=1
+          [[ "$FIRST_RESET" == 0 && "$FIRST_E2E" == 0 ]] || failed=1
+          [[ "$SECOND_RESET" == 0 && "$SECOND_E2E" == 0 ]] || failed=1
+          [[ "$FIRST_VALID" == true && "$SECOND_VALID" == true ]] || failed=1
+          [[ "$FIRST_ZERO" == true && "$SECOND_ZERO" == true ]] || failed=1
+          if [[ "$failed" != 0 ]]; then
+            echo '::error::PR #342 final database replay failed; migration, SQL E2E, rollback, or zero-residue evidence is incomplete.'
+          fi
+          exit "$failed"
