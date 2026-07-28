@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      PRIVATE_SHA: b91c31350d5e7182330cc1745f3750f6be3de5d8
+      PRIVATE_SHA: a0d42e3edf74c5c18850f74830b7e8d37e20985b
       BASE_SHA: 604631a96f01fb76d123072168c165cc699d9e8e
 
     steps:
@@ -69,7 +69,7 @@ jobs:
           actual_sha="$(git rev-parse HEAD)"
           actual_merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
           actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
-          expected_files=$'docs/product/trainingos-classroom-agent-queue-integration-v1.md\nlib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs\nlib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs\nlib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs\nlib/trainingos-agent-gateway/persistent-teacher-agent.mjs\nlib/trainingos-agent-gateway/teacher-action-queue.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs\nsupabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql\ntests/test_trainingos_classroom_agent_queue_integration_contract.py'
+          expected_files=$'docs/product/trainingos-classroom-agent-queue-integration-v1.md\nlib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs\nlib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs\nlib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs\nlib/trainingos-agent-gateway/persistent-teacher-agent.mjs\nlib/trainingos-agent-gateway/teacher-action-queue.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs\nprototypes/trainingos-agent-mvp-v1/zero-permission-mcp-composition.test.mjs\nsupabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql\ntests/test_trainingos_classroom_agent_queue_integration_contract.py'
           [[ "$actual_sha" == "$PRIVATE_SHA" ]]
           [[ "$actual_merge_base" == "$BASE_SHA" ]]
           [[ "$actual_files" == "$expected_files" ]]
