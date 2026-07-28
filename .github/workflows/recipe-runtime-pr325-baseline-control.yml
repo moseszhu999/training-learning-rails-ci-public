@@ -1,0 +1,73 @@
+name: Recipe Runtime PR325 baseline control
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recipe-runtime-pr325-baseline-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  baseline-known-red-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BASE_SHA: bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100
+
+    steps:
+      - name: Validate base SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
+
+      - name: Check out exact private base
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.BASE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private base
+        working-directory: private-base
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$BASE_SHA" ]] || exit 3
+
+      - name: Confirm same classroom contract is already red on base
+        working-directory: private-base
+        shell: bash
+        run: |
+          set +e
+          python tests/test_jhc_exercise_prompt_references.py \
+            ExercisePromptReferenceContracts.test_classroom_is_monitoring_only_and_has_no_exercise_creation \
+            -v > "$RUNNER_TEMP/recipe-baseline-control.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then
+            echo 'BASELINE_CONTROL unexpected-pass candidate-regression-not-excluded'
+            exit 1
+          fi
+          echo 'BASELINE_CONTROL confirmed-pre-existing-red exact-base=bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100'
+          exit 0
+
+      - name: Remove private base and sealed log
+        if: always()
+        shell: bash
+        run: rm -rf private-base "$RUNNER_TEMP/recipe-baseline-control.log"
