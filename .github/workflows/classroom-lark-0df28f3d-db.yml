@@ -1,0 +1,310 @@
+name: Classroom Lark 0df28f3d canonical database
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/classroom-lark-0df28f3d-app.yml
+      - .github/workflows/classroom-lark-0df28f3d-db.yml
+      - carriers/classroom-lark-0df28f3d.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-lark-0df28f3d-db-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 0df28f3d4056cc8aa2b65baa30981713a02f5b6a
+  BASE_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+  LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  canonical-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Validate exact inputs and credential
+        id: credential
+        continue-on-error: true
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        if: always()
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        if: always()
+        with:
+          version: latest
+
+      - name: Run sealed canonical two-pass database acceptance
+        id: database
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/lark-0df-supabase"
+          raw="$RUNNER_TEMP/lark-0df-db.log"
+          first_out="$RUNNER_TEMP/lark-0df-first.out"
+          first_err="$RUNNER_TEMP/lark-0df-first.err"
+          catalog_out="$RUNNER_TEMP/lark-0df-catalog.out"
+          second_out="$RUNNER_TEMP/lark-0df-second.out"
+          second_err="$RUNNER_TEMP/lark-0df-second.err"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+
+          precheck=1; bootstrap=1; start=1
+          first_reset=1; first_e2e=1; first_parse=1; first_history=1; catalog=1
+          second_reset=1; second_e2e=1; second_parse=1; second_history=1
+
+          actual_sha="$(git rev-parse HEAD 2>/dev/null)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA" 2>/dev/null)"
+          behind="$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA" 2>/dev/null)"
+          [[ "$actual_sha" == "$PRIVATE_SHA" && "$merge_base" == "$BASE_SHA" && "$behind" == 0 ]]
+          precheck=$?
+
+          if [[ "$precheck" == 0 ]]; then
+            {
+              supabase --workdir "$workdir" init --force --yes
+              python scripts/build-trainingos-fresh-bootstrap.py \
+                --repo-root "$PWD" \
+                --output-dir "$workdir/supabase/migrations" \
+                --commit-sha "$PRIVATE_SHA"
+            } > "$raw" 2>&1
+            bootstrap=$?
+          fi
+
+          if [[ "$bootstrap" == 0 ]]; then
+            supabase --workdir "$workdir" start >> "$raw" 2>&1
+            start=$?
+          fi
+
+          parse_evidence() {
+            python - "$1" "$GITHUB_OUTPUT" "$2" <<'PY'
+          import json,pathlib,sys
+          path=pathlib.Path(sys.argv[1]); prefix=sys.argv[3]
+          lines=path.read_text(encoding='utf-8',errors='replace').splitlines() if path.exists() else []
+          payload=next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{')),None)
+          true_fields=(
+              'exactRecordingStatusEvents','completedRecordingTokenBinding','transcriptImmutable',
+              'speakerCandidatesOnly','studentProjectionRejected','agentConfirmationRejected')
+          false_fields=('minuteTokenExposed','attendanceDeterminationPerformed')
+          failed=[key for key in true_fields if (payload or {}).get(key) is not True]
+          failed += [key for key in false_fields if (payload or {}).get(key) is not False]
+          valid=(bool(payload) and payload.get('status')=='PASS'
+                 and payload.get('cleanupStatus')=='PASS'
+                 and payload.get('zeroResidueCount')==0 and not failed)
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+              out.write(f'{prefix}_status={(payload or {}).get("status","MISSING")}\n')
+              out.write(f'{prefix}_cleanup={(payload or {}).get("cleanupStatus","MISSING")}\n')
+              out.write(f'{prefix}_zero={(payload or {}).get("zeroResidueCount",-1)}\n')
+              out.write(f'{prefix}_failed={",".join(failed) if failed else "NONE"}\n')
+              out.write(f'{prefix}_valid={str(valid).lower()}\n')
+          raise SystemExit(0 if valid else 1)
+          PY
+          }
+
+          check_history() {
+            local prefix="$1"
+            local file="$RUNNER_TEMP/lark-0df-${prefix}-history.out"
+            psql "$LOCAL_DATABASE_URL" -X -Atv ON_ERROR_STOP=1 -c \
+              "select jsonb_build_object('count',count(*),'min',min(version),'max',max(version)) from supabase_migrations.schema_migrations where version between '20260728195000' and '20260728199999';" \
+              > "$file" 2>> "$raw"
+            local code=$?
+            if [[ "$code" == 0 ]]; then
+              python - "$file" "$GITHUB_OUTPUT" "$prefix" <<'PY'
+          import json,pathlib,sys
+          lines=pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines(); prefix=sys.argv[3]
+          value=next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{')),{})
+          valid=value.get('count')==5 and value.get('min')=='20260728195000' and value.get('max')=='20260728195400'
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+              out.write(f'{prefix}_migration_count={value.get("count",0)}\n')
+              out.write(f'{prefix}_history_valid={str(valid).lower()}\n')
+          raise SystemExit(0 if valid else 1)
+          PY
+              code=$?
+            fi
+            return "$code"
+          }
+
+          if [[ "$start" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed >> "$raw" 2>&1
+            first_reset=$?
+          fi
+          if [[ "$first_reset" == 0 ]]; then
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_lark_adapter_e2e.sql \
+              > "$first_out" 2> "$first_err"
+            first_e2e=$?
+            if [[ "$first_e2e" == 0 ]]; then parse_evidence "$first_out" first; first_parse=$?; fi
+            check_history first; first_history=$?
+          fi
+
+          if [[ "$first_reset" == 0 ]]; then
+            psql "$LOCAL_DATABASE_URL" -X -Atv ON_ERROR_STOP=1 > "$catalog_out" 2>> "$raw" <<'SQL'
+          with expected_tables(name) as (
+            values
+              ('trainingos_classroom_lark_meeting_bindings'),
+              ('trainingos_classroom_lark_recording_events'),
+              ('trainingos_classroom_lark_minute_sources'),
+              ('trainingos_classroom_lark_transcripts'),
+              ('trainingos_classroom_lark_speaker_candidates'),
+              ('trainingos_classroom_lark_speaker_confirmations'),
+              ('trainingos_classroom_lark_audit_events')
+          ), security as (
+            select count(*) filter(where c.relrowsecurity and c.relforcerowsecurity) secure_count
+            from expected_tables e
+            join pg_class c on c.relname=e.name
+            join pg_namespace n on n.oid=c.relnamespace and n.nspname='public'
+          ), grants as (
+            select count(*) grant_count
+            from information_schema.role_table_grants g
+            join expected_tables e on e.name=g.table_name
+            where g.table_schema='public'
+              and g.grantee in ('PUBLIC','anon','authenticated',('service'||'_role'))
+          )
+          select jsonb_build_object(
+            'secureCount',(select secure_count from security),
+            'directGrantCount',(select grant_count from grants)
+          );
+          SQL
+            catalog=$?
+            if [[ "$catalog" == 0 ]]; then
+              python - "$catalog_out" "$GITHUB_OUTPUT" <<'PY'
+          import json,pathlib,sys
+          lines=pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines()
+          value=next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{')),{})
+          valid=value.get('secureCount')==7 and value.get('directGrantCount')==0
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+              out.write(f'rls_forced_count={value.get("secureCount",0)}\n')
+              out.write(f'direct_grant_count={value.get("directGrantCount",-1)}\n')
+              out.write(f'catalog_valid={str(valid).lower()}\n')
+          raise SystemExit(0 if valid else 1)
+          PY
+              catalog=$?
+            fi
+          fi
+
+          if [[ "$start" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed >> "$raw" 2>&1
+            second_reset=$?
+          fi
+          if [[ "$second_reset" == 0 ]]; then
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_lark_adapter_e2e.sql \
+              > "$second_out" 2> "$second_err"
+            second_e2e=$?
+            if [[ "$second_e2e" == 0 ]]; then parse_evidence "$second_out" second; second_parse=$?; fi
+            check_history second; second_history=$?
+          fi
+
+          {
+            echo "actual_sha=$actual_sha"
+            echo "merge_base=$merge_base"
+            echo "behind=$behind"
+            echo "precheck=$precheck"
+            echo "bootstrap=$bootstrap"
+            echo "start=$start"
+            echo "first_reset=$first_reset"
+            echo "first_e2e=$first_e2e"
+            echo "first_parse=$first_parse"
+            echo "first_history=$first_history"
+            echo "catalog=$catalog"
+            echo "second_reset=$second_reset"
+            echo "second_e2e=$second_e2e"
+            echo "second_parse=$second_parse"
+            echo "second_history=$second_history"
+          } >> "$GITHUB_OUTPUT"
+
+          [[ "$precheck" == 0 && "$bootstrap" == 0 && "$start" == 0 \
+             && "$first_reset" == 0 && "$first_e2e" == 0 && "$first_parse" == 0 \
+             && "$first_history" == 0 && "$catalog" == 0 \
+             && "$second_reset" == 0 && "$second_e2e" == 0 && "$second_parse" == 0 \
+             && "$second_history" == 0 ]]
+          exit $?
+
+      - name: Publish sanitized database result
+        if: always()
+        env:
+          DATABASE: ${{ steps.database.outcome }}
+          FIRST_STATUS: ${{ steps.database.outputs.first_status }}
+          FIRST_VALID: ${{ steps.database.outputs.first_valid }}
+          FIRST_ZERO: ${{ steps.database.outputs.first_zero }}
+          FIRST_FAILED: ${{ steps.database.outputs.first_failed }}
+          FIRST_MIGRATIONS: ${{ steps.database.outputs.first_migration_count }}
+          FIRST_HISTORY: ${{ steps.database.outputs.first_history_valid }}
+          RLS: ${{ steps.database.outputs.rls_forced_count }}
+          GRANTS: ${{ steps.database.outputs.direct_grant_count }}
+          CATALOG: ${{ steps.database.outputs.catalog_valid }}
+          SECOND_STATUS: ${{ steps.database.outputs.second_status }}
+          SECOND_VALID: ${{ steps.database.outputs.second_valid }}
+          SECOND_ZERO: ${{ steps.database.outputs.second_zero }}
+          SECOND_FAILED: ${{ steps.database.outputs.second_failed }}
+          SECOND_MIGRATIONS: ${{ steps.database.outputs.second_migration_count }}
+          SECOND_HISTORY: ${{ steps.database.outputs.second_history_valid }}
+        shell: bash
+        run: |
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
+            echo "database_stage=${DATABASE:-missing}"
+            echo "first_status=${FIRST_STATUS:-MISSING}"
+            echo "first_valid=${FIRST_VALID:-false}"
+            echo "first_zero=${FIRST_ZERO:--1}"
+            echo "first_failed=${FIRST_FAILED:-MISSING}"
+            echo "first_migration_count=${FIRST_MIGRATIONS:-0}"
+            echo "first_history_valid=${FIRST_HISTORY:-false}"
+            echo "rls_forced_count=${RLS:-0}"
+            echo "direct_grant_count=${GRANTS:--1}"
+            echo "catalog_valid=${CATALOG:-false}"
+            echo "second_status=${SECOND_STATUS:-MISSING}"
+            echo "second_valid=${SECOND_VALID:-false}"
+            echo "second_zero=${SECOND_ZERO:--1}"
+            echo "second_failed=${SECOND_FAILED:-MISSING}"
+            echo "second_migration_count=${SECOND_MIGRATIONS:-0}"
+            echo "second_history_valid=${SECOND_HISTORY:-false}"
+            echo "raw_database_logs_private_source_and_fixture_output=SEALED_AND_DELETED"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        shell: bash
+        run: |
+          supabase --workdir "$RUNNER_TEMP/lark-0df-supabase" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/lark-0df-*
+
+      - name: Final database enforcement
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          DATABASE: ${{ steps.database.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CREDENTIAL" == success && "$CHECKOUT" == success && "$DATABASE" == success ]]
