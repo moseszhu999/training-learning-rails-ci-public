@@ -11,4 +11,5 @@ explanation_migrations=15
 old_sha_results_are_final_evidence=false
 old_database_failure_marker=TRAININGOS_ASSESSMENT_REVIEW_CONTENT_INCOMPLETE
 old_enforcement_was_correct=true
+diagnostic_workflow_triggered=true
 raw_private_output=SEALED
