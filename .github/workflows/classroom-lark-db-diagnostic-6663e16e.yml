@@ -39,7 +39,7 @@ jobs:
         with:
           version: latest
 
-      - name: Classify replay failure without publishing private logs
+      - name: Classify replay with legacy-order normalization
         id: classify
         working-directory: private-repo
         shell: bash
@@ -52,6 +52,7 @@ jobs:
           init_code=$?
           start_code=1
           reset_code=1
+          normalized_count=0
           if [[ "$init_code" == "0" ]]; then
             mv supabase/migrations "$saved_migrations"
             mkdir -p supabase/migrations
@@ -61,10 +62,36 @@ jobs:
             mv "$saved_migrations" supabase/migrations
           fi
           if [[ "$start_code" == "0" ]]; then
-            supabase db reset --local --no-seed --debug >> "$db_log" 2>&1
-            reset_code=$?
+            normalized_count="$(python <<'PY'
+          from collections import defaultdict
+          from pathlib import Path
+          import re
+
+          root = Path('supabase/migrations')
+          groups = defaultdict(list)
+          for path in root.glob('*.sql'):
+              match = re.match(r'^(\d{8})_(.+\.sql)$', path.name)
+              if match:
+                  groups[match.group(1)].append((path, match.group(2)))
+          count = 0
+          for day, entries in sorted(groups.items()):
+              for index, (path, suffix) in enumerate(sorted(entries, key=lambda item: item[0].name)):
+                  version = 990000 + index
+                  target = path.with_name(f'{day}{version:06d}_{suffix}')
+                  if target.exists():
+                      raise SystemExit(f'legacy normalization collision: {target.name}')
+                  path.rename(target)
+                  count += 1
+          print(count)
+          PY
+            )"
+            normalize_code=$?
+            if [[ "$normalize_code" == "0" ]]; then
+              supabase db reset --local --no-seed --debug >> "$db_log" 2>&1
+              reset_code=$?
+            fi
           fi
-          diagnostic="$(python - "$db_log" "$init_code" "$start_code" "$reset_code" <<'PY'
+          diagnostic="$(python - "$db_log" "$init_code" "$start_code" "$reset_code" "$normalized_count" <<'PY'
           import hashlib
           import pathlib
           import re
@@ -96,6 +123,7 @@ jobs:
           print(
               'DB_REPLAY_DIAGNOSTIC '
               f'init={sys.argv[2]} start={sys.argv[3]} reset={sys.argv[4]} '
+              f'normalized_legacy={sys.argv[5]} '
               f'last_migration={pathlib.Path(applying[-1]).name if applying else "none"} '
               f'error={error} log_sha256={digest}'
           )
