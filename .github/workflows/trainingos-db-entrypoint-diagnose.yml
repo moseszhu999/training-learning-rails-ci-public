@@ -34,11 +34,11 @@ jobs:
           {
             echo "private_sha=$PRIVATE_SHA"
             echo '[baseline_bootstrap_paths]'
-            find private-repo -type f \( -iname '*baseline*' -o -iname '*bootstrap*' -o -iname '*schema*snapshot*' -o -iname '*migration*replay*' \) -printf '%P\n' | sort | head -200
+            find private-repo -type f \( -iname '*baseline*' -o -iname '*bootstrap*' -o -iname '*schema*snapshot*' -o -iname '*migration*replay*' \) -printf '%P\n' | sort | head -200 || true
             echo '[supabase_cli_script_paths]'
-            grep -RIlE 'supabase (db (start|reset|push)|migration|start)' private-repo/scripts private-repo/tests private-repo/docs private-repo/.github 2>/dev/null | sed 's#^private-repo/##' | sort | head -200
+            grep -RIlE 'supabase (db (start|reset|push)|migration|start)' private-repo/scripts private-repo/tests private-repo/docs private-repo/.github 2>/dev/null | sed 's#^private-repo/##' | sort | head -200 || true
             echo '[psql_migration_script_paths]'
-            grep -RIlE '(psql|postgres).*(migration|supabase/migrations)|(migration|supabase/migrations).*(psql|postgres)' private-repo/scripts private-repo/tests private-repo/docs private-repo/.github 2>/dev/null | sed 's#^private-repo/##' | sort | head -200
+            grep -RIlE '(psql|postgres).*(migration|supabase/migrations)|(migration|supabase/migrations).*(psql|postgres)' private-repo/scripts private-repo/tests private-repo/docs private-repo/.github 2>/dev/null | sed 's#^private-repo/##' | sort | head -200 || true
           } > sanitized/db-entrypoints.txt
           rm -rf private-repo
       - uses: actions/upload-artifact@v4
