@@ -34,6 +34,7 @@ jobs:
           version: latest
           github-token: ${{ github.token }}
       - name: Diagnose canonical trigger anchor and candidate fix
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +104,7 @@ jobs:
               if 'v_requires_human' in line and line.lower().endswith(' then') and line.lower().split()[0] in {'if','elsif'}:
                   guards.append(line)
           guards = list(dict.fromkeys(guards))
+          Path('sanitized/canonical-guard-candidates.txt').write_text(repr(guards) + '\n')
           if len(guards) != 1:
               raise SystemExit(f'canonical_guard_candidates={guards!r}')
           actual = guards[0]
@@ -130,14 +132,15 @@ jobs:
             grep -Ei -B4 -A8 'TRAININGOS_[A-Z0-9_]+|SQLSTATE|CONTEXT:|PL/pgSQL|ERROR' \
               "$RUNNER_TEMP/pr338-candidate.log" | tail -40 | cut -c1-600 || true
           } >> sanitized/pr338-db-context.txt
-          rm -f sanitized/canonical-guard.txt
+          rm -f sanitized/canonical-guard.txt sanitized/canonical-guard-candidates.txt
 
           supabase --workdir replay-project stop --no-backup || true
           rm -rf private-repo replay-project held-migrations
           rm -f "$RUNNER_TEMP"/pr338-*.log "$RUNNER_TEMP/pr338-base-definitions.txt"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: classroom-agent-queue-pr338-db-context
-          path: sanitized/pr338-db-context.txt
+          path: sanitized
           if-no-files-found: error
           retention-days: 1
