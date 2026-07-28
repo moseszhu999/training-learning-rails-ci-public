@@ -19,6 +19,8 @@ permissions:
 jobs:
   discover:
     runs-on: ubuntu-24.04
+    outputs:
+      diagnostic: ${{ steps.scan.outputs.diagnostic }}
     env:
       PRIVATE_SHA: f55b6383861bb604c83e4423add51ff1fb994a87
     steps:
@@ -33,10 +35,11 @@ jobs:
           fetch-depth: 1
 
       - name: Scan function creator and DDL consumers
+        id: scan
         working-directory: private-repo
         shell: bash
         run: |
-          python <<'PY'
+          diagnostic="$(python <<'PY'
           from pathlib import Path
           import re
 
@@ -62,3 +65,15 @@ jobs:
                   rows.append(f'{path.name}:{"+".join(kinds)}')
           print('FUNCTION_OWNER_DIAGNOSTIC target=' + target + ' rows=' + ','.join(rows))
           PY
+          )"
+          echo "diagnostic=$diagnostic" >> "$GITHUB_OUTPUT"
+
+  report:
+    needs: discover
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Print function owner diagnostic
+        shell: bash
+        env:
+          DIAGNOSTIC: ${{ needs.discover.outputs.diagnostic }}
+        run: echo "$DIAGNOSTIC"
