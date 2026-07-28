@@ -1,0 +1,214 @@
+name: PR325 synchronized Recipe exact-head final
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr325-final-24003f77.yml
+      - carriers/pr325-final-24003f77.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 24003f77d960b7237ed317d295cff015ed121a39
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Validate credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - name: Checkout exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact head and Recipe-only scope
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+          git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort > "$RUNNER_TEMP/pr325-files.txt"
+          python - "$RUNNER_TEMP/pr325-files.txt" <<'PY'
+          import pathlib,re,sys
+          files=[x for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if x]
+          def allowed(p):
+              return (p.startswith('packages/training-recipe/')
+                  or re.fullmatch(r'lib/trainingos-agent-gateway/recipe-[^/]+\.mjs',p)
+                  or re.fullmatch(r'supabase/migrations/2026072812\d{4}_trainingos_agent_recipe_[^/]+\.sql',p)
+                  or re.fullmatch(r'prototypes/trainingos-agent-mvp-v1/recipe-[^/]+\.test\.mjs',p)
+                  or re.fullmatch(r'tests/test_trainingos_agent_recipe[^/]*\.py',p)
+                  or re.fullmatch(r'tests/sql/trainingos_agent_recipe[^/]*\.sql',p)
+                  or p in {'docs/architecture/trainingos-agent-recipe-runtime-v1.md','docs/testing/trainingos-agent-recipe-validation-v1.md'})
+          bad=[p for p in files if not allowed(p)]
+          print(f'PR325_SCOPE files={len(files)} forbidden={len(bad)}')
+          raise SystemExit(0 if len(files)==26 and not bad else 1)
+          PY
+      - name: Focused contracts
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          node --check packages/training-recipe/src/compiler.mjs
+          node --check packages/training-recipe/src/adapters.mjs
+          node --check packages/training-recipe/src/index.mjs
+          node --check packages/training-recipe/src/review-hardening.mjs
+          node --check lib/trainingos-agent-gateway/recipe-runtime.mjs
+          node --check lib/trainingos-agent-gateway/recipe-runtime-review.mjs
+          node --check lib/trainingos-agent-gateway/recipe-mcp-layer.mjs
+          node --test prototypes/trainingos-agent-mvp-v1/recipe-runtime.test.mjs prototypes/trainingos-agent-mvp-v1/recipe-review-runtime.test.mjs > "$RUNNER_TEMP/pr325-node.log" 2>&1
+          grep -q '^# tests 11$' "$RUNNER_TEMP/pr325-node.log"
+          grep -q '^# pass 11$' "$RUNNER_TEMP/pr325-node.log"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/pr325-node.log"
+          python -m unittest -v tests.test_trainingos_agent_recipe_contract tests.test_trainingos_agent_recipe_review_contract > "$RUNNER_TEMP/pr325-python.log" 2>&1
+          grep -q 'Ran 21 tests' "$RUNNER_TEMP/pr325-python.log"
+          grep -q '^OK$' "$RUNNER_TEMP/pr325-python.log"
+      - name: Repository gates
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          npm ci > "$RUNNER_TEMP/pr325-install.log" 2>&1
+          npm run typecheck > "$RUNNER_TEMP/pr325-typecheck.log" 2>&1
+          npm run build > "$RUNNER_TEMP/pr325-build.log" 2>&1
+      - name: Sanitized application result
+        run: |
+          {
+            echo 'exact_private_sha=24003f77d960b7237ed317d295cff015ed121a39'
+            echo 'exact_base_sha=a2875b971b513f667caa67272eb4271485d2858c'
+            echo 'scope=PASS_26_FILES'
+            echo 'syntax=PASS_7_7'
+            echo 'node=PASS_11_11'
+            echo 'python=PASS_21_21'
+            echo 'install=PASS'
+            echo 'typecheck=PASS'
+            echo 'build=PASS'
+            echo 'raw_private_output=SEALED_AND_DELETED'
+          } | tee "$RUNNER_TEMP/pr325-app-result.txt" >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP"/pr325-*
+
+  database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - name: Validate credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+      - name: Checkout exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Prepare canonical prerequisite set
+        run: |
+          set -euo pipefail
+          mkdir replay-project && cd replay-project && supabase init
+          rm -rf supabase/migrations && mkdir -p supabase/migrations
+          cp ../private-repo/tests/sql/trainingos_agent_recipe_prerequisite_harness.sql supabase/migrations/00000000000000_trainingos_agent_recipe_prerequisite_harness.sql
+          for migration in \
+            20260714_jhc_source_bundle_reference_assets.sql \
+            20260719233000_trainingos_agent_devices.sql \
+            20260724153000_trainingos_agent_execution_envelope.sql \
+            20260724154500_trainingos_agent_execution_envelope_hardening.sql \
+            20260724160000_trainingos_agent_execution_progress.sql \
+            20260727240000_trainingos_persistent_teacher_agent_schema_v1.sql \
+            20260727240100_trainingos_persistent_teacher_agent_policy_rpc_v1.sql \
+            20260728120000_trainingos_agent_recipe_schema_v1.sql \
+            20260728120100_trainingos_agent_recipe_management_v1.sql \
+            20260728120200_trainingos_agent_recipe_execution_v1.sql \
+            20260728120300_trainingos_agent_recipe_security_hardening_v1.sql \
+            20260728120400_trainingos_agent_recipe_actor_access_hardening_v1.sql \
+            20260728120500_trainingos_agent_recipe_trigger_entry_guard_v1.sql \
+            20260728120600_trainingos_agent_recipe_source_digest_guard_v1.sql \
+            20260728120700_trainingos_agent_recipe_executor_provenance_v1.sql \
+            20260728120800_trainingos_agent_recipe_review_hardening_v1.sql \
+            20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql
+          do cp "../private-repo/supabase/migrations/$migration" "supabase/migrations/$migration"; done
+          rm -f supabase/seed.sql
+          test "$(find supabase/migrations -type f -name '*.sql' | wc -l | tr -d ' ')" = 18
+      - name: Two deterministic replays and SQL E2E
+        working-directory: replay-project
+        run: |
+          set -euo pipefail
+          supabase start > "$RUNNER_TEMP/pr325-db-first.log" 2>&1
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/pr325-db-second.log" 2>&1
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          ledger="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 -c "select count(*) from supabase_migrations.schema_migrations;")"
+          test "$ledger" = 18
+          acl="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          select jsonb_build_object(
+            'tables',(select count(*) from information_schema.tables where table_schema='public' and table_name in ('trainingos_agent_recipes','trainingos_agent_recipe_versions','trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts')),
+            'forced',(select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname like 'trainingos_agent_recipe%' and c.relrowsecurity and c.relforcerowsecurity),
+            'direct',(select count(*) from information_schema.role_table_grants where grantee in ('authenticated','service_role') and table_schema='public' and table_name like 'trainingos_agent_recipe%'),
+            'privateExec',(select count(*) from information_schema.routine_privileges where grantee in ('PUBLIC','anon','authenticated','service_role') and routine_schema='private' and routine_name like 'trainingos_agent_recipe%' and privilege_type='EXECUTE'));
+          SQL
+          )"
+          python - "$acl" <<'PY'
+          import json,sys
+          d=json.loads(sys.argv[1]); assert d=={'tables':4,'forced':4,'direct':0,'privateExec':0},d
+          PY
+          psql "$DB_URL" -X -qAt -1 -v ON_ERROR_STOP=1 -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql > "$RUNNER_TEMP/pr325-e2e.log" 2>&1
+          python - "$RUNNER_TEMP/pr325-e2e.log" <<'PY'
+          import json,pathlib,sys
+          ps=[]
+          for line in pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines():
+              if line.strip().startswith('{'):
+                  try: ps.append(json.loads(line))
+                  except: pass
+          d=ps[-1]; residue=d.get('residue') or {}
+          assert d.get('status')=='PASS' and residue and all(int(v)==0 for v in residue.values()),d
+          assert d.get('canonicalExecutionCount')==1 and d.get('triggerReceiptCount')==2,d
+          assert d.get('formalWritePerformed') is False,d
+          PY
+      - name: Sanitized database result
+        run: |
+          {
+            echo 'exact_private_sha=24003f77d960b7237ed317d295cff015ed121a39'
+            echo 'prerequisite_migrations=PASS_18_18'
+            echo 'first_replay=PASS'
+            echo 'second_replay=PASS'
+            echo 'rls_acl_private_helper=PASS'
+            echo 'transaction_e2e=PASS'
+            echo 'zero_residue=PASS'
+            echo 'raw_private_database_output=SEALED_AND_DELETED'
+          } | tee "$RUNNER_TEMP/pr325-db-result.txt" >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup
+        if: always()
+        run: |
+          (cd replay-project && supabase stop --no-backup >/dev/null 2>&1) || true
+          rm -rf private-repo replay-project "$RUNNER_TEMP"/pr325-*
