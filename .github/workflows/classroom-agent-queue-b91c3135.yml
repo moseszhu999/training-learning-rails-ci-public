@@ -301,37 +301,61 @@ jobs:
             "$RUNNER_TEMP/classroom-agent-queue-typecheck.log" \
             "$RUNNER_TEMP/classroom-agent-queue-build.log"
 
-      - name: Enforce exact-head result
+      - name: Enforce scope and syntax
         if: always()
         shell: bash
         env:
           SCOPE_STATUS: ${{ steps.scope.outputs.status }}
           SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+        run: |
+          echo "scope=${SCOPE_STATUS:-NOT_RUN} syntax=${SYNTAX_STATUS:-NOT_RUN}"
+          [[ "${SCOPE_STATUS:-FAIL}" == "PASS" ]]
+          [[ "${SYNTAX_STATUS:-FAIL}" == "PASS" ]]
+
+      - name: Enforce focused Node contracts
+        if: always()
+        shell: bash
+        env:
           NODE_STATUS: ${{ steps.node_focused.outputs.status }}
           NODE_COUNT: ${{ steps.node_focused.outputs.test_count }}
           NODE_PASS: ${{ steps.node_focused.outputs.pass_count }}
+        run: |
+          echo "node=${NODE_STATUS:-NOT_RUN} pass=${NODE_PASS:-0} count=${NODE_COUNT:-0}"
+          [[ "${NODE_STATUS:-FAIL}" == "PASS" ]]
+          [[ "${NODE_COUNT:-0}" == "5" ]]
+          [[ "${NODE_PASS:-0}" == "5" ]]
+
+      - name: Enforce focused Python contracts
+        if: always()
+        shell: bash
+        env:
           PYTHON_STATUS: ${{ steps.python_focused.outputs.status }}
           PYTHON_COUNT: ${{ steps.python_focused.outputs.test_count }}
           PYTHON_PASS: ${{ steps.python_focused.outputs.pass_count }}
+        run: |
+          echo "python=${PYTHON_STATUS:-NOT_RUN} pass=${PYTHON_PASS:-0} count=${PYTHON_COUNT:-0}"
+          [[ "${PYTHON_STATUS:-FAIL}" == "PASS" ]]
+          [[ "${PYTHON_COUNT:-0}" == "8" ]]
+          [[ "${PYTHON_PASS:-0}" == "8" ]]
+
+      - name: Enforce regression contracts
+        if: always()
+        shell: bash
+        env:
           REGRESSION_STATUS: ${{ steps.regressions.outputs.status }}
+        run: |
+          echo "regressions=${REGRESSION_STATUS:-NOT_RUN}"
+          [[ "${REGRESSION_STATUS:-FAIL}" == "PASS" ]]
+
+      - name: Enforce install, typecheck and build
+        if: always()
+        shell: bash
+        env:
           INSTALL_STATUS: ${{ steps.install.outputs.status }}
           TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
           BUILD_STATUS: ${{ steps.build.outputs.status }}
         run: |
-          failed=0
-          [[ "${SCOPE_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          [[ "${SYNTAX_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          [[ "${NODE_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          [[ "${NODE_COUNT:-0}" == "5" ]] || failed=1
-          [[ "${NODE_PASS:-0}" == "5" ]] || failed=1
-          [[ "${PYTHON_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          [[ "${PYTHON_COUNT:-0}" == "8" ]] || failed=1
-          [[ "${PYTHON_PASS:-0}" == "8" ]] || failed=1
-          [[ "${REGRESSION_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          [[ "${INSTALL_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          [[ "${TYPECHECK_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          [[ "${BUILD_STATUS:-FAIL}" == "PASS" ]] || failed=1
-          if [[ "$failed" != "0" ]]; then
-            echo "::error::Classroom Agent Queue exact-head validation failed. Review the sanitized step summary."
-          fi
-          exit "$failed"
+          echo "install=${INSTALL_STATUS:-NOT_RUN} typecheck=${TYPECHECK_STATUS:-NOT_RUN} build=${BUILD_STATUS:-NOT_RUN}"
+          [[ "${INSTALL_STATUS:-FAIL}" == "PASS" ]]
+          [[ "${TYPECHECK_STATUS:-FAIL}" == "PASS" ]]
+          [[ "${BUILD_STATUS:-FAIL}" == "PASS" ]]
