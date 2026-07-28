@@ -1,0 +1,93 @@
+name: PR339 c99 business diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-c99-business-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: c99ea9d941f8681b663baf52e33ec4f5ba9ddc29
+  BASE_SHA: e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    outputs:
+      stage: ${{ steps.run.outputs.stage }}
+      error: ${{ steps.run.outputs.error }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+      - name: Start canonical database
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/pr339-c99-db"
+          supabase --workdir "$workdir" init --force --yes >/dev/null 2>&1
+          python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA" >/dev/null 2>&1
+          supabase --workdir "$workdir" start >/dev/null 2>&1
+      - name: Run and classify E2Es
+        id: run
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          stage=NONE
+          failed="$RUNNER_TEMP/none.log"
+          for item in \
+            exercise:tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql \
+            assessment:tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql \
+            grading_result:tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql
+          do
+            name="${item%%:*}"; file="${item#*:}"; log="$RUNNER_TEMP/pr339-$name.log"
+            psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 -f "$file" >"$log" 2>&1
+            if [[ $? -ne 0 ]]; then stage="$name"; failed="$log"; break; fi
+          done
+          error="$(python - "$failed" <<'PY'
+          import pathlib,re,sys
+          p=pathlib.Path(sys.argv[1]); text=p.read_text(errors='replace') if p.exists() else ''
+          lines=[x.strip() for x in text.splitlines() if re.search(r'(ERROR:|CONTEXT:|DETAIL:|HINT:)',x,re.I)]
+          value=' | '.join(lines[-5:]) if lines else 'NONE'
+          value=re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,36}','<uuid>',value,flags=re.I)
+          value=re.sub(r'[^A-Za-z0-9_:.()<>/ |,=-]+','_',value)
+          print(value[:500] or 'NONE')
+          PY
+          )"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+          echo "error=$error" >> "$GITHUB_OUTPUT"
+          rm -f "$RUNNER_TEMP"/pr339-*.log
+          exit 0
+      - name: Cleanup
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-c99-db" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-*
+
+  disposition:
+    if: always()
+    needs: probe
+    name: diagnostic-${{ needs.probe.outputs.stage }}-${{ needs.probe.outputs.error }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo sanitized_diagnostic=true >> "$GITHUB_STEP_SUMMARY"
