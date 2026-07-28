@@ -1,0 +1,129 @@
+name: PR339 Student Learning exact-head 0b94438e
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-final-0b94438e.yml
+      - scripts/pr339-final-0b94438e.sh
+      - carriers/pr339-final-0b94438e.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: 0b94438ee73be768194c4f56ac31250cd6c9476e
+  BASE_SHA: 26fc34af65b9489985aa9a5cbe45c9d1590826bf
+
+jobs:
+  application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Validate private credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout public controller
+        uses: actions/checkout@v4
+        with:
+          path: public-ci
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Checkout exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run sealed exact-head application gate
+        shell: bash
+        run: |
+          bash public-ci/scripts/pr339-final-0b94438e.sh \
+            application \
+            "$GITHUB_WORKSPACE/private-repo" \
+            "$RUNNER_TEMP/pr339-application"
+
+      - name: Cleanup private checkout and sealed output
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo public-ci "$RUNNER_TEMP/pr339-application"
+
+  canonical-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 160
+    steps:
+      - name: Validate private credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Checkout public controller
+        uses: actions/checkout@v4
+        with:
+          path: public-ci
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Checkout exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run sealed canonical two-pass database gate
+        shell: bash
+        run: |
+          bash public-ci/scripts/pr339-final-0b94438e.sh \
+            database \
+            "$GITHUB_WORKSPACE/private-repo" \
+            "$RUNNER_TEMP/pr339-database"
+
+      - name: Cleanup isolated database private checkout and sealed output
+        if: always()
+        shell: bash
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-database/pr339-db" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo public-ci "$RUNNER_TEMP/pr339-database"
