@@ -1,0 +1,211 @@
+name: Classroom Explanation 05df0447 exact-head CI
+
+on:
+  push:
+    branches:
+      - ci/classroom-explanation-c4e0bc12-clean
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-explanation-c4e0bc12.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-explanation-05df0447-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: 05df044760e9ffb3884319e4b5180a81f9093afb
+      EXPECTED_BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact head, merge base, and Window 1 scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          actual_merge_base="$(git merge-base "$EXPECTED_BASE_SHA" "$PRIVATE_SHA")"
+          [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+          [[ "$actual_merge_base" == "$EXPECTED_BASE_SHA" ]]
+
+          actual_files="$(git diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'docs/architecture/trainingos-classroom-explanation-runtime-v1.md\ndocs/verification/trainingos-classroom-explanation-runtime-v1.md\nlib/trainingos-agent-gateway/classroom-explanation-mcp-layer.mjs\nlib/trainingos-agent-gateway/classroom-explanation-runtime.mjs\nprototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs\nsupabase/migrations/20260728160000_trainingos_classroom_explanation_schema_v1.sql\nsupabase/migrations/20260728160100_trainingos_classroom_explanation_prepare_rpc_v1.sql\nsupabase/migrations/20260728160200_trainingos_classroom_explanation_start_rpc_v1.sql\nsupabase/migrations/20260728160300_trainingos_classroom_explanation_capture_create_rpc_v1.sql\nsupabase/migrations/20260728160400_trainingos_classroom_explanation_capture_upload_rpc_v1.sql\nsupabase/migrations/20260728160500_trainingos_classroom_explanation_transcript_rpc_v1.sql\nsupabase/migrations/20260728160600_trainingos_classroom_explanation_analysis_rpc_v1.sql\nsupabase/migrations/20260728160700_trainingos_classroom_explanation_evaluation_rpc_v1.sql\nsupabase/migrations/20260728160800_trainingos_classroom_explanation_projection_rpc_v1.sql\nsupabase/migrations/20260728160900_trainingos_classroom_explanation_intelligence_hardening_v1.sql\nsupabase/migrations/20260728161000_trainingos_classroom_explanation_context_prepare_rpc_v1.sql\nsupabase/migrations/20260728161100_trainingos_classroom_explanation_transcript_intelligence_input_v1.sql\nsupabase/migrations/20260728161200_trainingos_classroom_explanation_agent_inference_rpc_v1.sql\nsupabase/migrations/20260728161300_trainingos_classroom_explanation_teacher_evaluation_projection_v1.sql\nsupabase/migrations/20260728161400_trainingos_classroom_explanation_start_active_slot_hardening_v1.sql\ntests/sql/trainingos_classroom_explanation_e2e.sql\ntests/test_trainingos_classroom_explanation_contract.py'
+          [[ "$actual_files" == "$expected_files" ]]
+
+          file_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+          migration_count="$(printf '%s\n' "$actual_files" | grep -Ec '^supabase/migrations/2026072816[0-5][0-9]{3}_trainingos_classroom_explanation_')"
+          [[ "$file_count" == "22" ]]
+          [[ "$migration_count" == "15" ]]
+          echo "SCOPE_PASS files=$file_count migrations=$migration_count sha=$actual_sha merge_base=$actual_merge_base"
+
+      - name: Run explanation runtime syntax checks
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! {
+            node --check lib/trainingos-agent-gateway/classroom-explanation-runtime.mjs
+            node --check lib/trainingos-agent-gateway/classroom-explanation-mcp-layer.mjs
+          } > "$RUNNER_TEMP/classroom-explanation-syntax.log" 2>&1; then
+            echo "::error::Classroom Explanation JavaScript syntax checks failed"
+            exit 1
+          fi
+          echo "SYNTAX_PASS 2/2"
+
+      - name: Run focused explanation Node contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs \
+            > "$RUNNER_TEMP/classroom-explanation-node.log" 2>&1
+          code=$?
+          set -e
+          tests="$(grep -E '^# tests ' "$RUNNER_TEMP/classroom-explanation-node.log" | tail -1 | awk '{print $3}')"
+          passed="$(grep -E '^# pass ' "$RUNNER_TEMP/classroom-explanation-node.log" | tail -1 | awk '{print $3}')"
+          failed="$(grep -E '^# fail ' "$RUNNER_TEMP/classroom-explanation-node.log" | tail -1 | awk '{print $3}')"
+          if [[ "$code" != "0" || "$tests" != "10" || "$passed" != "10" || "$failed" != "0" ]]; then
+            echo "::error::Focused Node contracts failed or count changed: exit=$code pass=${passed:-0}/${tests:-0} fail=${failed:--1}"
+            exit 1
+          fi
+          echo "NODE_CONTRACT_PASS 10/10"
+
+      - name: Run explanation Python contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          python -m unittest -v tests.test_trainingos_classroom_explanation_contract \
+            > "$RUNNER_TEMP/classroom-explanation-python.log" 2>&1
+          code=$?
+          set -e
+          tests="$(grep -E '^Ran [0-9]+ tests?' "$RUNNER_TEMP/classroom-explanation-python.log" | tail -1 | awk '{print $2}')"
+          if [[ "$code" != "0" || "$tests" != "14" ]] || ! grep -qx 'OK' "$RUNNER_TEMP/classroom-explanation-python.log"; then
+            echo "::error::Python contracts failed or count changed: exit=$code tests=${tests:-0}"
+            exit 1
+          fi
+          echo "PYTHON_CONTRACT_PASS 14/14"
+
+      - name: Install private repository dependencies
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npm ci > "$RUNNER_TEMP/classroom-explanation-install.log" 2>&1; then
+            echo "::error::npm ci failed"
+            exit 1
+          fi
+          echo "INSTALL_PASS"
+
+      - name: Run merged Classroom Intelligence package contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npm --prefix packages/training-classroom-intelligence test \
+            > "$RUNNER_TEMP/classroom-intelligence-package.log" 2>&1; then
+            echo "::error::Classroom Intelligence package contracts failed"
+            exit 1
+          fi
+          echo "INTELLIGENCE_PACKAGE_PASS"
+
+      - name: Run repository typecheck
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npm run typecheck > "$RUNNER_TEMP/classroom-explanation-typecheck.log" 2>&1; then
+            echo "::error::Repository typecheck failed"
+            exit 1
+          fi
+          echo "TYPECHECK_PASS"
+
+      - name: Run production build
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npm run build > "$RUNNER_TEMP/classroom-explanation-build.log" 2>&1; then
+            echo "::error::Production build failed"
+            exit 1
+          fi
+          echo "BUILD_PASS"
+
+      - name: Publish sanitized exact-head result
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Classroom Explanation 05df0447 exact-head CI
+
+          - Exact private SHA: `05df044760e9ffb3884319e4b5180a81f9093afb`
+          - Exact merge base: `9b8f04f29d572d22434ea577b5ed3543e4f6a2d3`
+          - Window 1 scope: **PASS (22 files / 15 migrations)**
+          - JavaScript syntax: **PASS 2/2**
+          - Focused Node contracts: **PASS 10/10**
+          - Python contracts: **PASS 14/14**
+          - Dependency install: **PASS**
+          - Classroom Intelligence package: **PASS**
+          - Repository typecheck: **PASS**
+          - Production build: **PASS**
+          - Database migration replay and SQL E2E: **NOT_RUN in this public-safe workflow**
+
+          Raw private output is sealed and deleted. No private source, fixtures, credentials, or raw logs are published.
+          EOF
+          echo "CLASSROOM_EXPLANATION_05DF_EXACT_CI PASS sha=$PRIVATE_SHA files=22 migrations=15 node=10/10 python=14/14 intelligence=PASS typecheck=PASS build=PASS"
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/classroom-explanation-syntax.log" \
+            "$RUNNER_TEMP/classroom-explanation-node.log" \
+            "$RUNNER_TEMP/classroom-explanation-python.log" \
+            "$RUNNER_TEMP/classroom-explanation-install.log" \
+            "$RUNNER_TEMP/classroom-intelligence-package.log" \
+            "$RUNNER_TEMP/classroom-explanation-typecheck.log" \
+            "$RUNNER_TEMP/classroom-explanation-build.log"
