@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: classroom-intelligence-b36367aa
+  group: classroom-intelligence-b36367aa-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
