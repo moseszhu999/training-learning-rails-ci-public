@@ -87,3 +87,5 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: echo sanitized_diagnostic=true >> "$GITHUB_STEP_SUMMARY"
+
+# Trigger refresh: 2026-07-29
