@@ -1,0 +1,75 @@
+name: Classroom Lark b7ef9890 Python contract diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/classroom-lark-b7ef9890-python-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: b7ef9890d18a97dc501057c51a955a730b62f53e
+
+jobs:
+  diagnose-python:
+    runs-on: ubuntu-24.04
+    outputs:
+      exit_code: ${{ steps.probe.outputs.exit_code }}
+      test_count: ${{ steps.probe.outputs.test_count }}
+      failures: ${{ steps.probe.outputs.failures }}
+    steps:
+      - name: Validate private credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run sealed Python diagnostic
+        id: probe
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/lark-python-diagnostic.log"
+          python -m unittest -v tests.test_trainingos_classroom_lark_adapter_contract > "$log" 2>&1
+          code=$?
+          count="$(grep -Eo 'Ran [0-9]+ tests?' "$log" | tail -1 | awk '{print $2}')"
+          failures="$(grep -E '^(FAIL|ERROR): ' "$log" | sed -E 's/^(FAIL|ERROR): ([^ ]+).*/\2/' | paste -sd, - | tr -cd 'A-Za-z0-9_.,-' | cut -c1-180)"
+          {
+            echo "exit_code=$code"
+            echo "test_count=${count:-0}"
+            echo "failures=${failures:-NONE}"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cleanup sealed Python log
+        if: always()
+        run: rm -rf private-repo "$RUNNER_TEMP/lark-python-diagnostic.log"
+
+  sanitized-disposition:
+    if: always()
+    needs: diagnose-python
+    name: python-${{ needs.diagnose-python.outputs.exit_code }}-${{ needs.diagnose-python.outputs.test_count }}-${{ needs.diagnose-python.outputs.failures }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "sanitized_python_diagnostic=published" >> "$GITHUB_STEP_SUMMARY"
