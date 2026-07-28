@@ -1,0 +1,150 @@
+name: PR339 c5f101de E2E diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr339-c5f101de-e2e-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: c5f101def0853baebbe27f8ec256698b3b44a6ed
+  BASE_SHA: e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      exercise: ${{ steps.probe.outputs.exercise }}
+      exercise_line: ${{ steps.probe.outputs.exercise_line }}
+      exercise_marker: ${{ steps.probe.outputs.exercise_marker }}
+      assessment: ${{ steps.probe.outputs.assessment }}
+      assessment_line: ${{ steps.probe.outputs.assessment_line }}
+      assessment_marker: ${{ steps.probe.outputs.assessment_marker }}
+      result: ${{ steps.probe.outputs.result }}
+      result_line: ${{ steps.probe.outputs.result_line }}
+      result_marker: ${{ steps.probe.outputs.result_marker }}
+    steps:
+      - name: Validate exact inputs and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Checkout exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run three bounded E2E probes with sealed output
+        id: probe
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr339-e2e-diag"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          supabase --workdir "$workdir" init --force --yes > "$RUNNER_TEMP/pr339-e2e-init.log" 2>&1
+          init=$?
+          if [[ "$init" == 0 ]]; then
+            python scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root "$PWD" \
+              --output-dir "$workdir/supabase/migrations" \
+              --commit-sha "$PRIVATE_SHA" \
+              > "$RUNNER_TEMP/pr339-e2e-bootstrap.log" 2>&1
+            build=$?
+          else
+            build=1
+          fi
+          if [[ "$build" == 0 ]]; then
+            supabase --workdir "$workdir" start > "$RUNNER_TEMP/pr339-e2e-start.log" 2>&1
+            start=$?
+          else
+            start=1
+          fi
+
+          parse_log() {
+            python - "$1" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace')
+          lines=re.findall(r'psql:[^:]+:(\d+):',text)
+          markers=re.findall(r'(TRAININGOS_[A-Z0-9_]+)',text)
+          print(lines[-1] if lines else 0)
+          print(markers[-1] if markers else 'NONE')
+          PY
+          }
+
+          exercise=99; assessment=99; result=99
+          exercise_line=0; assessment_line=0; result_line=0
+          exercise_marker=NOT_RUN; assessment_marker=NOT_RUN; result_marker=NOT_RUN
+          if [[ "$start" == 0 ]]; then
+            psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+              -f tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql \
+              > "$RUNNER_TEMP/pr339-e2e-exercise.log" 2>&1
+            exercise=$?
+            readarray -t parsed < <(parse_log "$RUNNER_TEMP/pr339-e2e-exercise.log")
+            exercise_line="${parsed[0]:-0}"; exercise_marker="${parsed[1]:-NONE}"
+
+            psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+              -f tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql \
+              > "$RUNNER_TEMP/pr339-e2e-assessment.log" 2>&1
+            assessment=$?
+            readarray -t parsed < <(parse_log "$RUNNER_TEMP/pr339-e2e-assessment.log")
+            assessment_line="${parsed[0]:-0}"; assessment_marker="${parsed[1]:-NONE}"
+
+            psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+              -f tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql \
+              > "$RUNNER_TEMP/pr339-e2e-result.log" 2>&1
+            result=$?
+            readarray -t parsed < <(parse_log "$RUNNER_TEMP/pr339-e2e-result.log")
+            result_line="${parsed[0]:-0}"; result_marker="${parsed[1]:-NONE}"
+          fi
+
+          {
+            echo "exercise=$exercise"
+            echo "exercise_line=$exercise_line"
+            echo "exercise_marker=$exercise_marker"
+            echo "assessment=$assessment"
+            echo "assessment_line=$assessment_line"
+            echo "assessment_marker=$assessment_marker"
+            echo "result=$result"
+            echo "result_line=$result_line"
+            echo "result_marker=$result_marker"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr339-e2e-diag" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr339-e2e-*
+
+  sanitized-disposition:
+    if: always()
+    needs: diagnose
+    name: e2e-ex${{ needs.diagnose.outputs.exercise }}-L${{ needs.diagnose.outputs.exercise_line }}-${{ needs.diagnose.outputs.exercise_marker }}-as${{ needs.diagnose.outputs.assessment }}-L${{ needs.diagnose.outputs.assessment_line }}-${{ needs.diagnose.outputs.assessment_marker }}-gr${{ needs.diagnose.outputs.result }}-L${{ needs.diagnose.outputs.result_line }}-${{ needs.diagnose.outputs.result_marker }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "bounded_e2e_diagnostic=published" >> "$GITHUB_STEP_SUMMARY"
