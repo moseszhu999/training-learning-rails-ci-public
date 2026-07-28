@@ -19,6 +19,23 @@ jobs:
   final:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    outputs:
+      exact: ${{ steps.report.outputs.exact }}
+      node: ${{ steps.report.outputs.node }}
+      python: ${{ steps.report.outputs.python }}
+      install: ${{ steps.report.outputs.install }}
+      typecheck: ${{ steps.report.outputs.typecheck }}
+      vscode: ${{ steps.report.outputs.vscode }}
+      workspace: ${{ steps.report.outputs.workspace }}
+      zero_permission: ${{ steps.report.outputs.zero_permission }}
+      build: ${{ steps.report.outputs.build }}
+      review: ${{ steps.report.outputs.review }}
+      db_first: ${{ steps.report.outputs.db_first }}
+      db_second: ${{ steps.report.outputs.db_second }}
+      db_acl: ${{ steps.report.outputs.db_acl }}
+      exercise_e2e: ${{ steps.report.outputs.exercise_e2e }}
+      assessment_e2e: ${{ steps.report.outputs.assessment_e2e }}
+      result_e2e: ${{ steps.report.outputs.result_e2e }}
     steps:
       - name: Check out public controller
         uses: actions/checkout@v4
@@ -67,6 +84,12 @@ jobs:
         shell: bash
         run: bash ci-repo/scripts/run-pr339-final-v3.sh private-repo
 
+      - name: Capture sanitized gate statuses
+        id: report
+        if: always()
+        shell: bash
+        run: bash ci-repo/scripts/report-pr339-final-v3.sh
+
       - name: Stop database and delete private checkout and sealed logs
         if: always()
         shell: bash
@@ -77,3 +100,34 @@ jobs:
           rm -rf private-repo
           find "$RUNNER_TEMP" -maxdepth 2 -type f -name 'pr339-*' -delete
           rm -rf "$RUNNER_TEMP/pr339-status"
+
+  sanitized-report:
+    needs: final
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish PR339 sanitized gate line
+        shell: bash
+        env:
+          FINAL_CONCLUSION: ${{ needs.final.result }}
+          EXACT: ${{ needs.final.outputs.exact }}
+          NODE: ${{ needs.final.outputs.node }}
+          PYTHON: ${{ needs.final.outputs.python }}
+          INSTALL: ${{ needs.final.outputs.install }}
+          TYPECHECK: ${{ needs.final.outputs.typecheck }}
+          VSCODE: ${{ needs.final.outputs.vscode }}
+          WORKSPACE: ${{ needs.final.outputs.workspace }}
+          ZERO_PERMISSION: ${{ needs.final.outputs.zero_permission }}
+          BUILD: ${{ needs.final.outputs.build }}
+          REVIEW: ${{ needs.final.outputs.review }}
+          DB_FIRST: ${{ needs.final.outputs.db_first }}
+          DB_SECOND: ${{ needs.final.outputs.db_second }}
+          DB_ACL: ${{ needs.final.outputs.db_acl }}
+          EXERCISE_E2E: ${{ needs.final.outputs.exercise_e2e }}
+          ASSESSMENT_E2E: ${{ needs.final.outputs.assessment_e2e }}
+          RESULT_E2E: ${{ needs.final.outputs.result_e2e }}
+        run: |
+          printf 'PR339_SANITIZED conclusion=%s exact=%s node=%s python=%s install=%s typecheck=%s vscode=%s workspace=%s zero_permission=%s build=%s review=%s db_first=%s db_second=%s db_acl=%s exercise_e2e=%s assessment_e2e=%s result_e2e=%s\n' \
+            "$FINAL_CONCLUSION" "$EXACT" "$NODE" "$PYTHON" "$INSTALL" "$TYPECHECK" \
+            "$VSCODE" "$WORKSPACE" "$ZERO_PERMISSION" "$BUILD" "$REVIEW" \
+            "$DB_FIRST" "$DB_SECOND" "$DB_ACL" "$EXERCISE_E2E" "$ASSESSMENT_E2E" "$RESULT_E2E"
