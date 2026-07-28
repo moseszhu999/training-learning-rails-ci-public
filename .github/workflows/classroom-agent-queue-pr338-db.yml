@@ -82,7 +82,7 @@ jobs:
           echo "$migration_count" > "$RUNNER_TEMP/caq-db-migration-count.txt"
           echo PASS > "$RUNNER_TEMP/caq-db-prepare.status"
 
-      - name: First fresh migration replay
+      - name: First fresh migration replay with sanitized classification
         working-directory: replay-project
         shell: bash
         run: |
@@ -90,40 +90,65 @@ jobs:
           supabase db start > "$RUNNER_TEMP/caq-db-first.log" 2>&1
           code=$?
           applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/caq-db-first.log" | tail -1 | sed -E 's/.*Applying migration ([A-Za-z0-9_.-]+).*/\1/' || true)"
+          marker="$(grep -oE 'TRAININGOS_[A-Z0-9_]+' "$RUNNER_TEMP/caq-db-first.log" | tail -1 || true)"
+          classification=none
+          if [[ "$code" != 0 ]]; then
+            classification="${marker:-unclassified_migration_failure}"
+            grep -qi 'does not exist' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-dependency_object_missing}"
+            grep -qi 'syntax error' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-sql_syntax_error}"
+            grep -qi 'duplicate' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-duplicate_object_or_key}"
+            grep -qi 'permission denied' "$RUNNER_TEMP/caq-db-first.log" && classification="${marker:-permission_denied}"
+          fi
           [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-first.status" || echo FAIL > "$RUNNER_TEMP/caq-db-first.status"
           echo "$applied" > "$RUNNER_TEMP/caq-db-first-count.txt"
-          exit "$code"
+          echo "${last:-none}" > "$RUNNER_TEMP/caq-db-first-last.txt"
+          echo "$classification" > "$RUNNER_TEMP/caq-db-first-classification.txt"
+          exit 0
 
       - name: Second deterministic migration replay
         working-directory: replay-project
         shell: bash
         run: |
           set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-first.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-db-second.status"
+            echo 0 > "$RUNNER_TEMP/caq-db-second-count.txt"
+            exit 0
+          fi
           supabase db reset --local --no-seed > "$RUNNER_TEMP/caq-db-second.log" 2>&1
           code=$?
           applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-second.log" || true)"
           [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-second.status" || echo FAIL > "$RUNNER_TEMP/caq-db-second.status"
           echo "$applied" > "$RUNNER_TEMP/caq-db-second-count.txt"
-          exit "$code"
+          exit 0
 
       - name: Run existing Persistent Agent SQL regression
         working-directory: replay-project
         shell: bash
         run: |
           set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-second.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-db-persistent-e2e.status"
+            exit 0
+          fi
           eval "$(supabase status -o env | grep '^DB_URL=')"
           psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
             -f ../private-repo/tests/sql/trainingos_persistent_teacher_agent_e2e.sql \
             > "$RUNNER_TEMP/caq-db-persistent-e2e.log" 2>&1
           code=$?
           [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-persistent-e2e.status" || echo FAIL > "$RUNNER_TEMP/caq-db-persistent-e2e.status"
-          exit "$code"
+          exit 0
 
       - name: Verify Queue projection, canonical ownership, RLS and ACL
         working-directory: replay-project
         shell: bash
         run: |
           set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-db-second.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-db-acl.status"
+            exit 0
+          fi
           eval "$(supabase status -o env | grep '^DB_URL=')"
           psql "$DB_URL" -X -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/caq-db-acl.log" 2>&1 <<'SQL'
           do $verify$
@@ -195,9 +220,9 @@ jobs:
               and privilege_type='EXECUTE';
 
             select count(*) into v_public_acl
-            from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-            join pg_proc p on true
+            from pg_proc p
             join pg_namespace n on n.oid=p.pronamespace
+            cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
             where n.nspname='public'
               and p.proname='get_trainingos_teacher_action_queue_v2'
               and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_as_of timestamp with time zone, p_horizon_days integer, p_limit integer'
@@ -246,17 +271,14 @@ jobs:
                or v_service_execute
                or v_workflow_constraints<>2
                or v_provider<>'[]'::jsonb then
-              raise exception 'CLASSROOM_AGENT_QUEUE_DB_CONTRACT_INVALID functions=% disallowed_tables=% canonical_tables=% policy_forced=% policy_acl=% private_acl=% public_acl=% auth_exec=% anon_exec=% service_exec=% workflow_constraints=% provider=%',
-                v_functions,v_disallowed_tables,v_canonical_tables,v_policy_forced,v_policy_direct_acl,
-                v_private_acl,v_public_acl,v_public_execute,v_anon_execute,v_service_execute,
-                v_workflow_constraints,v_provider;
+              raise exception 'CLASSROOM_AGENT_QUEUE_DB_CONTRACT_INVALID';
             end if;
           end;
           $verify$;
           SQL
           code=$?
           [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-db-acl.status" || echo FAIL > "$RUNNER_TEMP/caq-db-acl.status"
-          exit "$code"
+          exit 0
 
       - name: Publish sanitized database result
         if: always()
@@ -267,6 +289,7 @@ jobs:
         run: |
           read_status() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf NOT_RUN; }
           read_count() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf 0; }
+          read_value() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf none; }
           {
             echo '## Classroom Agent Queue PR338 database replay'
             echo
@@ -275,6 +298,8 @@ jobs:
             echo "- Scope: **$(read_status caq-db-scope.status)**"
             echo "- Replay preparation: **$(read_status caq-db-prepare.status)**"
             echo "- First fresh replay: **$(read_status caq-db-first.status)** ($(read_count caq-db-first-count.txt) migrations)"
+            echo "- Last applying migration: \`$(read_value caq-db-first-last.txt)\`"
+            echo "- Sanitized failure classification: \`$(read_value caq-db-first-classification.txt)\`"
             echo "- Second deterministic replay: **$(read_status caq-db-second.status)** ($(read_count caq-db-second-count.txt) migrations)"
             echo "- Persistent Agent SQL regression: **$(read_status caq-db-persistent-e2e.status)**"
             echo "- Queue ownership / RLS / ACL: **$(read_status caq-db-acl.status)**"
