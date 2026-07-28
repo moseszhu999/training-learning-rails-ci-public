@@ -103,34 +103,30 @@ jobs:
         working-directory: replay-project
         shell: bash
         run: |
-          set +e
           supabase start > "$RUNNER_TEMP/recipe-db-first.log" 2>&1
-          code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
-          if [[ "$code" == 0 && "$applied" == 18 && "$last" == '20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql' ]]; then
-            echo 'PASS 18/18' > "$RUNNER_TEMP/recipe-db-first.status"
-            exit 0
-          fi
-          echo "FAIL applied=$applied last=${last:-none}" > "$RUNNER_TEMP/recipe-db-first.status"
-          exit 1
+          echo PASS > "$RUNNER_TEMP/recipe-db-first.status"
 
       - name: Second deterministic canonical replay
-        if: always()
         working-directory: replay-project
         shell: bash
         run: |
-          set +e
           supabase db reset --local --no-seed > "$RUNNER_TEMP/recipe-db-second.log" 2>&1
-          code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
-          if [[ "$code" == 0 && "$applied" == 18 && "$last" == '20260728120900_trainingos_agent_recipe_create_idempotency_guard_v1.sql' ]]; then
-            echo 'PASS 18/18' > "$RUNNER_TEMP/recipe-db-second.status"
-            exit 0
-          fi
-          echo "FAIL applied=$applied last=${last:-none}" > "$RUNNER_TEMP/recipe-db-second.status"
-          exit 1
+          echo PASS > "$RUNNER_TEMP/recipe-db-second.status"
+
+      - name: Verify exact migration ledger
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          result="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 -c "select jsonb_build_object('applied',count(*),'reviewGuard',bool_or(version='20260728120800'),'createGuard',bool_or(version='20260728120900')) from supabase_migrations.schema_migrations;")"
+          python - "$result" "$RUNNER_TEMP/recipe-db-ledger.status" <<'PY'
+          import json,pathlib,sys
+          data=json.loads(sys.argv[1])
+          ok=data.get('applied')==18 and data.get('reviewGuard') is True and data.get('createGuard') is True
+          pathlib.Path(sys.argv[2]).write_text('PASS 18/18' if ok else 'FAIL',encoding='utf-8')
+          raise SystemExit(0 if ok else 1)
+          PY
 
       - name: Verify Recipe objects RLS and ACL boundary
         if: always()
@@ -223,10 +219,10 @@ jobs:
           node <<'NODE'
           const fs=require('node:fs'),path=require('node:path');
           const read=n=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,n),'utf8').trim()}catch{return 'NOT_RUN'}};
-          const r={prepare:read('recipe-db-prepare.status'),first:read('recipe-db-first.status'),second:read('recipe-db-second.status'),acl:read('recipe-db-acl.status'),e2e:read('recipe-db-e2e.status')};
-          const lines=['## Recipe PR325 isolated database gates','',`- Exact private SHA: \`${process.env.PRIVATE_SHA}\``,`- Canonical prerequisite set: **${r.prepare}**`,`- First isolated replay: **${r.first}**`,`- Second deterministic replay: **${r.second}**`,`- RLS / ACL / private helper denial: **${r.acl}**`,`- Transaction E2E / zero residue: **${r.e2e}**`,'','Raw database and private output is sealed and deleted.'];
+          const r={prepare:read('recipe-db-prepare.status'),first:read('recipe-db-first.status'),second:read('recipe-db-second.status'),ledger:read('recipe-db-ledger.status'),acl:read('recipe-db-acl.status'),e2e:read('recipe-db-e2e.status')};
+          const lines=['## Recipe PR325 isolated database gates','',`- Exact private SHA: \`${process.env.PRIVATE_SHA}\``,`- Canonical prerequisite set: **${r.prepare}**`,`- First isolated replay: **${r.first}**`,`- Second deterministic replay: **${r.second}**`,`- Migration ledger: **${r.ledger}**`,`- RLS / ACL / private helper denial: **${r.acl}**`,`- Transaction E2E / zero residue: **${r.e2e}**`,'','Raw database and private output is sealed and deleted.'];
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,lines.join('\n')+'\n');
-          console.log(`RECIPE_DB prepare=${r.prepare} first=${r.first} second=${r.second} acl=${r.acl} e2e=${r.e2e} sha=${process.env.PRIVATE_SHA}`);
+          console.log(`RECIPE_DB prepare=${r.prepare} first=${r.first} second=${r.second} ledger=${r.ledger} acl=${r.acl} e2e=${r.e2e} sha=${process.env.PRIVATE_SHA}`);
           NODE
 
       - name: Stop isolated database and delete sealed logs
