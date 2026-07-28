@@ -1,0 +1,253 @@
+name: Classroom Explanation 230f97d1 database replay
+
+on:
+  push:
+    branches:
+      - ci/classroom-explanation-230f97d1-db
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-explanation-230f97d1-db.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-explanation-230f97d1-db-${{ github.event_name }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 230f97d1be72d79dd5aeb36f8348a7a42e6e6d20
+  EXPECTED_BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+jobs:
+  full-schema-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Verify exact head and merge base
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$EXPECTED_BASE_SHA" "$PRIVATE_SHA")" == "$EXPECTED_BASE_SHA" ]]
+          echo "EXACT_HEAD_PASS sha=$PRIVATE_SHA base=$EXPECTED_BASE_SHA"
+
+      - name: Prepare isolated full-schema project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir replay-project
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          mkdir -p supabase/migrations
+          cp ../private-repo/supabase/migrations/*.sql supabase/migrations/
+          rm -f supabase/seed.sql
+          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+          test "$count" -gt 0
+          printf 'PASS migrations=%s\n' "$count" > "$RUNNER_TEMP/explanation-db-prepare.status"
+
+      - name: First fresh full-schema replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/explanation-db-first.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/explanation-db-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/explanation-db-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          if [[ "$code" == "0" ]]; then
+            printf 'PASS applied=%s last=%s\n' "$applied" "${last:-none}" > "$RUNNER_TEMP/explanation-db-first.status"
+            exit 0
+          fi
+          printf 'FAIL applied=%s last=%s exit=%s\n' "$applied" "${last:-none}" "$code" > "$RUNNER_TEMP/explanation-db-first.status"
+          exit 1
+
+      - name: Run Classroom Explanation SQL E2E
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_classroom_explanation_e2e.sql \
+            > "$RUNNER_TEMP/explanation-db-e2e-first.log" 2>&1
+          python - "$RUNNER_TEMP/explanation-db-e2e-first.log" "$RUNNER_TEMP/explanation-db-e2e-first.status" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          payloads = []
+          for line in text.splitlines():
+              line = line.strip()
+              if not line.startswith('{'):
+                  continue
+              try:
+                  payloads.append(json.loads(line))
+              except json.JSONDecodeError:
+                  pass
+          result = payloads[-1] if payloads else {}
+          required_true = (
+              'activeSlotReleasedAfterUpload',
+              'secondExplanationStarted',
+              'classEndedStartRejected',
+              'agentRecordingRejected',
+              'agentInferencePersisted',
+              'prohibitedCandidateRejected',
+              'teacherEvaluationConfirmed',
+              'rawAudioHidden',
+          )
+          remaining = {key: value for key, value in result.items() if key.startswith('remaining')}
+          cleanup = bool(remaining) and all(int(value) == 0 for value in remaining.values())
+          ok = result.get('status') == 'PASS' and all(result.get(key) is True for key in required_true) and cleanup
+          pathlib.Path(sys.argv[2]).write_text(
+              f'{"PASS" if ok else "FAIL"} status={result.get("status", "missing")} cleanup={"PASS" if cleanup else "FAIL"} remainingKeys={len(remaining)}',
+              encoding='utf-8',
+          )
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Second deterministic full-schema replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/explanation-db-second.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/explanation-db-second.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/explanation-db-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          if [[ "$code" == "0" ]]; then
+            printf 'PASS applied=%s last=%s\n' "$applied" "${last:-none}" > "$RUNNER_TEMP/explanation-db-second.status"
+            exit 0
+          fi
+          printf 'FAIL applied=%s last=%s exit=%s\n' "$applied" "${last:-none}" "$code" > "$RUNNER_TEMP/explanation-db-second.status"
+          exit 1
+
+      - name: Re-run SQL E2E after deterministic reset
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_classroom_explanation_e2e.sql \
+            > "$RUNNER_TEMP/explanation-db-e2e-second.log" 2>&1
+          python - "$RUNNER_TEMP/explanation-db-e2e-second.log" "$RUNNER_TEMP/explanation-db-e2e-second.status" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          payloads = []
+          for line in text.splitlines():
+              line = line.strip()
+              if not line.startswith('{'):
+                  continue
+              try:
+                  payloads.append(json.loads(line))
+              except json.JSONDecodeError:
+                  pass
+          result = payloads[-1] if payloads else {}
+          required_true = (
+              'activeSlotReleasedAfterUpload',
+              'secondExplanationStarted',
+              'classEndedStartRejected',
+              'agentRecordingRejected',
+              'agentInferencePersisted',
+              'prohibitedCandidateRejected',
+              'teacherEvaluationConfirmed',
+              'rawAudioHidden',
+          )
+          remaining = {key: value for key, value in result.items() if key.startswith('remaining')}
+          cleanup = bool(remaining) and all(int(value) == 0 for value in remaining.values())
+          ok = result.get('status') == 'PASS' and all(result.get(key) is True for key in required_true) and cleanup
+          pathlib.Path(sys.argv[2]).write_text(
+              f'{"PASS" if ok else "FAIL"} status={result.get("status", "missing")} cleanup={"PASS" if cleanup else "FAIL"} remainingKeys={len(remaining)}',
+              encoding='utf-8',
+          )
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Publish sanitized database result
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const read = (name) => {
+            try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8').trim(); }
+            catch { return 'NOT_RUN'; }
+          };
+          const result = {
+            prepare: read('explanation-db-prepare.status'),
+            firstReplay: read('explanation-db-first.status'),
+            firstE2e: read('explanation-db-e2e-first.status'),
+            secondReplay: read('explanation-db-second.status'),
+            secondE2e: read('explanation-db-e2e-second.status'),
+          };
+          const lines = [
+            '## Classroom Explanation 230f97d1 database replay',
+            '',
+            `- Exact private SHA: \`${process.env.PRIVATE_SHA}\``,
+            `- Full-schema project preparation: **${result.prepare}**`,
+            `- First fresh replay: **${result.firstReplay}**`,
+            `- First SQL E2E: **${result.firstE2e}**`,
+            `- Second deterministic replay: **${result.secondReplay}**`,
+            `- Second SQL E2E: **${result.secondE2e}**`,
+            '',
+            'Raw migration and SQL output remained sealed on the runner. No private source or raw logs were published.',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`CLASSROOM_EXPLANATION_DB prepare=${result.prepare} first=${result.firstReplay} e2e1=${result.firstE2e} second=${result.secondReplay} e2e2=${result.secondE2e}`);
+          NODE
+
+      - name: Stop isolated database and delete sealed files
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d replay-project ]]; then
+            (cd replay-project && supabase stop --no-backup) >/dev/null 2>&1 || true
+          fi
+          rm -rf private-repo replay-project \
+            "$RUNNER_TEMP/explanation-db-first.log" \
+            "$RUNNER_TEMP/explanation-db-e2e-first.log" \
+            "$RUNNER_TEMP/explanation-db-second.log" \
+            "$RUNNER_TEMP/explanation-db-e2e-second.log" \
+            "$RUNNER_TEMP/explanation-db-prepare.status" \
+            "$RUNNER_TEMP/explanation-db-first.status" \
+            "$RUNNER_TEMP/explanation-db-e2e-first.status" \
+            "$RUNNER_TEMP/explanation-db-second.status" \
+            "$RUNNER_TEMP/explanation-db-e2e-second.status"
