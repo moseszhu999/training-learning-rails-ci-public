@@ -1,0 +1,219 @@
+name: PR327 Scheduling Runtime final exact-head CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr327-scheduling-0f3fcabf-exact-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  exact-head-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: 0f3fcabf348f53f6f07836302b1088e23aa923c5
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+    steps:
+      - name: Validate exact SHAs and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact head, merge base and owned file scope
+        id: scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python - "$PRIVATE_SHA" "$BASE_SHA" "$GITHUB_OUTPUT" > "$RUNNER_TEMP/pr327-final-scope.log" 2>&1 <<'PY'
+          import subprocess, sys
+          private_sha, base_sha, output_path = sys.argv[1:]
+          expected = [
+              'apps/training-web/src/components/TrainingOsSchedulingDeliveryPanel.tsx',
+              'apps/training-web/src/lib/trainingos-scheduling-delivery-runtime.ts',
+              'apps/training-web/src/trainingos-scheduling-delivery.css',
+              'docs/architecture/trainingos-scheduling-delivery-runtime-v2.md',
+              'docs/testing/trainingos-scheduling-delivery-runtime-v2-verification.md',
+              'lib/trainingos-agent-gateway/scheduling-delivery-runtime.mjs',
+              'prototypes/trainingos-agent-mvp-v1/test/scheduling-delivery-runtime-v2.test.mjs',
+              'supabase/migrations/20260728130000_trainingos_scheduling_delivery_runtime_v2_pattern.sql',
+              'supabase/migrations/20260728130100_trainingos_scheduling_delivery_runtime_v2_occurrence_schema.sql',
+              'supabase/migrations/20260728131000_trainingos_scheduling_delivery_runtime_v2_generation.sql',
+              'supabase/migrations/20260728131100_trainingos_scheduling_delivery_runtime_v2_projection.sql',
+              'supabase/migrations/20260728132000_trainingos_scheduling_delivery_runtime_v2_conflict_guard.sql',
+              'supabase/migrations/20260728132100_trainingos_scheduling_delivery_runtime_v2_preview.sql',
+              'supabase/migrations/20260728132200_trainingos_scheduling_delivery_runtime_v2_confirm.sql',
+              'supabase/migrations/20260728132300_trainingos_scheduling_delivery_runtime_v2_conflict_read.sql',
+              'supabase/migrations/20260728132400_trainingos_scheduling_delivery_runtime_v2_human_actor_hardening.sql',
+              'supabase/migrations/20260728132500_trainingos_scheduling_delivery_runtime_v2_idempotency_binding.sql',
+              'tests/sql/trainingos_scheduling_delivery_runtime_v2_e2e.sql',
+              'tests/sql/trainingos_scheduling_delivery_runtime_v2_e2e_runner.sql',
+              'tests/sql/trainingos_scheduling_delivery_runtime_v2_replay.sql',
+              'tests/test_trainingos_scheduling_delivery_runtime_v2_contract.py',
+          ]
+          actual_sha = subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+          merge_base = subprocess.check_output(['git','merge-base',base_sha,private_sha], text=True).strip()
+          actual = subprocess.check_output(['git','diff','--name-only',base_sha,private_sha], text=True).splitlines()
+          ok = actual_sha == private_sha and merge_base == base_sha and sorted(actual) == sorted(expected)
+          with open(output_path, 'a', encoding='utf-8') as out:
+              out.write(f'actual_sha={actual_sha}\nmerge_base={merge_base}\nchanged_file_count={len(actual)}\n')
+          if not ok: raise SystemExit('exact SHA, merge base, or owned scope mismatch')
+          PY
+          code=$?
+          echo "$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" > "$RUNNER_TEMP/pr327-final-scope.status"
+          exit "$code"
+
+      - name: Validate migrations and canonical ownership
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python - > "$RUNNER_TEMP/pr327-final-migrations.log" 2>&1 <<'PY'
+          from pathlib import Path
+          files = sorted(Path('supabase/migrations').glob('2026072813*.sql'))
+          expected = [
+              '20260728130000_trainingos_scheduling_delivery_runtime_v2_pattern.sql',
+              '20260728130100_trainingos_scheduling_delivery_runtime_v2_occurrence_schema.sql',
+              '20260728131000_trainingos_scheduling_delivery_runtime_v2_generation.sql',
+              '20260728131100_trainingos_scheduling_delivery_runtime_v2_projection.sql',
+              '20260728132000_trainingos_scheduling_delivery_runtime_v2_conflict_guard.sql',
+              '20260728132100_trainingos_scheduling_delivery_runtime_v2_preview.sql',
+              '20260728132200_trainingos_scheduling_delivery_runtime_v2_confirm.sql',
+              '20260728132300_trainingos_scheduling_delivery_runtime_v2_conflict_read.sql',
+              '20260728132400_trainingos_scheduling_delivery_runtime_v2_human_actor_hardening.sql',
+              '20260728132500_trainingos_scheduling_delivery_runtime_v2_idempotency_binding.sql',
+          ]
+          assert [p.name for p in files] == expected
+          assert all(20260728130000 <= int(p.name[:14]) <= 20260728135999 for p in files)
+          combined = '\n'.join(p.read_text(encoding='utf-8').lower() for p in files)
+          for forbidden in (
+              'create table public.classes','create table if not exists public.classes',
+              'create table public.trainingos_courses','create table public.training_days',
+              'create table public.lesson_sections','create table public.classroom_sessions',
+          ): assert forbidden not in combined, forbidden
+          assert 'create table if not exists public.trainingos_schedule_patterns' in combined
+          assert 'alter table public.schedule_adjustments' in combined
+          PY
+          code=$?
+          echo "$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" > "$RUNNER_TEMP/pr327-final-migrations.status"
+          exit "$code"
+
+      - name: Run focused Node contracts
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          { node --check lib/trainingos-agent-gateway/scheduling-delivery-runtime.mjs; node --test prototypes/trainingos-agent-mvp-v1/test/scheduling-delivery-runtime-v2.test.mjs; } > "$RUNNER_TEMP/pr327-final-node.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/pr327-final-node.log" "$code" "$RUNNER_TEMP/pr327-final-node.status" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace'); code=int(sys.argv[2])
+          tests=[int(v) for v in re.findall(r'# tests\s+(\d+)',text)]; passed=[int(v) for v in re.findall(r'# pass\s+(\d+)',text)]; failed=[int(v) for v in re.findall(r'# fail\s+(\d+)',text)]
+          ok=code==0 and tests and tests[-1]==4 and passed[-1]==4 and failed[-1]==0
+          pathlib.Path(sys.argv[3]).write_text(f'{"PASS" if ok else "FAIL"} {passed[-1] if passed else 0}/{tests[-1] if tests else 0}')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Run focused Python contracts
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest tests.test_trainingos_scheduling_delivery_runtime_v2_contract -v > "$RUNNER_TEMP/pr327-final-python.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/pr327-final-python.log" "$code" "$RUNNER_TEMP/pr327-final-python.status" <<'PY'
+          import pathlib,re,sys
+          text=pathlib.Path(sys.argv[1]).read_text(errors='replace'); code=int(sys.argv[2]); match=re.search(r'Ran\s+(\d+)\s+tests?',text); count=int(match.group(1)) if match else 0
+          ok=code==0 and count==12 and re.search(r'\nOK\s*$',text) is not None
+          pathlib.Path(sys.argv[3]).write_text(f'{"PASS" if ok else "FAIL"} {count if ok else 0}/{count}')
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Install dependencies
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e; npm ci > "$RUNNER_TEMP/pr327-final-install.log" 2>&1; code=$?; echo "$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" > "$RUNNER_TEMP/pr327-final-install.status"; exit "$code"
+
+      - name: Run full repository typecheck
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e; npm run typecheck > "$RUNNER_TEMP/pr327-final-typecheck.log" 2>&1; code=$?; echo "$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" > "$RUNNER_TEMP/pr327-final-typecheck.status"; exit "$code"
+
+      - name: Run full repository production build
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e; npm run build > "$RUNNER_TEMP/pr327-final-build.log" 2>&1; code=$?; echo "$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" > "$RUNNER_TEMP/pr327-final-build.status"; exit "$code"
+
+      - name: Publish sanitized exact-head result
+        if: always()
+        shell: bash
+        env:
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'),path=require('node:path'); const read=n=>{try{return fs.readFileSync(path.join(process.env.RUNNER_TEMP,n),'utf8').trim()}catch{return'NOT_RUN'}};
+          const r={scope:read('pr327-final-scope.status'),migrations:read('pr327-final-migrations.status'),node:read('pr327-final-node.status'),python:read('pr327-final-python.status'),install:read('pr327-final-install.status'),typecheck:read('pr327-final-typecheck.status'),build:read('pr327-final-build.status')};
+          const report=[`exact_private_sha=${process.env.ACTUAL_SHA||process.env.PRIVATE_SHA}`,`merge_base=${process.env.MERGE_BASE||process.env.BASE_SHA}`,`changed_file_count=${process.env.FILE_COUNT||'0'}`,...Object.entries(r).map(([k,v])=>`${k}=${v}`),'raw_private_output=SEALED_AND_DELETED'].join('\n')+'\n';
+          fs.writeFileSync('pr327-scheduling-final-exact.txt',report); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## PR327 final exact-head CI\n\n\`\`\`text\n${report}\`\`\`\n`); console.log(report);
+          NODE
+
+      - name: Upload sanitized result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr327-scheduling-final-exact
+          path: pr327-scheduling-final-exact.txt
+          retention-days: 3
+
+      - name: Cleanup and enforce all gates
+        if: always()
+        shell: bash
+        run: |
+          failed=0
+          for name in scope migrations node python install typecheck build; do value="$(cat "$RUNNER_TEMP/pr327-final-${name}.status" 2>/dev/null || echo NOT_RUN)"; [[ "$value" == PASS* ]] || failed=1; done
+          rm -rf private-repo "$RUNNER_TEMP"/pr327-final-*.log "$RUNNER_TEMP"/pr327-final-*.status pr327-scheduling-final-exact.txt
+          [[ "$failed" == 0 ]]
