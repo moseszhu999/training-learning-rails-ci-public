@@ -1,0 +1,212 @@
+name: TrainingOS public exact-head CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      privateExactSha:
+        description: Lowercase 40-character private commit SHA
+        required: true
+        type: string
+      expectedBaseSha:
+        description: Lowercase 40-character expected merge base SHA
+        required: true
+        type: string
+      validationProfile:
+        description: Fixed public-safe validation command profile
+        required: true
+        type: choice
+        options:
+          - student-learning-execution
+          - scheduling-delivery
+          - agent-recipe
+          - classroom-explanation
+          - classroom-lark
+          - classroom-agent-queue
+          - generic-owned
+      expectedChangedFileCount:
+        description: Exact changed-file count from expected base to exact head
+        required: true
+        type: string
+      expectedMigrationRange:
+        description: none or inclusive 14-digit-start-14-digit-end
+        required: true
+        type: string
+      expectedFocusedTestCounts:
+        description: Exact format node=N;python=N
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trainingos-public-exact-head-${{ inputs.privateExactSha }}-${{ inputs.validationProfile }}
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Check out public CI controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate dispatch inputs
+        id: inputs
+        shell: bash
+        env:
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          VALIDATION_PROFILE: ${{ inputs.validationProfile }}
+          EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
+          EXPECTED_MIGRATION_RANGE: ${{ inputs.expectedMigrationRange }}
+          EXPECTED_FOCUSED_TEST_COUNTS: ${{ inputs.expectedFocusedTestCounts }}
+        run: |
+          set +e
+          node scripts/exact-head-inputs.mjs > "$RUNNER_TEMP/trainingos-inputs.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate read-only private credential presence
+        id: credential
+        if: steps.inputs.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          if [[ -n "$PRIVATE_TOKEN" ]]; then
+            echo 'status=PASS' >> "$GITHUB_OUTPUT"
+          else
+            echo 'status=FAIL' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out exact private commit
+        id: private_checkout
+        if: steps.inputs.outputs.status == 'PASS' && steps.credential.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ inputs.privateExactSha }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify exact head, merge base, file count, and migration range
+        id: scope
+        if: steps.private_checkout.outcome == 'success'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
+          MIGRATION_START: ${{ steps.inputs.outputs.migration_start }}
+          MIGRATION_END: ${{ steps.inputs.outputs.migration_end }}
+        run: |
+          set +e
+          node scripts/verify-private-scope.mjs > "$RUNNER_TEMP/trainingos-scope.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run selected fixed profile with sealed output
+        id: profile
+        if: steps.scope.outputs.status == 'PASS'
+        shell: bash
+        env:
+          VALIDATION_PROFILE: ${{ inputs.validationProfile }}
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          EXPECTED_NODE_COUNT: ${{ steps.inputs.outputs.expected_node_count }}
+          EXPECTED_PYTHON_COUNT: ${{ steps.inputs.outputs.expected_python_count }}
+        run: |
+          set +e
+          node scripts/run-private-profile.mjs > "$RUNNER_TEMP/trainingos-profile-controller.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized exact-head status
+        if: always()
+        shell: bash
+        env:
+          VALIDATION_PROFILE: ${{ inputs.validationProfile }}
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
+          MIGRATION_COUNT: ${{ steps.scope.outputs.migration_count }}
+          PROFILE_STATUS: ${{ steps.profile.outputs.status }}
+          PASSED_STEPS: ${{ steps.profile.outputs.passed_step_count }}
+          STEP_COUNT: ${{ steps.profile.outputs.step_count }}
+          NODE_PASSED: ${{ steps.profile.outputs.node_passed }}
+          NODE_TESTS: ${{ steps.profile.outputs.node_tests }}
+          PYTHON_TESTS: ${{ steps.profile.outputs.python_tests }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const value = (input) => input || 'NOT_RUN';
+          const lines = [
+            '## TrainingOS public exact-head CI',
+            '',
+            `- Validation profile: **${process.env.VALIDATION_PROFILE}**`,
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_EXACT_SHA}\``,
+            `- Exact merge base: \`${process.env.MERGE_BASE || process.env.EXPECTED_BASE_SHA}\``,
+            `- Input validation: **${value(process.env.INPUT_STATUS)}**`,
+            `- Read-only credential present: **${value(process.env.CREDENTIAL_STATUS)}**`,
+            `- Scope verification: **${value(process.env.SCOPE_STATUS)}**`,
+            `- Changed files: **${process.env.CHANGED_FILE_COUNT || '0'}**`,
+            `- Migrations in declared range: **${process.env.MIGRATION_COUNT || '0'}**`,
+            `- Fixed profile result: **${value(process.env.PROFILE_STATUS)}**`,
+            `- Profile stages: **${process.env.PASSED_STEPS || '0'}/${process.env.STEP_COUNT || '0'}**`,
+            `- Focused Node tests: **${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'}**`,
+            `- Focused Python tests: **${process.env.PYTHON_TESTS || '0'}**`,
+            '- Database replay: **NOT_RUN — separate isolated-database gate**',
+            '',
+            'Private checkout and raw command output remain sealed on the runner and are deleted. No artifact is uploaded.',
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`TRAININGOS_PUBLIC_EXACT_HEAD profile=${process.env.VALIDATION_PROFILE} scope=${value(process.env.SCOPE_STATUS)} validation=${value(process.env.PROFILE_STATUS)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'} node=${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'} python=${process.env.PYTHON_TESTS || '0'}`);
+          NODE
+
+      - name: Enforce final exact-head result
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          INPUT_RUNNER_CODE: ${{ steps.inputs.outputs.runner_code }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          SCOPE_RUNNER_CODE: ${{ steps.scope.outputs.runner_code }}
+          PROFILE_STATUS: ${{ steps.profile.outputs.status }}
+          PROFILE_RUNNER_CODE: ${{ steps.profile.outputs.runner_code }}
+        run: |
+          [[ "${INPUT_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${INPUT_RUNNER_CODE:-1}" == '0' ]]
+          [[ "${CREDENTIAL_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${SCOPE_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${SCOPE_RUNNER_CODE:-1}" == '0' ]]
+          [[ "${PROFILE_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${PROFILE_RUNNER_CODE:-1}" == '0' ]]
+
+      - name: Remove private checkout and sealed files
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/trainingos-*.log
