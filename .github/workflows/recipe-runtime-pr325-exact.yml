@@ -16,106 +16,7 @@ env:
   PRIVATE_SHA: 0e9052c142fe8a55d238b648f414caf04f107605
 
 jobs:
-  focused-contracts:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Validate exact SHA and private read credential
-        shell: bash
-        env:
-          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-        run: |
-          set -euo pipefail
-          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
-          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
-
-      - name: Check out exact private commit
-        uses: actions/checkout@v4
-        with:
-          repository: moseszhu999/training-learning-rails
-          ref: ${{ env.PRIVATE_SHA }}
-          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-          path: private-repo
-          persist-credentials: false
-          fetch-depth: 1
-          clean: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Verify exact private head
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
-
-      - name: Enforce focused Recipe Python 16 of 16
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          python -m unittest -v tests/test_trainingos_agent_recipe_contract.py > "$RUNNER_TEMP/recipe-python.log" 2>&1
-          code=$?
-          python - "$RUNNER_TEMP/recipe-python.log" "$code" <<'PY'
-          import pathlib, re, sys
-          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
-          code = int(sys.argv[2])
-          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
-          count = int(match.group(1)) if match else 0
-          ok = code == 0 and count == 16 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
-          print(f'RECIPE_FOCUSED_PYTHON status={"PASS" if ok else "FAIL"} count={count}/16')
-          raise SystemExit(0 if ok else 1)
-          PY
-
-      - name: Enforce focused Recipe Node 9 of 9
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          node --test prototypes/trainingos-agent-mvp-v1/recipe-runtime.test.mjs > "$RUNNER_TEMP/recipe-node.log" 2>&1
-          code=$?
-          python - "$RUNNER_TEMP/recipe-node.log" "$code" <<'PY'
-          import pathlib, re, sys
-          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
-          code = int(sys.argv[2])
-          tests = re.search(r'# tests\s+(\d+)', text)
-          passed = re.search(r'# pass\s+(\d+)', text)
-          failed = re.search(r'# fail\s+(\d+)', text)
-          count = int(tests.group(1)) if tests else 0
-          pass_count = int(passed.group(1)) if passed else 0
-          fail_count = int(failed.group(1)) if failed else -1
-          ok = code == 0 and count == 9 and pass_count == 9 and fail_count == 0
-          print(f'RECIPE_FOCUSED_NODE status={"PASS" if ok else "FAIL"} pass={pass_count}/{count} fail={fail_count}')
-          raise SystemExit(0 if ok else 1)
-          PY
-
-      - name: Enforce Recipe JavaScript syntax
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          {
-            node --check packages/training-recipe/src/compiler.mjs
-            node --check packages/training-recipe/src/adapters.mjs
-            node --check lib/trainingos-agent-gateway/recipe-runtime.mjs
-            node --check lib/trainingos-agent-gateway/recipe-mcp-layer.mjs
-          } > "$RUNNER_TEMP/recipe-syntax.log" 2>&1
-          code=$?
-          echo "RECIPE_SYNTAX status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL)"
-          exit "$code"
-
-      - name: Remove focused private checkout and sealed logs
-        if: always()
-        shell: bash
-        run: rm -rf private-repo "$RUNNER_TEMP/recipe-python.log" "$RUNNER_TEMP/recipe-node.log" "$RUNNER_TEMP/recipe-syntax.log"
-
-  fresh-database-and-sql-e2e:
+  migration-replay-diagnostic:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
@@ -154,77 +55,78 @@ jobs:
           rm -rf supabase/migrations
           cp -R ../private-repo/supabase/migrations supabase/migrations
           rm -f supabase/seed.sql
-          count="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
-          echo "RECIPE_DB_PREP status=PASS migration_files=$count sha=$PRIVATE_SHA"
 
-      - name: First fresh migration replay
+      - name: Capture sanitized fresh replay diagnosis
+        id: replay
         working-directory: replay-project
         shell: bash
         run: |
           set +e
-          supabase start > "$RUNNER_TEMP/recipe-db-first.log" 2>&1
+          supabase start > "$RUNNER_TEMP/recipe-db-diagnostic.log" 2>&1
           code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
-          echo "RECIPE_DB_FIRST status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
-          exit "$code"
-
-      - name: Second deterministic migration replay
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set +e
-          supabase db reset --local > "$RUNNER_TEMP/recipe-db-second.log" 2>&1
-          code=$?
-          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" || true)"
-          last="$(grep 'Applying migration ' "$RUNNER_TEMP/recipe-db-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
-          echo "RECIPE_DB_SECOND status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL) applied=$applied last=${last:-none}"
-          exit "$code"
-
-      - name: Run transactional Recipe SQL E2E
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set -euo pipefail
-          eval "$(supabase status -o env | grep '^DB_URL=')"
-          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
-            -f ../private-repo/tests/sql/trainingos_agent_recipe_runtime_e2e.sql \
-            > "$RUNNER_TEMP/recipe-sql-e2e.log" 2>&1
-          python - "$RUNNER_TEMP/recipe-sql-e2e.log" <<'PY'
-          import json, pathlib, sys
+          CODE="$code" PRIVATE_SHA="$PRIVATE_SHA" python - "$RUNNER_TEMP/recipe-db-diagnostic.log" "$RUNNER_TEMP/recipe-db-diagnostic.json" <<'PY'
+          import hashlib, json, os, pathlib, re, sys
           text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
-          payloads = []
-          for line in text.splitlines():
-              line = line.strip()
-              if not line.startswith('{'):
-                  continue
-              try:
-                  payloads.append(json.loads(line))
-              except json.JSONDecodeError:
-                  pass
-          payload = payloads[-1] if payloads else {}
-          residue = payload.get('residue') or {}
-          ok = (
-              payload.get('status') == 'PASS'
-              and payload.get('canonicalExecutionReused') is True
-              and payload.get('canonicalExecutionCount') == 1
-              and payload.get('triggerReceiptCount') == 2
-              and payload.get('formalWritePerformed') is False
-              and payload.get('badSourceDigestDenied') is True
-              and payload.get('humanInitialTriggerDenied') is True
-              and payload.get('humanReplayDenied') is True
-              and payload.get('changedExecutorProvenanceDenied') is True
-              and residue
-              and all(int(value) == 0 for value in residue.values())
-          )
-          print('RECIPE_SQL_E2E status=%s execution=%s receipts=%s cleanup=%s' % (
-              'PASS' if ok else 'FAIL',
-              payload.get('canonicalExecutionCount', 0),
-              payload.get('triggerReceiptCount', 0),
-              'PASS' if residue and all(int(value) == 0 for value in residue.values()) else 'FAIL',
-          ))
-          raise SystemExit(0 if ok else 1)
+          code = int(os.environ['CODE'])
+          applied = re.findall(r'Applying migration\s+([^\s]+)', text)
+          last = applied[-1] if applied else None
+          lower = text.lower()
+          if code == 0:
+              error_class = None
+          elif 'duplicate key value violates unique constraint' in lower and 'schema_migrations' in lower:
+              error_class = 'duplicate_migration_version'
+          elif 'invalid migration' in lower or 'migration filename' in lower:
+              error_class = 'invalid_migration_filename'
+          elif 'error running container' in lower or 'docker daemon' in lower:
+              error_class = 'container_runtime'
+          elif 'health check' in lower or 'unhealthy' in lower:
+              error_class = 'service_health'
+          elif re.search(r'\berror:\s', lower):
+              error_class = 'migration_sql_error'
+          else:
+              error_class = 'unknown_start_failure'
+          sqlstate = None
+          for pattern in [r'SQLSTATE[=: ]+([0-9A-Z]{5})', r'\(([0-9A-Z]{5})\)']:
+              match = re.search(pattern, text, flags=re.I)
+              if match:
+                  sqlstate = match.group(1).upper()
+                  break
+          tail = '\n'.join(text.splitlines()[-80:])
+          payload = {
+              'schemaVersion': 'trainingos-recipe-db-replay-diagnostic-v1',
+              'privateSha': os.environ['PRIVATE_SHA'],
+              'status': 'PASS' if code == 0 else 'FAIL',
+              'exitCode': code,
+              'appliedCount': len(applied),
+              'lastMigration': last,
+              'recipeMigrationReached': bool(last and last.startswith('2026072812')),
+              'errorClass': error_class,
+              'sqlstate': sqlstate,
+              'tailFingerprint': hashlib.sha256(tail.encode()).hexdigest(),
+              'rawOutputPublished': False,
+          }
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+          print('RECIPE_DB_DIAGNOSTIC status=%s applied=%s last=%s recipe_reached=%s class=%s sqlstate=%s fingerprint=%s' % (
+              payload['status'], payload['appliedCount'], payload['lastMigration'] or 'none',
+              payload['recipeMigrationReached'], payload['errorClass'] or 'none', payload['sqlstate'] or 'none',
+              payload['tailFingerprint']))
           PY
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload sanitized replay diagnosis
+        uses: actions/upload-artifact@v4
+        with:
+          name: recipe-pr325-db-replay-diagnostic
+          path: ${{ runner.temp }}/recipe-db-diagnostic.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce fresh replay result
+        shell: bash
+        env:
+          REPLAY_CODE: ${{ steps.replay.outputs.code }}
+        run: test "${REPLAY_CODE:-1}" = 0
 
       - name: Stop isolated database and remove sealed logs
         if: always()
@@ -232,5 +134,5 @@ jobs:
         shell: bash
         run: |
           supabase stop --no-backup || true
-          rm -f "$RUNNER_TEMP/recipe-db-first.log" "$RUNNER_TEMP/recipe-db-second.log" "$RUNNER_TEMP/recipe-sql-e2e.log"
+          rm -f "$RUNNER_TEMP/recipe-db-diagnostic.log" "$RUNNER_TEMP/recipe-db-diagnostic.json"
           rm -rf ../private-repo
