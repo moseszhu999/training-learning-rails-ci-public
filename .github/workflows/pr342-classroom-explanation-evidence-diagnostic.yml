@@ -23,6 +23,13 @@ jobs:
   diagnose-evidence:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      status: ${{ steps.probe.outputs.status }}
+      cleanup: ${{ steps.probe.outputs.cleanup }}
+      remaining_count: ${{ steps.probe.outputs.remaining_count }}
+      remaining_zero: ${{ steps.probe.outputs.remaining_zero }}
+      failed_assertion_count: ${{ steps.probe.outputs.failed_assertion_count }}
+      failed_assertions: ${{ steps.probe.outputs.failed_assertions }}
     steps:
       - name: Validate exact private inputs
         env:
@@ -203,3 +210,28 @@ jobs:
         run: |
           supabase --workdir "$RUNNER_TEMP/pr342-evidence-supabase" stop --no-backup >/dev/null 2>&1 || true
           rm -rf private-repo "$RUNNER_TEMP"/pr342-evidence-*
+
+  sanitized-disposition:
+    if: always()
+    needs: diagnose-evidence
+    name: assertions-${{ needs.diagnose-evidence.outputs.failed_assertion_count }}-${{ needs.diagnose-evidence.outputs.failed_assertions }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish bounded job result
+        env:
+          STATUS: ${{ needs.diagnose-evidence.outputs.status }}
+          CLEANUP: ${{ needs.diagnose-evidence.outputs.cleanup }}
+          REMAINING_COUNT: ${{ needs.diagnose-evidence.outputs.remaining_count }}
+          REMAINING_ZERO: ${{ needs.diagnose-evidence.outputs.remaining_zero }}
+          FAILED_COUNT: ${{ needs.diagnose-evidence.outputs.failed_assertion_count }}
+          FAILED_ASSERTIONS: ${{ needs.diagnose-evidence.outputs.failed_assertions }}
+        shell: bash
+        run: |
+          {
+            echo "status=${STATUS:-MISSING}"
+            echo "cleanup=${CLEANUP:-MISSING}"
+            echo "remaining_count=${REMAINING_COUNT:-0}"
+            echo "remaining_zero=${REMAINING_ZERO:-false}"
+            echo "failed_assertion_count=${FAILED_COUNT:-0}"
+            echo "failed_assertions=${FAILED_ASSERTIONS:-MISSING}"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
