@@ -1,0 +1,241 @@
+name: PR342 Classroom Explanation final application
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-classroom-explanation-final-app.yml
+      - .github/workflows/pr342-classroom-explanation-final-db.yml
+      - carriers/pr342-final-7c575a2e.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-final-app-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 7c575a2e42e76d564e4ba15dfe8f682da8dee366
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+
+jobs:
+  exact-head-application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Validate exact inputs and credential
+        id: credential
+        continue-on-error: true
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Node.js
+        id: node_setup
+        if: always()
+        continue-on-error: true
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Set up Python
+        id: python_setup
+        if: always()
+        continue-on-error: true
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact SHA merge base posture and scope
+        id: scope
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+          counts="$(git rev-list --left-right --count "$BASE_SHA...$PRIVATE_SHA")"
+          behind="$(printf '%s' "$counts" | awk '{print $1}')"
+          ahead="$(printf '%s' "$counts" | awk '{print $2}')"
+          actual_files="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected_files=$'docs/architecture/trainingos-classroom-explanation-runtime-v1.md\ndocs/verification/trainingos-classroom-explanation-runtime-v1.md\nlib/trainingos-agent-gateway/classroom-explanation-mcp-layer.mjs\nlib/trainingos-agent-gateway/classroom-explanation-runtime.mjs\nprototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs\nsupabase/migrations/20260728160000_trainingos_classroom_explanation_schema_v1.sql\nsupabase/migrations/20260728160100_trainingos_classroom_explanation_prepare_rpc_v1.sql\nsupabase/migrations/20260728160200_trainingos_classroom_explanation_start_rpc_v1.sql\nsupabase/migrations/20260728160300_trainingos_classroom_explanation_capture_create_rpc_v1.sql\nsupabase/migrations/20260728160400_trainingos_classroom_explanation_capture_upload_rpc_v1.sql\nsupabase/migrations/20260728160500_trainingos_classroom_explanation_transcript_rpc_v1.sql\nsupabase/migrations/20260728160600_trainingos_classroom_explanation_analysis_rpc_v1.sql\nsupabase/migrations/20260728160700_trainingos_classroom_explanation_evaluation_rpc_v1.sql\nsupabase/migrations/20260728160800_trainingos_classroom_explanation_projection_rpc_v1.sql\nsupabase/migrations/20260728160900_trainingos_classroom_explanation_intelligence_hardening_v1.sql\nsupabase/migrations/20260728161000_trainingos_classroom_explanation_context_prepare_rpc_v1.sql\nsupabase/migrations/20260728161100_trainingos_classroom_explanation_transcript_intelligence_input_v1.sql\nsupabase/migrations/20260728161200_trainingos_classroom_explanation_agent_inference_rpc_v1.sql\nsupabase/migrations/20260728161300_trainingos_classroom_explanation_teacher_evaluation_projection_v1.sql\nsupabase/migrations/20260728161400_trainingos_classroom_explanation_start_active_slot_hardening_v1.sql\nsupabase/migrations/20260728161500_trainingos_classroom_explanation_question_source_hardening_v1.sql\ntests/sql/trainingos_classroom_explanation_e2e.sql\ntests/test_trainingos_classroom_explanation_contract.py'
+          file_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+          migration_count="$(printf '%s\n' "$actual_files" | grep -Ec '^supabase/migrations/2026072816[0-5][0-9]{3}_trainingos_classroom_explanation_')"
+          [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+          [[ "$merge_base" == "$BASE_SHA" ]]
+          [[ "$behind" == 0 && "$ahead" == 22 ]]
+          [[ "$actual_files" == "$expected_files" ]]
+          [[ "$file_count" == 23 && "$migration_count" == 16 ]]
+          test -z "$(git status --porcelain)"
+          {
+            echo "actual_sha=$actual_sha"
+            echo "merge_base=$merge_base"
+            echo "ahead=$ahead"
+            echo "behind=$behind"
+            echo "file_count=$file_count"
+            echo "migration_count=$migration_count"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: JavaScript syntax 2 of 2
+        id: syntax
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check lib/trainingos-agent-gateway/classroom-explanation-runtime.mjs > "$RUNNER_TEMP/pr342-syntax.log" 2>&1
+          node --check lib/trainingos-agent-gateway/classroom-explanation-mcp-layer.mjs >> "$RUNNER_TEMP/pr342-syntax.log" 2>&1
+
+      - name: Focused Node contracts 10 of 10
+        id: node_contract
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs > "$RUNNER_TEMP/pr342-node.log" 2>&1
+          code=$?
+          tests="$(grep -E '^# tests ' "$RUNNER_TEMP/pr342-node.log" | tail -1 | awk '{print $3}')"
+          passed="$(grep -E '^# pass ' "$RUNNER_TEMP/pr342-node.log" | tail -1 | awk '{print $3}')"
+          failed="$(grep -E '^# fail ' "$RUNNER_TEMP/pr342-node.log" | tail -1 | awk '{print $3}')"
+          {
+            echo "tests=${tests:-0}"
+            echo "passed=${passed:-0}"
+            echo "failed=${failed:--1}"
+          } >> "$GITHUB_OUTPUT"
+          [[ "$code" == 0 && "$tests" == 10 && "$passed" == 10 && "$failed" == 0 ]]
+
+      - name: Focused Python contracts 14 of 14
+        id: python_contract
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python -m unittest -v tests.test_trainingos_classroom_explanation_contract > "$RUNNER_TEMP/pr342-python.log" 2>&1
+          code=$?
+          tests="$(grep -E '^Ran [0-9]+ tests?' "$RUNNER_TEMP/pr342-python.log" | tail -1 | awk '{print $2}')"
+          echo "tests=${tests:-0}" >> "$GITHUB_OUTPUT"
+          [[ "$code" == 0 && "$tests" == 14 ]]
+          grep -qx 'OK' "$RUNNER_TEMP/pr342-python.log"
+
+      - name: Install dependencies
+        id: install
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: npm ci > "$RUNNER_TEMP/pr342-install.log" 2>&1
+
+      - name: Classroom Intelligence contracts
+        id: intelligence
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: npm --prefix packages/training-classroom-intelligence test > "$RUNNER_TEMP/pr342-intelligence.log" 2>&1
+
+      - name: Repository typecheck
+        id: typecheck
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: npm run typecheck > "$RUNNER_TEMP/pr342-typecheck.log" 2>&1
+
+      - name: Production build
+        id: build
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: npm run build > "$RUNNER_TEMP/pr342-build.log" 2>&1
+
+      - name: Sanitized application summary
+        if: always()
+        env:
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          AHEAD: ${{ steps.scope.outputs.ahead }}
+          BEHIND: ${{ steps.scope.outputs.behind }}
+          FILES: ${{ steps.scope.outputs.file_count }}
+          MIGRATIONS: ${{ steps.scope.outputs.migration_count }}
+          NODE_TESTS: ${{ steps.node_contract.outputs.tests }}
+          NODE_PASSED: ${{ steps.node_contract.outputs.passed }}
+          PYTHON_TESTS: ${{ steps.python_contract.outputs.tests }}
+        shell: bash
+        run: |
+          {
+            echo '## PR #342 final application evidence'
+            echo "- exact SHA: \`${ACTUAL_SHA:-$PRIVATE_SHA}\`"
+            echo "- merge base: \`${MERGE_BASE:-$BASE_SHA}\`"
+            echo "- posture: ahead ${AHEAD:-0} / behind ${BEHIND:-0}"
+            echo "- scope: ${FILES:-0} files / ${MIGRATIONS:-0} migrations"
+            echo "- syntax: 2/2"
+            echo "- Node: ${NODE_PASSED:-0}/${NODE_TESTS:-0}"
+            echo "- Python: ${PYTHON_TESTS:-0}/14"
+            echo '- install / intelligence / typecheck / build: enforced below'
+            echo '- raw source and logs: sealed'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup sealed output
+        if: always()
+        shell: bash
+        run: rm -rf private-repo "$RUNNER_TEMP"/pr342-*.log
+
+      - name: Final application enforcement
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          NODE_SETUP: ${{ steps.node_setup.outcome }}
+          PYTHON_SETUP: ${{ steps.python_setup.outcome }}
+          SCOPE: ${{ steps.scope.outcome }}
+          SYNTAX: ${{ steps.syntax.outcome }}
+          NODE_STATUS: ${{ steps.node_contract.outcome }}
+          NODE_TESTS: ${{ steps.node_contract.outputs.tests }}
+          NODE_PASSED: ${{ steps.node_contract.outputs.passed }}
+          NODE_FAILED: ${{ steps.node_contract.outputs.failed }}
+          PYTHON_STATUS: ${{ steps.python_contract.outcome }}
+          PYTHON_TESTS: ${{ steps.python_contract.outputs.tests }}
+          INSTALL: ${{ steps.install.outcome }}
+          INTELLIGENCE: ${{ steps.intelligence.outcome }}
+          TYPECHECK: ${{ steps.typecheck.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CREDENTIAL" == success && "$CHECKOUT" == success ]]
+          [[ "$NODE_SETUP" == success && "$PYTHON_SETUP" == success ]]
+          [[ "$SCOPE" == success && "$SYNTAX" == success ]]
+          [[ "$NODE_STATUS" == success && "$NODE_TESTS" == 10 && "$NODE_PASSED" == 10 && "$NODE_FAILED" == 0 ]]
+          [[ "$PYTHON_STATUS" == success && "$PYTHON_TESTS" == 14 ]]
+          [[ "$INSTALL" == success && "$INTELLIGENCE" == success ]]
+          [[ "$TYPECHECK" == success && "$BUILD" == success ]]
