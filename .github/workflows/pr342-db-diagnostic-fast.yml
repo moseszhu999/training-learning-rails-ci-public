@@ -1,0 +1,82 @@
+name: PR342 database diagnostic fast
+
+on:
+  push:
+    branches: [ci/pr342-db-diagnostic-fast]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      PRIVATE_SHA: 05df044760e9ffb3884319e4b5180a81f9093afb
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Diagnose sealed SQL E2E failure
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr342-fast-supabase"
+          log="$RUNNER_TEMP/pr342-fast-bootstrap.log"
+          err="$RUNNER_TEMP/pr342-fast-e2e.err"
+          out="$RUNNER_TEMP/pr342-fast-e2e.out"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+          bootstrap=1; start=1; reset=1; e2e=1
+          {
+            [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+            [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+            supabase --workdir "$workdir" init --force --yes
+            python scripts/build-trainingos-fresh-bootstrap.py --repo-root "$PWD" --output-dir "$workdir/supabase/migrations" --commit-sha "$PRIVATE_SHA"
+          } > "$log" 2>&1
+          bootstrap=$?
+          if [[ "$bootstrap" == 0 ]]; then supabase --workdir "$workdir" start >> "$log" 2>&1; start=$?; fi
+          if [[ "$start" == 0 ]]; then supabase --workdir "$workdir" db reset --local --no-seed >> "$log" 2>&1; reset=$?; fi
+          if [[ "$reset" == 0 ]]; then
+            psql "$DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -At -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$out" 2> "$err"
+            e2e=$?
+          fi
+          marker="$(cat "$log" "$err" 2>/dev/null | grep -Eo '\b(TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+' | tail -1)"
+          signature="$(grep -E 'ERROR:|FATAL:' "$err" 2>/dev/null | tail -1 | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}/<uuid>/g; s#/home/runner/[^ :]+#<runner-path>#g' | cut -c1-360)"
+          sqlstate="$(printf '%s' "$signature" | sed -nE 's/.*ERROR:[[:space:]]*([A-Z0-9]{5}):.*/\1/p')"
+          last_migration="$(grep -Eo 'Applying migration [0-9]{14}_[A-Za-z0-9_]+\.sql' "$log" | tail -1 | awk '{print $3}')"
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "bootstrap_exit=$bootstrap"
+            echo "start_exit=$start"
+            echo "reset_exit=$reset"
+            echo "e2e_exit=$e2e"
+            echo "last_migration=${last_migration:-NONE}"
+            echo "failure_marker=${marker:-NONE}"
+            echo "sqlstate=${sqlstate:-NONE}"
+            echo "error_signature=${signature:-NONE}"
+            echo "evidence_bytes=$(wc -c < "$out" 2>/dev/null || echo 0)"
+            echo "raw_output=SEALED_AND_DELETED"
+          } | tee pr342-db-diagnostic-fast.txt >> "$GITHUB_STEP_SUMMARY"
+          supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf "$workdir" "$log" "$err" "$out" private-repo
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr342-db-diagnostic-fast
+          path: private-repo/pr342-db-diagnostic-fast.txt
+          if-no-files-found: ignore
+          retention-days: 3
