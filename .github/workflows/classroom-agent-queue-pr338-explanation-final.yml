@@ -1,0 +1,452 @@
+name: Classroom Agent Queue PR338 post-Explanation final gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/classroom-agent-queue-pr338-explanation-final.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classroom-agent-queue-pr338-explanation-final-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 65560e3656394f7b938329e84381a041902c12be
+  BASE_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+
+jobs:
+  contracts-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Validate exact inputs
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact head, post-Explanation main and 12-file scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$'docs/product/trainingos-classroom-agent-queue-integration-v1.md\nlib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs\nlib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs\nlib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs\nlib/trainingos-agent-gateway/persistent-teacher-agent.mjs\nlib/trainingos-agent-gateway/teacher-action-queue.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs\nprototypes/trainingos-agent-mvp-v1/zero-permission-mcp-composition.test.mjs\nsupabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql\nsupabase/migrations/20260728180100_trainingos_classroom_explanation_queue_binding_v1.sql\ntests/sql/trainingos_classroom_agent_queue_integration_e2e.sql\ntests/test_trainingos_classroom_agent_queue_integration_contract.py'
+          actual="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$actual" == "$expected" ]]
+          [[ -f supabase/migrations/20260728161500_trainingos_classroom_explanation_question_source_hardening_v1.sql ]]
+          [[ -f supabase/migrations/20260728180100_trainingos_classroom_explanation_queue_binding_v1.sql ]]
+          echo PASS > "$RUNNER_TEMP/caq-exp-scope.status"
+
+      - name: Gateway syntax
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --check lib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs
+            node --check lib/trainingos-agent-gateway/persistent-teacher-agent.mjs
+            node --check lib/trainingos-agent-gateway/teacher-action-queue.mjs
+            node --check lib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs
+            node --check lib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs
+          } > "$RUNNER_TEMP/caq-exp-syntax.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-syntax.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-syntax.status"
+          exit 0
+
+      - name: Focused Node contracts
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test prototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs > "$RUNNER_TEMP/caq-exp-node.log" 2>&1
+          code=$?
+          tests="$(grep -E '^# tests ' "$RUNNER_TEMP/caq-exp-node.log" | awk '{print $3}' | tail -1)"
+          passed="$(grep -E '^# pass ' "$RUNNER_TEMP/caq-exp-node.log" | awk '{print $3}' | tail -1)"
+          failed="$(grep -E '^# fail ' "$RUNNER_TEMP/caq-exp-node.log" | awk '{print $3}' | tail -1)"
+          [[ "$code" == 0 && "$tests" == 5 && "$passed" == 5 && "$failed" == 0 ]] && echo 'PASS 5/5' > "$RUNNER_TEMP/caq-exp-node.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-node.status"
+          exit 0
+
+      - name: Focused Python contracts
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python tests/test_trainingos_classroom_agent_queue_integration_contract.py > "$RUNNER_TEMP/caq-exp-python.log" 2>&1
+          code=$?
+          count="$(grep -Eo 'Ran [0-9]+ tests?' "$RUNNER_TEMP/caq-exp-python.log" | awk '{print $2}' | tail -1)"
+          [[ "$code" == 0 && "$count" == 13 ]] && echo 'PASS 13/13' > "$RUNNER_TEMP/caq-exp-python.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-python.status"
+          exit 0
+
+      - name: Existing Queue, Persistent Agent and Explanation regressions
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          {
+            node --test prototypes/trainingos-agent-mvp-v1/teacher-action-queue.test.mjs
+            node --test prototypes/trainingos-agent-mvp-v1/persistent-teacher-agent.test.mjs
+            node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs
+            python tests/test_trainingos_teacher_action_queue_contract.py
+            python tests/test_trainingos_persistent_teacher_agent_contract.py
+            python tests/test_trainingos_persistent_teacher_agent_draft_execution_contract.py
+            python tests/test_trainingos_classroom_explanation_contract.py
+          } > "$RUNNER_TEMP/caq-exp-regressions.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-regressions.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-regressions.status"
+          exit 0
+
+      - name: Install dependencies
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/caq-exp-install.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-install.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-install.status"
+          exit 0
+
+      - name: Typecheck and production validations
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/caq-exp-typecheck.log" 2>&1
+          typecheck=$?
+          node scripts/run-trainingos-native-classroom-validation.mjs > "$RUNNER_TEMP/caq-exp-native.log" 2>&1
+          native=$?
+          node scripts/run-trainingos-zero-permission-bridge-validation.mjs > "$RUNNER_TEMP/caq-exp-zero.log" 2>&1
+          zero=$?
+          node scripts/run-trainingos-learning-workspace-bridge-validation.mjs > "$RUNNER_TEMP/caq-exp-learning.log" 2>&1
+          learning=$?
+          node extensions/trainingos-classroom-vscode/esbuild.mjs --production > "$RUNNER_TEMP/caq-exp-vscode.log" 2>&1
+          vscode=$?
+          npx vite build --config vite.config.ts > "$RUNNER_TEMP/caq-exp-vite.log" 2>&1
+          vite=$?
+          [[ "$typecheck" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-typecheck.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-typecheck.status"
+          [[ "$native" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-native.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-native.status"
+          [[ "$zero" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-zero.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-zero.status"
+          [[ "$learning" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-learning.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-learning.status"
+          [[ "$vscode" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-vscode.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-vscode.status"
+          [[ "$vite" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-vite.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-vite.status"
+          exit 0
+
+      - name: Publish and enforce contract/build result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          read_status() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf NOT_RUN; }
+          {
+            echo '## PR338 post-Explanation exact-head contracts and build'
+            echo
+            echo "- exact private SHA: \`$PRIVATE_SHA\`"
+            echo "- exact post-Explanation merge base: \`$BASE_SHA\`"
+            for entry in \
+              'scope caq-exp-scope.status' \
+              'syntax caq-exp-syntax.status' \
+              'focused_node caq-exp-node.status' \
+              'focused_python caq-exp-python.status' \
+              'queue_agent_explanation_regressions caq-exp-regressions.status' \
+              'npm_ci caq-exp-install.status' \
+              'typecheck caq-exp-typecheck.status' \
+              'native_classroom caq-exp-native.status' \
+              'zero_permission caq-exp-zero.status' \
+              'learning_workspace caq-exp-learning.status' \
+              'vscode_bundle caq-exp-vscode.status' \
+              'vite_build caq-exp-vite.status'; do
+              set -- $entry
+              echo "- $1: **$(read_status "$2")**"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          for file in \
+            caq-exp-scope.status caq-exp-syntax.status caq-exp-node.status caq-exp-python.status \
+            caq-exp-regressions.status caq-exp-install.status caq-exp-typecheck.status \
+            caq-exp-native.status caq-exp-zero.status caq-exp-learning.status \
+            caq-exp-vscode.status caq-exp-vite.status; do
+            [[ -f "$RUNNER_TEMP/$file" ]]
+            [[ "$(cut -d' ' -f1 "$RUNNER_TEMP/$file")" == PASS ]]
+          done
+          rm -rf private-repo
+          rm -f "$RUNNER_TEMP"/caq-exp-*.log
+
+  canonical-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - name: Validate exact inputs
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Verify exact scope and build canonical bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-repo rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git -C private-repo merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ -f private-repo/supabase/migrations/20260728161500_trainingos_classroom_explanation_question_source_hardening_v1.sql ]]
+          [[ -f private-repo/supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql ]]
+          [[ -f private-repo/supabase/migrations/20260728180100_trainingos_classroom_explanation_queue_binding_v1.sql ]]
+          mkdir replay-project
+          supabase --workdir replay-project init --force --yes > "$RUNNER_TEMP/caq-exp-db-init.log" 2>&1
+          rm -rf replay-project/supabase/migrations
+          python private-repo/scripts/build-trainingos-fresh-bootstrap.py \
+            --repo-root private-repo \
+            --output-dir replay-project/supabase/migrations \
+            --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/caq-exp-db-build.log" 2>&1
+          [[ -f replay-project/supabase/migrations/20260728161500_trainingos_classroom_explanation_question_source_hardening_v1.sql ]]
+          [[ -f replay-project/supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql ]]
+          [[ -f replay-project/supabase/migrations/20260728180100_trainingos_classroom_explanation_queue_binding_v1.sql ]]
+          echo PASS > "$RUNNER_TEMP/caq-exp-db-bootstrap.status"
+
+      - name: Initial canonical replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/caq-exp-db-start.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-db-start.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-db-start.status"
+          exit 0
+
+      - name: Deterministic destructive replay
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-exp-db-start.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-exp-db-reset.status"
+            exit 0
+          fi
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/caq-exp-db-reset.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-db-reset.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-db-reset.status"
+          exit 0
+
+      - name: Existing Persistent Agent SQL regression
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-exp-db-reset.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-exp-db-persistent.status"
+            exit 0
+          fi
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_persistent_teacher_agent_e2e.sql \
+            > "$RUNNER_TEMP/caq-exp-db-persistent.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-db-persistent.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-db-persistent.status"
+          exit 0
+
+      - name: Canonical Explanation queue-binding SQL E2E
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-exp-db-reset.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-exp-db-binding.status"
+            exit 0
+          fi
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_classroom_agent_queue_integration_e2e.sql \
+            > "$RUNNER_TEMP/caq-exp-db-binding.log" 2>&1
+          code=$?
+          pass_marker="$(grep -c 'canonicalExplanationEvaluationProjected' "$RUNNER_TEMP/caq-exp-db-binding.log" || true)"
+          [[ "$code" == 0 && "$pass_marker" -ge 1 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-db-binding.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-db-binding.status"
+          exit 0
+
+      - name: Queue ownership, canonical provider, trigger guard, RLS and ACL
+        working-directory: replay-project
+        shell: bash
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/caq-exp-db-reset.status")" != PASS ]]; then
+            echo NOT_RUN > "$RUNNER_TEMP/caq-exp-db-acl.status"
+            exit 0
+          fi
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/caq-exp-db-acl.log" 2>&1 <<'SQL'
+          do $verify$
+          declare
+            v_count integer;
+            v_trigger_definition text;
+            v_provider_definition text;
+            v_provider jsonb;
+          begin
+            select count(*) into v_count
+            from information_schema.tables
+            where table_schema='public' and table_name in (
+              'teacher_queue_items','trainingos_classroom_agent_queue_items',
+              'trainingos_classroom_agent_executions','trainingos_classroom_agent_execution_events'
+            );
+            if v_count<>0 then raise exception 'SECOND_OWNER_CREATED'; end if;
+
+            select count(*) into v_count
+            from information_schema.tables
+            where table_schema='public' and table_name in (
+              'trainingos_agent_executions','trainingos_agent_execution_events','trainingos_teacher_agent_policies',
+              'trainingos_classroom_explanations','trainingos_classroom_explanation_analysis_candidates',
+              'trainingos_classroom_explanation_evaluations'
+            );
+            if v_count<>6 then raise exception 'CANONICAL_OWNER_MISSING'; end if;
+
+            select count(*) into v_count
+            from pg_class c join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and c.relname='trainingos_teacher_agent_policies'
+              and c.relrowsecurity and c.relforcerowsecurity;
+            if v_count<>1 then raise exception 'POLICY_RLS_NOT_FORCED'; end if;
+
+            select count(*) into v_count
+            from information_schema.role_table_grants
+            where table_schema='public' and table_name='trainingos_teacher_agent_policies'
+              and grantee in ('PUBLIC','anon','authenticated','service_role');
+            if v_count<>0 then raise exception 'POLICY_DIRECT_GRANT'; end if;
+
+            select count(*) into v_count
+            from information_schema.routine_privileges
+            where specific_schema='private'
+              and routine_name in (
+                'trainingos_classroom_agent_queue_provider',
+                'trainingos_native_classroom_agent_queue_candidates',
+                'trainingos_classroom_agent_queue_candidates'
+              ) and grantee in ('PUBLIC','anon','authenticated','service_role')
+              and privilege_type='EXECUTE';
+            if v_count<>0 then raise exception 'PRIVATE_PROVIDER_EXECUTE_GRANT'; end if;
+
+            if not has_function_privilege('authenticated','public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)','EXECUTE')
+               or has_function_privilege('anon','public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)','EXECUTE')
+               or has_function_privilege('service_role','public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)','EXECUTE') then
+              raise exception 'QUEUE_RPC_ACL_INVALID';
+            end if;
+
+            select pg_get_functiondef(p.oid) into v_trigger_definition
+            from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='public'
+              and p.proname='trigger_trainingos_teacher_agent_from_queue'
+              and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_device_id uuid, p_queue_item_key text, p_expected_source_version text, p_expected_source_digest text, p_trigger_key text, p_executor_context jsonb, p_trigger_context jsonb';
+            if v_trigger_definition is null
+               or position('get_trainingos_teacher_action_queue_v2' in v_trigger_definition)=0
+               or position('elsif v_requires_human' in v_trigger_definition)=0
+               or position('agentDraftEligible' in v_trigger_definition)=0
+               or position('classroom_plan_draft' in v_trigger_definition)=0
+               or position('classroom_explanation_analysis' in v_trigger_definition)=0
+               or position('classroom_follow_up_draft' in v_trigger_definition)=0 then
+              raise exception 'TRIGGER_DRAFT_GUARD_INVALID';
+            end if;
+
+            select pg_get_functiondef(p.oid) into v_provider_definition
+            from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='private'
+              and p.proname='trainingos_classroom_agent_queue_provider'
+              and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_as_of timestamp with time zone, p_horizon_end timestamp with time zone';
+            if v_provider_definition is null
+               or position('trainingos_classroom_explanations' in v_provider_definition)=0
+               or position('trainingos_classroom_explanation_analysis_candidates' in v_provider_definition)=0
+               or position('trainingos_classroom_explanation_evaluations' in v_provider_definition)=0
+               or position('analysis_proposed' in v_provider_definition)=0
+               or position('agent_inference' in v_provider_definition)=0
+               or position('formalWritePerformed' in v_provider_definition)=0 then
+              raise exception 'CANONICAL_EXPLANATION_PROVIDER_INVALID';
+            end if;
+
+            v_provider := private.trainingos_classroom_agent_queue_provider(
+              extensions.gen_random_uuid(),clock_timestamp(),clock_timestamp()+interval '1 day'
+            );
+            if v_provider<>'[]'::jsonb then raise exception 'EMPTY_CLASS_PROVIDER_NOT_EMPTY'; end if;
+          end;
+          $verify$;
+          SQL
+          code=$?
+          [[ "$code" == 0 ]] && echo PASS > "$RUNNER_TEMP/caq-exp-db-acl.status" || echo FAIL > "$RUNNER_TEMP/caq-exp-db-acl.status"
+          exit 0
+
+      - name: Publish, clean and enforce database result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          read_status() { [[ -f "$RUNNER_TEMP/$1" ]] && cat "$RUNNER_TEMP/$1" || printf NOT_RUN; }
+          {
+            echo '## PR338 post-Explanation canonical database gate'
+            echo
+            echo "- exact private SHA: \`$PRIVATE_SHA\`"
+            echo "- exact post-Explanation merge base: \`$BASE_SHA\`"
+            echo "- canonical bootstrap: **$(read_status caq-exp-db-bootstrap.status)**"
+            echo "- initial migration replay: **$(read_status caq-exp-db-start.status)**"
+            echo "- deterministic destructive replay: **$(read_status caq-exp-db-reset.status)**"
+            echo "- existing Persistent Agent SQL E2E: **$(read_status caq-exp-db-persistent.status)**"
+            echo "- canonical Explanation queue-binding SQL E2E: **$(read_status caq-exp-db-binding.status)**"
+            echo "- Queue ownership / canonical provider / trigger guard / RLS / ACL: **$(read_status caq-exp-db-acl.status)**"
+            echo
+            echo 'Raw private source, SQL output, fixtures, identifiers and database URLs remain sealed and are deleted.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          supabase --workdir replay-project stop --no-backup || true
+          rm -rf private-repo replay-project
+          rm -f "$RUNNER_TEMP"/caq-exp-db-*.log
+          for file in \
+            caq-exp-db-bootstrap.status caq-exp-db-start.status caq-exp-db-reset.status \
+            caq-exp-db-persistent.status caq-exp-db-binding.status caq-exp-db-acl.status; do
+            [[ -f "$RUNNER_TEMP/$file" ]]
+            [[ "$(cat "$RUNNER_TEMP/$file")" == PASS ]]
+          done
