@@ -1,0 +1,143 @@
+name: Browser capture exact-head PR checkpoint CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-capture-exact-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  browser-capture-exact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PRIVATE_SHA: a4fe5e95f2c7f218619948c486e27d8af1dd5a3e
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify exact private head
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
+          printf 'Verified private exact head: `%s`\n' "$PRIVATE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run capture syntax checks with sealed output
+        id: syntax
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm --prefix packages/training-classroom-capture run check \
+            > "$RUNNER_TEMP/browser-capture-check.log" 2>&1
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [[ "$code" == "0" ]]; then
+            echo "status=PASS" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=FAIL" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Run capture tests with sealed output
+        id: tests
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm --prefix packages/training-classroom-capture test \
+            > "$RUNNER_TEMP/browser-capture-tests.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/browser-capture-tests.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          tests = re.search(r'# tests\s+(\d+)', text)
+          passed = re.search(r'# pass\s+(\d+)', text)
+          failed = re.search(r'# fail\s+(\d+)', text)
+          count = int(tests.group(1)) if tests else 0
+          pass_count = int(passed.group(1)) if passed else 0
+          fail_count = int(failed.group(1)) if failed else -1
+          ok = code == 0 and count == 17 and pass_count == 17 and fail_count == 0
+          with open(sys.argv[3], 'a', encoding='utf-8') as out:
+              out.write(f'count={count}\npass_count={pass_count}\nfail_count={fail_count}\nstatus={"PASS" if ok else "FAIL"}\n')
+          PY
+          exit 0
+
+      - name: Publish sanitized result
+        if: always()
+        shell: bash
+        env:
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          TEST_STATUS: ${{ steps.tests.outputs.status }}
+          TEST_COUNT: ${{ steps.tests.outputs.count }}
+          TEST_PASS: ${{ steps.tests.outputs.pass_count }}
+          TEST_FAIL: ${{ steps.tests.outputs.fail_count }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const lines = [
+            '## Browser capture exact-head PR checkpoint CI',
+            '',
+            `- Exact SHA: \`${process.env.PRIVATE_SHA}\``,
+            `- Syntax checks: **${process.env.SYNTAX_STATUS || 'FAIL'}**`,
+            `- Node tests: **${process.env.TEST_STATUS || 'FAIL'} ${process.env.TEST_PASS || '0'}/${process.env.TEST_COUNT || '0'}**`,
+            `- Failed tests: \`${process.env.TEST_FAIL || 'unknown'}\``,
+            '',
+            'Raw private output is sealed and deleted; no private source, logs, or audio artifacts are published.'
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          console.log(`BROWSER_CAPTURE_EXACT_CI syntax=${process.env.SYNTAX_STATUS} tests=${process.env.TEST_STATUS}:${process.env.TEST_PASS}/${process.env.TEST_COUNT} fail=${process.env.TEST_FAIL} sha=${process.env.PRIVATE_SHA}`);
+          NODE
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: rm -rf private-repo "$RUNNER_TEMP/browser-capture-check.log" "$RUNNER_TEMP/browser-capture-tests.log"
+
+      - name: Enforce checkpoint result
+        if: always()
+        shell: bash
+        env:
+          SYNTAX_STATUS: ${{ steps.syntax.outputs.status }}
+          TEST_STATUS: ${{ steps.tests.outputs.status }}
+          TEST_COUNT: ${{ steps.tests.outputs.count }}
+          TEST_PASS: ${{ steps.tests.outputs.pass_count }}
+          TEST_FAIL: ${{ steps.tests.outputs.fail_count }}
+        run: |
+          [[ "${SYNTAX_STATUS:-FAIL}" == PASS ]]
+          [[ "${TEST_STATUS:-FAIL}" == PASS ]]
+          [[ "${TEST_COUNT:-0}" == 17 ]]
+          [[ "${TEST_PASS:-0}" == 17 ]]
+          [[ "${TEST_FAIL:-1}" == 0 ]]
