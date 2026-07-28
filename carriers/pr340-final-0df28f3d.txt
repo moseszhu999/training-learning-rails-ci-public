@@ -1,0 +1,4 @@
+private_pr=340
+private_exact_sha=0df28f3d4056cc8aa2b65baa30981713a02f5b6a
+expected_base_sha=542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+scope=classroom-lark
