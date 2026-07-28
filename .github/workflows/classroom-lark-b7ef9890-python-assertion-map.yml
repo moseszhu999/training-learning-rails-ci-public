@@ -1,0 +1,77 @@
+name: Classroom Lark b7ef9890 Python assertion map
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/classroom-lark-b7ef9890-python-assertion-map.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: b7ef9890d18a97dc501057c51a955a730b62f53e
+
+jobs:
+  map-assertions:
+    runs-on: ubuntu-24.04
+    outputs:
+      failed_count: ${{ steps.map.outputs.failed_count }}
+      failed_checks: ${{ steps.map.outputs.failed_checks }}
+    steps:
+      - name: Validate private credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Map bounded assertion names
+        id: map
+        working-directory: private-repo
+        shell: bash
+        run: |
+          python - "$GITHUB_OUTPUT" <<'PY'
+          from pathlib import Path
+          import sys
+
+          schema = Path('supabase/migrations/20260728195000_trainingos_classroom_lark_schema_v1.sql').read_text(encoding='utf-8')
+          rpc = Path('supabase/migrations/20260728195100_trainingos_classroom_lark_rpc_v1.sql').read_text(encoding='utf-8')
+          checks = {
+              'immutable_marker': 'TRAININGOS_LARK_EVIDENCE_IMMUTABLE' in schema,
+              'transcript_trigger': 'before update or delete on public.trainingos_classroom_lark_transcripts' in schema,
+              'human_operator': 'private.trainingos_classroom_require_operator' in rpc,
+              'automatic_false': "'automaticConfirmationPerformed',false" in rpc,
+              'candidate_table': 'trainingos_lark_speaker_candidates' in rpc,
+              'confirmation_table': 'trainingos_lark_speaker_confirmations' in rpc,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          with open(sys.argv[1], 'a', encoding='utf-8') as out:
+              out.write(f'failed_count={len(failed)}\n')
+              out.write(f'failed_checks={",".join(failed) if failed else "NONE"}\n')
+          PY
+
+      - name: Cleanup private checkout
+        if: always()
+        run: rm -rf private-repo
+
+  sanitized-disposition:
+    if: always()
+    needs: map-assertions
+    name: checks-${{ needs.map-assertions.outputs.failed_count }}-${{ needs.map-assertions.outputs.failed_checks }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "bounded_assertion_map=published" >> "$GITHUB_STEP_SUMMARY"
