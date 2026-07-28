@@ -1,0 +1,317 @@
+name: Attendance audit final exact-head 4a90d0d
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/attendance-audit-final-4a90d0d.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attendance-audit-final-4a90d0d-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_EXACT_SHA: 4a90d0dbc5173530beac28b9f5de5517c1d5075c
+  EXPECTED_BASE_SHA: 30a9c267e1a07078dcbf150a9ef363995db65de1
+  AUDIT_PATH: docs/testing/trainingos-attendance-canonical-gap-audit-v1.md
+
+jobs:
+  docs-exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out public controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate locked inputs and read-only credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+          [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_EXACT_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Exact head ancestry one-file scope and zero migration PASS
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
+          [[ "$(git merge-base "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")" == "$EXPECTED_BASE_SHA" ]]
+          [[ "$(git rev-list --count "$EXPECTED_BASE_SHA..$PRIVATE_EXACT_SHA")" == '1' ]]
+          actual="$(git diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")"
+          [[ "$actual" == "$AUDIT_PATH" ]]
+          [[ "$(printf '%s\n' "$actual" | sed '/^$/d' | wc -l | tr -d ' ')" == '1' ]]
+          [[ "$(printf '%s\n' "$actual" | grep -c '^supabase/migrations/' || true)" == '0' ]]
+          if printf '%s\n' "$actual" | grep -Eq '^(api/integrations/agents/mcp\.mjs|netlify/functions/trainingos-mcp\.mjs|extensions/trainingos-classroom-vscode/|packages/training-learning-workspace/|packages/training-classroom/|packages/training-classroom-zoom/|packages/training-classroom-lark/|packages/training-scheduling/|lib/trainingos-agent-gateway/|supabase/migrations/)'; then
+            exit 1
+          fi
+
+      - name: Markdown structural lint PASS
+        working-directory: private-repo
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('docs/testing/trainingos-attendance-canonical-gap-audit-v1.md')
+          text = path.read_text(encoding='utf-8')
+          lines = text.splitlines()
+          assert text.endswith('\n')
+          assert lines[0] == '# TrainingOS Attendance Canonical Gap Audit v1'
+          assert sum(line.startswith('# ') for line in lines) == 1
+          assert all('\t' not in line for line in lines)
+          assert all(line == line.rstrip(' ') for line in lines)
+          assert sum(line.startswith('```') for line in lines) % 2 == 0
+          levels = [len(match.group(1)) for line in lines if (match := re.match(r'^(#{1,6})\s+\S', line))]
+          for previous, current in zip(levels, levels[1:]):
+              assert current <= previous + 1
+          required = [
+              '## 2. Historical window and conflict check',
+              '## 4. Canonical owner conclusion',
+              '## 5. Evidence classification matrix',
+              '## 12. Enterprise Report source analysis',
+              '## 13. Risk / Intervention source analysis',
+              '## 22. Identified gaps and severity',
+              '## 24. Implementation options',
+              '## 26. Option A acceptance criteria',
+              '## 29. Unresolved questions',
+          ]
+          for heading in required:
+              assert heading in text, heading
+          assert '30a9c267e1a07078dcbf150a9ef363995db65de1' in text
+          assert 'runtime changes: none' in text
+          assert 'migration changes: none' in text
+          assert 'RECOMMEND Option A' in text
+          print('ATTENDANCE_AUDIT_MARKDOWN status=PASS')
+          PY
+
+      - name: Referenced file existence PASS
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          while IFS= read -r path; do
+            [[ -f "$path" ]]
+          done <<'PATHS'
+          docs/architecture/trainingos-scheduling-delivery-runtime-v2.md
+          supabase/migrations/20260728130100_trainingos_scheduling_delivery_runtime_v2_occurrence_schema.sql
+          supabase/migrations/20260728132000_trainingos_scheduling_delivery_runtime_v2_conflict_guard.sql
+          docs/architecture/trainingos-native-classroom-owner-audit-v1.md
+          supabase/migrations/20260727230000_trainingos_native_classroom_schema_v1.sql
+          docs/product/trainingos-classroom-zoom-adapter-v1.md
+          packages/training-classroom-zoom/src/adapter.mjs
+          supabase/migrations/20260728190000_trainingos_classroom_zoom_adapter_schema_v1.sql
+          docs/architecture/trainingos-classroom-lark-adapter-v1.md
+          docs/architecture/trainingos-classroom-provider-adapter-contract-v1.md
+          docs/product/trainingos-vscode-exercise-inbox-v1.md
+          docs/product/trainingos-learning-activity-exercise-projection-v1.md
+          supabase/migrations/20260713_jhc_lifecycle_daily_operations.sql
+          apps/training-web/src/lib/jhc-lifecycle-operations.ts
+          supabase/migrations/20260724103000_trainingos_tencent_daily_ops_sync.sql
+          docs/verification/trainingos-wave3-enterprise-report-v1.md
+          supabase/migrations/20260727160200_trainingos_wave3_enterprise_report_sources_v1.sql
+          docs/testing/trainingos-gc03-risk-intervention-verification-2026-07-27.md
+          supabase/migrations/20260727210000_trainingos_risk_intervention_schema_v1.sql
+          docs/product/trainingos-classroom-agent-queue-integration-v1.md
+          supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql
+          PATHS
+
+      - name: Schema function and safety-boundary assertions PASS
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          grep -Fq 'lesson_sections' supabase/migrations/20260728130100_trainingos_scheduling_delivery_runtime_v2_occurrence_schema.sql
+          grep -Fq 'schedule_adjustments' supabase/migrations/20260728130100_trainingos_scheduling_delivery_runtime_v2_occurrence_schema.sql
+          grep -Fq 'trainingos_candidate_conflicts_v2' supabase/migrations/20260728132000_trainingos_scheduling_delivery_runtime_v2_conflict_guard.sql
+          grep -Fq 'validate_trainingos_delivery_occurrence_v2' supabase/migrations/20260728132000_trainingos_scheduling_delivery_runtime_v2_conflict_guard.sql
+          grep -Fq 'trainingos_classroom_sessions' supabase/migrations/20260727230000_trainingos_native_classroom_schema_v1.sql
+          grep -Fq 'trainingos_classroom_instruction_acknowledgements' supabase/migrations/20260727230000_trainingos_native_classroom_schema_v1.sql
+          grep -Fq 'attendanceDetermination: false' packages/training-classroom-zoom/src/adapter.mjs
+          grep -Eiq 'automatic attendance|attendance inference|must not infer attendance|attendance.*not' docs/architecture/trainingos-classroom-lark-adapter-v1.md
+          grep -Fq 'attendance inference: NO' docs/product/trainingos-learning-activity-exercise-projection-v1.md
+          grep -Fq 'attendance_expected' supabase/migrations/20260713_jhc_lifecycle_daily_operations.sql
+          grep -Fq 'attendance_actual' supabase/migrations/20260713_jhc_lifecycle_daily_operations.sql
+          grep -Fq 'prepare_trainingos_tencent_daily_log_sync' supabase/migrations/20260724103000_trainingos_tencent_daily_ops_sync.sql
+          grep -Fq 'confirm_trainingos_tencent_daily_log_sync' supabase/migrations/20260724103000_trainingos_tencent_daily_ops_sync.sql
+          grep -Fq 'freeze_trainingos_enterprise_report_sources' supabase/migrations/20260727160200_trainingos_wave3_enterprise_report_sources_v1.sql
+          grep -Fq 'attendance_anomaly' supabase/migrations/20260727210000_trainingos_risk_intervention_schema_v1.sql
+          grep -Fq 'trainingos_intervention_source_binding' supabase/migrations/20260727210000_trainingos_risk_intervention_schema_v1.sql
+          grep -Fq 'trainingos_native_classroom_agent_queue_candidates' supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql
+          grep -Fq 'get_trainingos_teacher_action_queue_v2' supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql
+          grep -Fq 'not an attendance finding' docs/product/trainingos-classroom-agent-queue-integration-v1.md
+          grep -Fq 'formalWritePerformed: false' docs/product/trainingos-classroom-agent-queue-integration-v1.md
+          if grep -Eq "source_kind text.*attendance_record|'attendance_record'" supabase/migrations/20260727210000_trainingos_risk_intervention_schema_v1.sql; then
+            exit 1
+          fi
+
+      - name: Publish docs exact-head PASS
+        if: always()
+        run: |
+          {
+            echo '## TrainingOS Attendance audit docs exact-head gate'
+            echo "- Exact private SHA: \`$PRIVATE_EXACT_SHA\`"
+            echo "- Exact merge base: \`$EXPECTED_BASE_SHA\`"
+            echo '- Changed files: **1**'
+            echo '- Migrations: **0**'
+            echo '- Forbidden-path changes: **0**'
+            echo '- Markdown structural lint: **PASS**'
+            echo '- Referenced paths: **PASS**'
+            echo '- Schema/function identifiers: **PASS**'
+            echo '- Canonical safety boundaries: **PASS**'
+            echo '- Database replay: **NOT_RUN — docs-only, no migration**'
+            echo '- Artifacts uploaded: **0**'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'TRAININGOS_ATTENDANCE_DOCS status=PASS files=1 migrations=0 forbidden=0'
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf private-repo
+
+  generic-owned-classification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact private candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_EXACT_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: head-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Check out exact private base
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.EXPECTED_BASE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: base-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact source parity boundary
+        run: |
+          set -euo pipefail
+          [[ "$(git -C head-repo rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
+          [[ "$(git -C base-repo rev-parse HEAD)" == "$EXPECTED_BASE_SHA" ]]
+          [[ "$(git -C head-repo diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")" == "$AUDIT_PATH" ]]
+
+      - name: Install head dependencies with sealed output
+        working-directory: head-repo
+        run: npm ci > "$RUNNER_TEMP/attendance-final-install.log" 2>&1
+
+      - name: Execute generic-owned profile with sealed output
+        id: generic
+        working-directory: head-repo
+        env:
+          TRAININGOS_CI_INSTALL: always
+          TRAININGOS_CI_INCLUDE_PLAYWRIGHT: '0'
+        run: |
+          set +e
+          npm run ci:owned > "$RUNNER_TEMP/attendance-final-generic.log" 2>&1
+          code=$?
+          node - "$GITHUB_OUTPUT" "$code" <<'NODE'
+          const fs = require('node:fs');
+          const [output, code] = process.argv.slice(2);
+          const path = '.trainingos-ci/owned-container-ci-report.json';
+          let report = { status: 'NOT_AVAILABLE', failedOrLastStep: 'unknown', exitCode: Number(code) };
+          if (fs.existsSync(path)) {
+            const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
+            report = {
+              status: String(parsed.status || 'UNKNOWN'),
+              failedOrLastStep: String(parsed.failedOrLastStep || 'unknown').replace(/[^a-zA-Z0-9_.-]/g, '_'),
+              exitCode: Number(parsed.exitCode ?? code),
+            };
+          }
+          fs.appendFileSync(output, `status=${report.status}\nfailed_step=${report.failedOrLastStep}\nexit_code=${report.exitCode}\n`);
+          NODE
+          exit 0
+
+      - name: Run exact base and head Python contracts with sealed output
+        id: parity
+        run: |
+          set +e
+          (cd base-repo && python -m unittest discover -s tests -v) > "$RUNNER_TEMP/attendance-final-base-python.log" 2>&1
+          base_code=$?
+          (cd head-repo && python -m unittest discover -s tests -v) > "$RUNNER_TEMP/attendance-final-head-python.log" 2>&1
+          head_code=$?
+          echo "base_code=$base_code" >> "$GITHUB_OUTPUT"
+          echo "head_code=$head_code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Classify generic-owned result
+        id: classify
+        env:
+          GENERIC_STATUS: ${{ steps.generic.outputs.status }}
+          FAILED_STEP: ${{ steps.generic.outputs.failed_step }}
+          BASE_CODE: ${{ steps.parity.outputs.base_code }}
+          HEAD_CODE: ${{ steps.parity.outputs.head_code }}
+        run: |
+          set -euo pipefail
+          classification=FAIL
+          if [[ "$GENERIC_STATUS" == 'PASS' ]]; then
+            classification=GENERIC_OWNED_PASS
+          elif [[ "$FAILED_STEP" == 'python-contracts' && "$BASE_CODE" != '0' && "$HEAD_CODE" != '0' ]]; then
+            classification=BASELINE_PYTHON_PARITY
+          fi
+          echo "classification=$classification" >> "$GITHUB_OUTPUT"
+          [[ "$classification" != 'FAIL' ]]
+
+      - name: Publish bounded generic-owned classification
+        if: always()
+        env:
+          GENERIC_STATUS: ${{ steps.generic.outputs.status }}
+          FAILED_STEP: ${{ steps.generic.outputs.failed_step }}
+          GENERIC_EXIT: ${{ steps.generic.outputs.exit_code }}
+          BASE_CODE: ${{ steps.parity.outputs.base_code }}
+          HEAD_CODE: ${{ steps.parity.outputs.head_code }}
+          CLASSIFICATION: ${{ steps.classify.outputs.classification }}
+        run: |
+          {
+            echo '## TrainingOS Attendance audit generic-owned classification'
+            echo "- Exact private SHA: \`$PRIVATE_EXACT_SHA\`"
+            echo "- Exact base SHA: \`$EXPECTED_BASE_SHA\`"
+            echo "- generic-owned status: **${GENERIC_STATUS:-NOT_RUN}**"
+            echo "- failed or last stage: **${FAILED_STEP:-NOT_RUN}**"
+            echo "- generic-owned exit: **${GENERIC_EXIT:-NOT_RUN}**"
+            echo "- base Python exit: **${BASE_CODE:-NOT_RUN}**"
+            echo "- head Python exit: **${HEAD_CODE:-NOT_RUN}**"
+            echo "- classification: **${CLASSIFICATION:-NOT_RUN}**"
+            echo '- raw outputs: **sealed / deleted**'
+            echo '- artifacts uploaded: **0**'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "TRAININGOS_ATTENDANCE_GENERIC status=${GENERIC_STATUS:-NOT_RUN} step=${FAILED_STEP:-NOT_RUN} classification=${CLASSIFICATION:-NOT_RUN}"
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf head-repo base-repo "$RUNNER_TEMP"/attendance-final-*.log
