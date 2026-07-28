@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Dependency-order migration files in an isolated CI checkout.
 
-SQL content is never changed. Only top-level object-existence requirements are
-used as hard edges. Dollar-quoted function bodies are excluded because PL/pgSQL
-body references do not require those objects at CREATE FUNCTION time.
+SQL content is never changed. The scanner removes comments, quoted literals,
+and dollar-quoted function bodies before discovering top-level hard object
+requirements, then assigns synthetic unique versions for local replay only.
 """
 
 from __future__ import annotations
@@ -33,6 +33,9 @@ DOLLAR_QUOTED_BLOCK = re.compile(
     r"(?P<tag>\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$)[\s\S]*?(?P=tag)",
     re.IGNORECASE,
 )
+BLOCK_COMMENT = re.compile(r"/\*[\s\S]*?\*/")
+LINE_COMMENT = re.compile(r"--[^\r\n]*")
+SINGLE_QUOTED_LITERAL = re.compile(r"(?:E|U&|B|X)?'(?:''|[^'])*'", re.IGNORECASE)
 PUBLIC_REF = re.compile(r"\bpublic\.([a-z_][a-z0-9_]*)", re.IGNORECASE)
 FUNCTION_DDL_REF = re.compile(
     r"(?:"
@@ -57,6 +60,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("migration_root", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     return parser.parse_args()
+
+
+def sanitize_top_level_sql(text: str) -> str:
+    without_bodies = DOLLAR_QUOTED_BLOCK.sub(" ", text)
+    without_block_comments = BLOCK_COMMENT.sub(" ", without_bodies)
+    without_line_comments = LINE_COMMENT.sub(" ", without_block_comments)
+    return SINGLE_QUOTED_LITERAL.sub("''", without_line_comments)
 
 
 def git_created(path: Path) -> int:
@@ -100,7 +110,7 @@ def main() -> int:
         return 2
 
     texts = {path: path.read_text(encoding="utf-8", errors="replace") for path in paths}
-    top_level_texts = {path: DOLLAR_QUOTED_BLOCK.sub(" ", text) for path, text in texts.items()}
+    top_level_texts = {path: sanitize_top_level_sql(text) for path, text in texts.items()}
     keys = {path: base_key(path) for path in paths}
 
     table_owner: dict[object, Path] = {}
@@ -109,7 +119,6 @@ def main() -> int:
     column_owner: dict[object, Path] = {}
 
     for path in paths:
-        text = texts[path]
         top_level = top_level_texts[path]
         for name in TABLE_CREATE.findall(top_level):
             first_owner(table_owner, name.lower(), path, keys)
@@ -172,11 +181,13 @@ def main() -> int:
                 heapq.heappush(heap, (keys[consumer], consumer))
 
     if len(ordered) != len(paths):
-        unresolved = sorted(path.name for path in paths if path not in set(ordered))
-        unresolved_set = set(unresolved)
+        ordered_set = set(ordered)
+        unresolved_paths = [path for path in paths if path not in ordered_set]
+        unresolved = sorted(path.name for path in unresolved_paths)
+        unresolved_path_set = set(unresolved_paths)
         cycle_edges = []
         for (producer, consumer), reasons in edge_reasons.items():
-            if producer.name in unresolved_set and consumer.name in unresolved_set:
+            if producer in unresolved_path_set and consumer in unresolved_path_set:
                 cycle_edges.append(
                     f"{producer.name}->{consumer.name}:{'+'.join(sorted(set(reasons)))}"
                 )
