@@ -1,4 +1,4 @@
-name: Window 4 PR334 exact-head CI
+name: Window 4 PR334 merged-head CI
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: window4-pr334-exact-94cf3d1c
+  group: window4-pr334-merged-7a7a0599
   cancel-in-progress: false
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      PRIVATE_SHA: 94cf3d1cea163e3a81baa1f5607f392729d0f9ed
+      PRIVATE_SHA: 7a7a0599d2235c624135e56d59c1ffda63a05c2a
     outputs:
       install_status: ${{ steps.install.outputs.status }}
       focused_status: ${{ steps.focused.outputs.status }}
@@ -42,7 +42,7 @@ jobs:
           [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
           [[ -n "$PRIVATE_TOKEN" ]] || exit 2
 
-      - name: Check out private PR334 exact head
+      - name: Check out synchronized private PR334 merged head
         uses: actions/checkout@v4
         with:
           repository: moseszhu999/training-learning-rails
@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
           [[ -z "$(git status --porcelain)" ]] || exit 3
-          printf 'Verified private exact head: `%s`\n' "$PRIVATE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Verified synchronized private merged head: `%s`\n' "$PRIVATE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install dependencies with sealed output
         id: install
@@ -142,7 +142,7 @@ jobs:
           BUILD_STATUS: ${{ steps.build.outputs.status }}
         run: |
           {
-            echo '## Window 4 PR #334 exact-head validation'
+            echo '## Window 4 PR #334 synchronized merged-head validation'
             echo
             echo "- Exact private SHA: \`$PRIVATE_SHA\`"
             echo "- npm ci: **${INSTALL_STATUS:-FAIL}**"
@@ -152,7 +152,7 @@ jobs:
             echo
             echo 'Private source and raw output remained sealed and are deleted after validation.'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "WINDOW4_PR334 install=${INSTALL_STATUS:-FAIL} focused=${FOCUSED_STATUS:-FAIL}:${FOCUSED_COUNT:-0}/11 typecheck=${TYPECHECK_STATUS:-FAIL} build=${BUILD_STATUS:-FAIL} sha=$PRIVATE_SHA"
+          echo "WINDOW4_PR334_MERGED install=${INSTALL_STATUS:-FAIL} focused=${FOCUSED_STATUS:-FAIL}:${FOCUSED_COUNT:-0}/11 typecheck=${TYPECHECK_STATUS:-FAIL} build=${BUILD_STATUS:-FAIL} sha=$PRIVATE_SHA"
 
       - name: Remove private checkout and sealed logs
         if: always()
