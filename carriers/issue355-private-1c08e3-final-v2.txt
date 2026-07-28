@@ -1,0 +1,6 @@
+privateExactSha=1c08e31afe0fff23e077ac082432cfe6b9289e53
+expectedBaseSha=26fc34af65b9489985aa9a5cbe45c9d1590826bf
+expectedChangedFileCount=6
+expectedMigrationRange=20260729100000-20260729105999
+expectedMigrationFiles=NONE
+databaseProfile=full-history-empty-replay
