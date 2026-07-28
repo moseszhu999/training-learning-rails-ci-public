@@ -1,0 +1,58 @@
+name: Classroom Agent Queue PR338 main sync evidence
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-agent-queue-pr338-sync.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-sync-inputs:
+    runs-on: ubuntu-24.04
+    env:
+      MAIN_SHA: cf3a6cd4062c00c6798ea0c20e7c2f1c642f7d37
+      PRIVATE_SHA: c5caf2e145d72ae4b22bc02cc56ceb176ee6589c
+      OLD_BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - name: Verify disjoint latest-main sync inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-repo rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          branch_files="$(git -C private-repo diff --name-only "$OLD_BASE_SHA" "$PRIVATE_SHA" | sort)"
+          main_files="$(git -C private-repo diff --name-only "$OLD_BASE_SHA" "$MAIN_SHA" | sort)"
+          overlap="$(comm -12 <(printf '%s\n' "$branch_files") <(printf '%s\n' "$main_files"))"
+          [[ -z "$overlap" ]]
+          mkdir sanitized
+          {
+            echo "main_sha=$MAIN_SHA"
+            echo "main_tree=$(git -C private-repo rev-parse "$MAIN_SHA^{tree}")"
+            echo "private_sha=$PRIVATE_SHA"
+            echo "private_tree=$(git -C private-repo rev-parse "$PRIVATE_SHA^{tree}")"
+            echo "old_base_sha=$OLD_BASE_SHA"
+            echo "merge_base=$(git -C private-repo merge-base "$MAIN_SHA" "$PRIVATE_SHA")"
+            echo "branch_file_count=$(printf '%s\n' "$branch_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+            echo "main_file_count=$(printf '%s\n' "$main_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+            echo "overlap_count=0"
+          } > sanitized/pr338-sync.txt
+          rm -rf private-repo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classroom-agent-queue-pr338-sync
+          path: sanitized/pr338-sync.txt
+          if-no-files-found: error
+          retention-days: 1
