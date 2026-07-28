@@ -1,0 +1,393 @@
+name: PR342 Classroom Explanation final database
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-classroom-explanation-final-app.yml
+      - .github/workflows/pr342-classroom-explanation-final-db.yml
+      - carriers/pr342-final-7c575a2e.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-final-db-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 7c575a2e42e76d564e4ba15dfe8f682da8dee366
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+
+jobs:
+  isolated-database-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Validate exact inputs and credential
+        id: credential
+        continue-on-error: true
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Python
+        id: python_setup
+        if: always()
+        continue-on-error: true
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Supabase CLI
+        id: supabase_setup
+        if: always()
+        continue-on-error: true
+        uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: First fresh full-schema replay
+        id: first_replay
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" == 0 ]]
+          supabase start > "$RUNNER_TEMP/pr342-db-start.log" 2>&1
+          eval "$(supabase status -o env 2>/dev/null | grep '^DB_URL=')"
+          [[ -n "${DB_URL:-}" ]]
+          echo "db_url=$DB_URL" >> "$GITHUB_OUTPUT"
+
+      - name: First SQL E2E rollback and zero-residue pass
+        id: first_e2e
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        env:
+          DB_URL: ${{ steps.first_replay.outputs.db_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+            -f tests/sql/trainingos_classroom_explanation_e2e.sql \
+            > "$RUNNER_TEMP/pr342-first-e2e.out" 2> "$RUNNER_TEMP/pr342-first-e2e.err"
+          python - "$RUNNER_TEMP/pr342-first-e2e.out" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          lines=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace').splitlines()
+          payload=next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{')),None)
+          required=(
+            'oneActiveExplanationEnforced','activeSlotReleasedAfterUpload','secondExplanationStarted',
+            'classEndedStartRejected','agentRecordingRejected','agentInferencePersisted',
+            'prohibitedCandidateRejected','teacherEvaluationConfirmed','agentConfirmRejected',
+            'staleVersionRejected','staleTranscriptRejected','crossClassRejected',
+            'transcriptUpdateRejected','transcriptDeleteRejected','rawAudioHidden',
+            'idempotencyConflictRejected','transcriptIdempotencyConflictRejected')
+          remaining={k:v for k,v in (payload or {}).items() if k.startswith('remaining')}
+          valid=(bool(payload) and payload.get('status')=='PASS'
+                 and payload.get('fixtureCleanup')=='PLPGSQL_SUBTRANSACTION_ROLLBACK'
+                 and all(payload.get(k) is True for k in required)
+                 and len(remaining)>=13 and all(v==0 for v in remaining.values()))
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+            out.write(f"status={(payload or {}).get('status','MISSING')}\n")
+            out.write(f"valid={str(valid).lower()}\n")
+            out.write(f"remaining_count={len(remaining)}\n")
+            out.write(f"remaining_zero={str(bool(remaining) and all(v==0 for v in remaining.values())).lower()}\n")
+          raise SystemExit(0 if valid else 1)
+          PY
+
+      - name: Live RLS ACL helper index and append-only catalog checks
+        id: catalog
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        env:
+          DB_URL: ${{ steps.first_replay.outputs.db_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          with expected_tables(name) as (
+            values
+              ('trainingos_classroom_explanations'),
+              ('trainingos_classroom_explanation_captures'),
+              ('trainingos_classroom_explanation_transcript_imports'),
+              ('trainingos_classroom_explanation_speech_turns'),
+              ('trainingos_classroom_explanation_analysis_candidates'),
+              ('trainingos_classroom_explanation_evaluations'),
+              ('trainingos_classroom_explanation_events')
+          ), table_security as (
+            select count(*) filter (where c.relrowsecurity and c.relforcerowsecurity) secure_count
+            from expected_tables e
+            join pg_class c on c.relname=e.name
+            join pg_namespace n on n.oid=c.relnamespace and n.nspname='public'
+          ), raw_grants as (
+            select count(*) grant_count
+            from information_schema.role_table_grants g
+            join expected_tables e on e.name=g.table_name
+            where g.table_schema='public'
+              and g.grantee in ('PUBLIC','anon','authenticated',('service'||'_role'))
+          ), private_grants as (
+            select count(*) grant_count
+            from information_schema.routine_privileges r
+            where r.specific_schema='private'
+              and r.routine_name like 'trainingos_classroom_explanation%'
+              and r.grantee in ('PUBLIC','anon','authenticated',('service'||'_role'))
+          ), public_function_security as (
+            select
+              count(*) function_count,
+              count(*) filter (
+                where p.prosecdef
+                  and exists(select 1 from unnest(coalesce(p.proconfig,array[]::text[])) setting where setting='search_path=')
+              ) secure_count
+            from pg_proc p
+            join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='public'
+              and p.proname in (
+                'prepare_trainingos_classroom_explanation',
+                'start_trainingos_classroom_explanation',
+                'create_trainingos_classroom_explanation_capture',
+                'complete_trainingos_classroom_explanation_capture_upload',
+                'append_trainingos_classroom_explanation_transcript',
+                'get_trainingos_classroom_explanation_analysis_input',
+                'propose_trainingos_classroom_explanation_analysis',
+                'confirm_trainingos_classroom_explanation_evaluation',
+                'get_trainingos_classroom_explanation'
+              )
+          ), public_bad_grants as (
+            select count(*) grant_count
+            from information_schema.routine_privileges r
+            where r.specific_schema='public'
+              and r.routine_name in (
+                'prepare_trainingos_classroom_explanation',
+                'start_trainingos_classroom_explanation',
+                'create_trainingos_classroom_explanation_capture',
+                'complete_trainingos_classroom_explanation_capture_upload',
+                'append_trainingos_classroom_explanation_transcript',
+                'get_trainingos_classroom_explanation_analysis_input',
+                'propose_trainingos_classroom_explanation_analysis',
+                'confirm_trainingos_classroom_explanation_evaluation',
+                'get_trainingos_classroom_explanation'
+              )
+              and r.grantee in ('PUBLIC','anon',('service'||'_role'))
+          ), active_index as (
+            select count(*) index_count
+            from pg_indexes
+            where schemaname='public'
+              and indexname='trainingos_classroom_explanation_one_active_per_control_idx'
+              and indexdef ilike '%started%'
+              and indexdef ilike '%capture_open%'
+          ), immutable_triggers as (
+            select count(*) trigger_count
+            from pg_trigger t
+            join pg_class c on c.oid=t.tgrelid
+            join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and not t.tgisinternal
+              and t.tgname in (
+                'trainingos_classroom_explanation_transcript_immutable',
+                'trainingos_classroom_explanation_turn_immutable',
+                'trainingos_classroom_explanation_candidate_immutable',
+                'trainingos_classroom_explanation_evaluation_immutable',
+                'trainingos_classroom_explanation_event_immutable'
+              )
+          )
+          select jsonb_build_object(
+            'rlsForcedCount',(select secure_count from table_security),
+            'rawGrantCount',(select grant_count from raw_grants),
+            'privateHelperGrantCount',(select grant_count from private_grants),
+            'publicFunctionCount',(select function_count from public_function_security),
+            'publicFunctionSecureCount',(select secure_count from public_function_security),
+            'publicBadGrantCount',(select grant_count from public_bad_grants),
+            'activeIndexCount',(select index_count from active_index),
+            'appendOnlyTriggerCount',(select trigger_count from immutable_triggers)
+          );
+          SQL
+          )"
+          python - "$result" "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          value=json.loads(sys.argv[1])
+          valid=(value.get('rlsForcedCount')==7
+                 and value.get('rawGrantCount')==0
+                 and value.get('privateHelperGrantCount')==0
+                 and value.get('publicFunctionCount')==9
+                 and value.get('publicFunctionSecureCount')==9
+                 and value.get('publicBadGrantCount')==0
+                 and value.get('activeIndexCount')==1
+                 and value.get('appendOnlyTriggerCount')==5)
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+            for key,val in value.items(): out.write(f'{key}={val}\n')
+            out.write(f'valid={str(valid).lower()}\n')
+          raise SystemExit(0 if valid else 1)
+          PY
+
+      - name: Second deterministic full-schema replay
+        id: second_replay
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db reset --local --no-seed > "$RUNNER_TEMP/pr342-db-reset.log" 2>&1
+
+      - name: Second SQL E2E rollback and zero-residue pass
+        id: second_e2e
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        env:
+          DB_URL: ${{ steps.first_replay.outputs.db_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+            -f tests/sql/trainingos_classroom_explanation_e2e.sql \
+            > "$RUNNER_TEMP/pr342-second-e2e.out" 2> "$RUNNER_TEMP/pr342-second-e2e.err"
+          python - "$RUNNER_TEMP/pr342-second-e2e.out" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, sys
+          lines=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8',errors='replace').splitlines()
+          payload=next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{')),None)
+          required=(
+            'oneActiveExplanationEnforced','activeSlotReleasedAfterUpload','secondExplanationStarted',
+            'classEndedStartRejected','agentRecordingRejected','agentInferencePersisted',
+            'prohibitedCandidateRejected','teacherEvaluationConfirmed','agentConfirmRejected',
+            'staleVersionRejected','staleTranscriptRejected','crossClassRejected',
+            'transcriptUpdateRejected','transcriptDeleteRejected','rawAudioHidden',
+            'idempotencyConflictRejected','transcriptIdempotencyConflictRejected')
+          remaining={k:v for k,v in (payload or {}).items() if k.startswith('remaining')}
+          valid=(bool(payload) and payload.get('status')=='PASS'
+                 and payload.get('fixtureCleanup')=='PLPGSQL_SUBTRANSACTION_ROLLBACK'
+                 and all(payload.get(k) is True for k in required)
+                 and len(remaining)>=13 and all(v==0 for v in remaining.values()))
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+            out.write(f"status={(payload or {}).get('status','MISSING')}\n")
+            out.write(f"valid={str(valid).lower()}\n")
+            out.write(f"remaining_count={len(remaining)}\n")
+            out.write(f"remaining_zero={str(bool(remaining) and all(v==0 for v in remaining.values())).lower()}\n")
+          raise SystemExit(0 if valid else 1)
+          PY
+
+      - name: Sanitized database summary
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          FIRST_REPLAY: ${{ steps.first_replay.outcome }}
+          FIRST_E2E: ${{ steps.first_e2e.outcome }}
+          FIRST_STATUS: ${{ steps.first_e2e.outputs.status }}
+          FIRST_VALID: ${{ steps.first_e2e.outputs.valid }}
+          FIRST_ZERO: ${{ steps.first_e2e.outputs.remaining_zero }}
+          CATALOG: ${{ steps.catalog.outcome }}
+          CATALOG_VALID: ${{ steps.catalog.outputs.valid }}
+          RLS_COUNT: ${{ steps.catalog.outputs.rlsForcedCount }}
+          RAW_GRANTS: ${{ steps.catalog.outputs.rawGrantCount }}
+          PRIVATE_GRANTS: ${{ steps.catalog.outputs.privateHelperGrantCount }}
+          PUBLIC_FUNCTIONS: ${{ steps.catalog.outputs.publicFunctionCount }}
+          PUBLIC_SECURE: ${{ steps.catalog.outputs.publicFunctionSecureCount }}
+          PUBLIC_BAD_GRANTS: ${{ steps.catalog.outputs.publicBadGrantCount }}
+          ACTIVE_INDEX: ${{ steps.catalog.outputs.activeIndexCount }}
+          APPEND_TRIGGERS: ${{ steps.catalog.outputs.appendOnlyTriggerCount }}
+          SECOND_REPLAY: ${{ steps.second_replay.outcome }}
+          SECOND_E2E: ${{ steps.second_e2e.outcome }}
+          SECOND_STATUS: ${{ steps.second_e2e.outputs.status }}
+          SECOND_VALID: ${{ steps.second_e2e.outputs.valid }}
+          SECOND_ZERO: ${{ steps.second_e2e.outputs.remaining_zero }}
+        shell: bash
+        run: |
+          report=pr342-final-database-result.txt
+          {
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "exact_base_sha=$BASE_SHA"
+            echo "credential=${CREDENTIAL:-missing}"
+            echo "checkout=${CHECKOUT:-missing}"
+            echo "first_full_replay=${FIRST_REPLAY:-missing}"
+            echo "first_sql_e2e=${FIRST_E2E:-missing}"
+            echo "first_status=${FIRST_STATUS:-MISSING}"
+            echo "first_acceptance_valid=${FIRST_VALID:-false}"
+            echo "first_remaining_zero=${FIRST_ZERO:-false}"
+            echo "catalog_checks=${CATALOG:-missing}"
+            echo "catalog_valid=${CATALOG_VALID:-false}"
+            echo "rls_forced_count=${RLS_COUNT:-0}"
+            echo "raw_grant_count=${RAW_GRANTS:-missing}"
+            echo "private_helper_grant_count=${PRIVATE_GRANTS:-missing}"
+            echo "public_function_count=${PUBLIC_FUNCTIONS:-0}"
+            echo "public_function_secure_count=${PUBLIC_SECURE:-0}"
+            echo "public_bad_grant_count=${PUBLIC_BAD_GRANTS:-missing}"
+            echo "active_index_count=${ACTIVE_INDEX:-0}"
+            echo "append_only_trigger_count=${APPEND_TRIGGERS:-0}"
+            echo "second_full_replay=${SECOND_REPLAY:-missing}"
+            echo "second_sql_e2e=${SECOND_E2E:-missing}"
+            echo "second_status=${SECOND_STATUS:-MISSING}"
+            echo "second_acceptance_valid=${SECOND_VALID:-false}"
+            echo "second_remaining_zero=${SECOND_ZERO:-false}"
+            echo 'raw_database_logs_private_source_and_fixture_output=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized database evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr342-final-7c575a2e-database-result
+          path: pr342-final-database-result.txt
+          retention-days: 3
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        shell: bash
+        run: |
+          (cd private-repo && supabase stop --no-backup >/dev/null 2>&1) || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-* pr342-final-database-result.txt
+
+      - name: Final database enforcement
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          PYTHON_SETUP: ${{ steps.python_setup.outcome }}
+          SUPABASE_SETUP: ${{ steps.supabase_setup.outcome }}
+          FIRST_REPLAY: ${{ steps.first_replay.outcome }}
+          FIRST_E2E: ${{ steps.first_e2e.outcome }}
+          FIRST_VALID: ${{ steps.first_e2e.outputs.valid }}
+          FIRST_ZERO: ${{ steps.first_e2e.outputs.remaining_zero }}
+          CATALOG: ${{ steps.catalog.outcome }}
+          CATALOG_VALID: ${{ steps.catalog.outputs.valid }}
+          SECOND_REPLAY: ${{ steps.second_replay.outcome }}
+          SECOND_E2E: ${{ steps.second_e2e.outcome }}
+          SECOND_VALID: ${{ steps.second_e2e.outputs.valid }}
+          SECOND_ZERO: ${{ steps.second_e2e.outputs.remaining_zero }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CREDENTIAL" == success && "$CHECKOUT" == success ]]
+          [[ "$PYTHON_SETUP" == success && "$SUPABASE_SETUP" == success ]]
+          [[ "$FIRST_REPLAY" == success ]]
+          [[ "$FIRST_E2E" == success && "$FIRST_VALID" == true && "$FIRST_ZERO" == true ]]
+          [[ "$CATALOG" == success && "$CATALOG_VALID" == true ]]
+          [[ "$SECOND_REPLAY" == success ]]
+          [[ "$SECOND_E2E" == success && "$SECOND_VALID" == true && "$SECOND_ZERO" == true ]]
