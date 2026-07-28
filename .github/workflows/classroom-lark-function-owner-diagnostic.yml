@@ -6,6 +6,11 @@ on:
       - ci/classroom-lark-6663e16e
     paths:
       - .github/workflows/classroom-lark-function-owner-diagnostic.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-lark-function-owner-diagnostic.yml
   workflow_dispatch:
 
 permissions:
