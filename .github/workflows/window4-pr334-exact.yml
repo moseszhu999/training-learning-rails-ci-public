@@ -1,0 +1,189 @@
+name: Window 4 PR334 exact-head CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/window4-pr334-exact.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: window4-pr334-exact-94cf3d1c
+  cancel-in-progress: false
+
+jobs:
+  exact-head-validation:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.head_ref == 'ci/window4-pr334-exact-94cf3d1c')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_SHA: 94cf3d1cea163e3a81baa1f5607f392729d0f9ed
+    outputs:
+      install_status: ${{ steps.install.outputs.status }}
+      focused_status: ${{ steps.focused.outputs.status }}
+      focused_count: ${{ steps.focused.outputs.count }}
+      typecheck_status: ${{ steps.typecheck.outputs.status }}
+      build_status: ${{ steps.build.outputs.status }}
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
+
+      - name: Check out private PR334 exact head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact private head and clean checkout
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
+          [[ -z "$(git status --porcelain)" ]] || exit 3
+          printf 'Verified private exact head: `%s`\n' "$PRIVATE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install dependencies with sealed output
+        id: install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/window4-pr334-install.log" 2>&1
+          code=$?
+          echo "status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run focused UI static contracts with sealed output
+        id: focused
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python tests/test_trainingos_teacher_live_classroom_console_contract.py -v \
+            > "$RUNNER_TEMP/window4-pr334-focused.log" 2>&1
+          code=$?
+          python - "$RUNNER_TEMP/window4-pr334-focused.log" "$code" "$GITHUB_OUTPUT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          ok = code == 0 and count == 11 and re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is not None
+          with open(sys.argv[3], 'a', encoding='utf-8') as out:
+              out.write(f'status={"PASS" if ok else "FAIL"}\n')
+              out.write(f'count={count}\n')
+              out.write(f'exit_code={code}\n')
+          PY
+          exit 0
+
+      - name: Run repository typecheck with sealed output
+        id: typecheck
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/window4-pr334-typecheck.log" 2>&1
+          code=$?
+          echo "status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run production build with sealed output
+        id: build
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/window4-pr334-build.log" 2>&1
+          code=$?
+          echo "status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized result
+        if: always()
+        shell: bash
+        env:
+          INSTALL_STATUS: ${{ steps.install.outputs.status }}
+          FOCUSED_STATUS: ${{ steps.focused.outputs.status }}
+          FOCUSED_COUNT: ${{ steps.focused.outputs.count }}
+          TYPECHECK_STATUS: ${{ steps.typecheck.outputs.status }}
+          BUILD_STATUS: ${{ steps.build.outputs.status }}
+        run: |
+          {
+            echo '## Window 4 PR #334 exact-head validation'
+            echo
+            echo "- Exact private SHA: \`$PRIVATE_SHA\`"
+            echo "- npm ci: **${INSTALL_STATUS:-FAIL}**"
+            echo "- UI static contracts: **${FOCUSED_STATUS:-FAIL} ${FOCUSED_COUNT:-0}/11**"
+            echo "- repository typecheck: **${TYPECHECK_STATUS:-FAIL}**"
+            echo "- production build: **${BUILD_STATUS:-FAIL}**"
+            echo
+            echo 'Private source and raw output remained sealed and are deleted after validation.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "WINDOW4_PR334 install=${INSTALL_STATUS:-FAIL} focused=${FOCUSED_STATUS:-FAIL}:${FOCUSED_COUNT:-0}/11 typecheck=${TYPECHECK_STATUS:-FAIL} build=${BUILD_STATUS:-FAIL} sha=$PRIVATE_SHA"
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/window4-pr334-install.log" \
+            "$RUNNER_TEMP/window4-pr334-focused.log" \
+            "$RUNNER_TEMP/window4-pr334-typecheck.log" \
+            "$RUNNER_TEMP/window4-pr334-build.log"
+
+  enforce-results:
+    needs: exact-head-validation
+    if: always()
+    name: >-
+      result install-${{ needs.exact-head-validation.outputs.install_status }}
+      focused-${{ needs.exact-head-validation.outputs.focused_status }}-${{ needs.exact-head-validation.outputs.focused_count }}
+      typecheck-${{ needs.exact-head-validation.outputs.typecheck_status }}
+      build-${{ needs.exact-head-validation.outputs.build_status }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce sanitized results
+        env:
+          INSTALL_STATUS: ${{ needs.exact-head-validation.outputs.install_status }}
+          FOCUSED_STATUS: ${{ needs.exact-head-validation.outputs.focused_status }}
+          FOCUSED_COUNT: ${{ needs.exact-head-validation.outputs.focused_count }}
+          TYPECHECK_STATUS: ${{ needs.exact-head-validation.outputs.typecheck_status }}
+          BUILD_STATUS: ${{ needs.exact-head-validation.outputs.build_status }}
+        run: |
+          [[ "$INSTALL_STATUS" == PASS ]]
+          [[ "$FOCUSED_STATUS" == PASS && "$FOCUSED_COUNT" == 11 ]]
+          [[ "$TYPECHECK_STATUS" == PASS ]]
+          [[ "$BUILD_STATUS" == PASS ]]
