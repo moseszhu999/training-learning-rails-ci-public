@@ -1,0 +1,160 @@
+name: Window 1 PR324 build diagnostic
+
+on:
+  push:
+    branches:
+      - ci/window1-pr324-exact-857bc086
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: window1-pr324-build-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  build-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PRIVATE_SHA: 857bc086386232410082575e078a85d8e8ce9d5b
+
+    steps:
+      - name: Validate exact SHA and private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          [[ -n "$PRIVATE_TOKEN" ]] || exit 2
+
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Verify exact private head
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]] || exit 3
+
+      - name: Install dependencies with sealed output
+        id: install
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/window1-diag-install.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run Native Classroom validation with sealed output
+        id: native
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node scripts/run-trainingos-native-classroom-validation.mjs > "$RUNNER_TEMP/window1-diag-native.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run Zero-Permission validation with sealed output
+        id: zero_permission
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node scripts/run-trainingos-zero-permission-bridge-validation.mjs > "$RUNNER_TEMP/window1-diag-zero.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run direct Vite production build with sealed output
+        id: vite
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npx vite build --config vite.config.ts > "$RUNNER_TEMP/window1-diag-vite.log" 2>&1
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized diagnostic
+        if: always()
+        shell: bash
+        env:
+          INSTALL_CODE: ${{ steps.install.outputs.exit_code }}
+          NATIVE_CODE: ${{ steps.native.outputs.exit_code }}
+          ZERO_CODE: ${{ steps.zero_permission.outputs.exit_code }}
+          VITE_CODE: ${{ steps.vite.outputs.exit_code }}
+        run: |
+          status() { [[ "${1:-1}" == "0" ]] && printf PASS || printf FAIL; }
+          report="$GITHUB_WORKSPACE/window1-pr324-build-diagnostic.txt"
+          {
+            echo 'Window 1 PR #324 production build diagnostic'
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "npm_ci=$(status "$INSTALL_CODE")"
+            echo "native_classroom_validation=$(status "$NATIVE_CODE")"
+            echo "zero_permission_validation=$(status "$ZERO_CODE")"
+            echo "direct_vite_build=$(status "$VITE_CODE")"
+            echo 'private_checkout_and_raw_logs=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: window1-pr324-build-diagnostic
+          path: window1-pr324-build-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo \
+            "$RUNNER_TEMP/window1-diag-install.log" \
+            "$RUNNER_TEMP/window1-diag-native.log" \
+            "$RUNNER_TEMP/window1-diag-zero.log" \
+            "$RUNNER_TEMP/window1-diag-vite.log" \
+            "$GITHUB_WORKSPACE/window1-pr324-build-diagnostic.txt"
+
+      - name: Enforce diagnostic result
+        if: always()
+        shell: bash
+        env:
+          INSTALL_CODE: ${{ steps.install.outputs.exit_code }}
+          NATIVE_CODE: ${{ steps.native.outputs.exit_code }}
+          ZERO_CODE: ${{ steps.zero_permission.outputs.exit_code }}
+          VITE_CODE: ${{ steps.vite.outputs.exit_code }}
+        run: |
+          failed=0
+          for code in "$INSTALL_CODE" "$NATIVE_CODE" "$ZERO_CODE" "$VITE_CODE"; do
+            [[ "${code:-1}" == "0" ]] || failed=1
+          done
+          exit "$failed"
