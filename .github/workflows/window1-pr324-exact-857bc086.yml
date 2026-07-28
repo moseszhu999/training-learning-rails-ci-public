@@ -179,21 +179,37 @@ jobs:
           BUILD_CODE: ${{ steps.production_build.outputs.exit_code }}
         run: |
           status() { [[ "${1:-1}" == "0" ]] && printf PASS || printf FAIL; }
+          report="$GITHUB_WORKSPACE/window1-pr324-sanitized-result.txt"
+          {
+            echo 'Window 1 PR #324 exact-head validation'
+            echo "exact_private_sha=$PRIVATE_SHA"
+            echo "npm_ci=$(status "$INSTALL_CODE")"
+            echo "node_contracts=$(status "$NODE_CODE")"
+            echo "node_tests=${NODE_PASS:-0}/${NODE_TESTS:-0}"
+            echo "node_fail=${NODE_FAIL:--1}"
+            echo "python_contracts=$(status "$PY_CODE")"
+            echo "python_tests=${PY_TESTS:-0}"
+            echo "learning_workspace_validation=$(status "$WORKSPACE_CODE")"
+            echo "typecheck=$(status "$TYPECHECK_CODE")"
+            echo "vscode_bundle=$(status "$VSCODE_CODE")"
+            echo "production_build=$(status "$BUILD_CODE")"
+            echo 'private_checkout_raw_logs_and_build_output=SEALED_AND_DELETED'
+          } > "$report"
           {
             echo '## Window 1 PR #324 exact-head validation'
             echo
-            echo "- Exact private SHA: \`$PRIVATE_SHA\`"
-            echo "- npm ci: **$(status "$INSTALL_CODE")**"
-            echo "- Node contracts: **$(status "$NODE_CODE") ${NODE_PASS:-0}/${NODE_TESTS:-0}** (fail ${NODE_FAIL:--1})"
-            echo "- Python contracts: **$(status "$PY_CODE") ${PY_TESTS:-0} tests**"
-            echo "- Learning Workspace validation: **$(status "$WORKSPACE_CODE")**"
-            echo "- Typecheck: **$(status "$TYPECHECK_CODE")**"
-            echo "- VS Code production bundle: **$(status "$VSCODE_CODE")**"
-            echo "- Production build: **$(status "$BUILD_CODE")**"
-            echo
-            echo 'Private checkout, source, raw logs, and build output remain sealed and are deleted.'
+            sed 's/^/- /' "$report"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "WINDOW1_PR324_EXACT sha=$PRIVATE_SHA install=$(status "$INSTALL_CODE") node=$(status "$NODE_CODE"):${NODE_PASS:-0}/${NODE_TESTS:-0} python=$(status "$PY_CODE"):${PY_TESTS:-0} workspace=$(status "$WORKSPACE_CODE") typecheck=$(status "$TYPECHECK_CODE") vscode=$(status "$VSCODE_CODE") build=$(status "$BUILD_CODE")"
+          cat "$report"
+
+      - name: Upload sanitized result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: window1-pr324-sanitized-result
+          path: window1-pr324-sanitized-result.txt
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Remove private checkout and sealed logs
         if: always()
@@ -206,7 +222,8 @@ jobs:
             "$RUNNER_TEMP/window1-workspace.log" \
             "$RUNNER_TEMP/window1-typecheck.log" \
             "$RUNNER_TEMP/window1-vscode.log" \
-            "$RUNNER_TEMP/window1-build.log"
+            "$RUNNER_TEMP/window1-build.log" \
+            "$GITHUB_WORKSPACE/window1-pr324-sanitized-result.txt"
 
       - name: Enforce exact-head validation result
         if: always()
