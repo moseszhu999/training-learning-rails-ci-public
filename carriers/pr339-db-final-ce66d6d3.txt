@@ -1,0 +1,7 @@
+private_pr=339
+private_exact_sha=ce66d6d388b6f6353e3b7967f392dec58e31a551
+expected_base_sha=26fc34af65b9489985aa9a5cbe45c9d1590826bf
+profile=student-learning-canonical-database
+canonical_e2e=exercise,assessment,grading-result-bridge
+legacy_weak_rpc=revoked-and-not-executed
+carrier=evidence-only-never-merge
