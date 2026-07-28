@@ -31,3 +31,7 @@ npm run check
 Pull requests run the boundary gate and synthetic unit tests. The same checks run again after approved changes reach `main`.
 
 The private TrainingOS repository remains the system of record. This repository is not a deployment source and must not be connected to production services.
+
+## Exact-head private validation
+
+Hosted validation of the private TrainingOS repository is controlled by the reusable manual workflow documented in [`docs/public-exact-head-ci.md`](docs/public-exact-head-ci.md). It accepts only fixed profiles and exact candidate metadata, publishes sanitized counts/status, uploads no artifact, and deletes the private checkout and sealed logs on every run.
