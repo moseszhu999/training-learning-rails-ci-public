@@ -1,0 +1,50 @@
+name: TrainingOS migration order diagnosis
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/trainingos-migration-order-diagnose.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitized-order:
+    runs-on: ubuntu-24.04
+    env:
+      PRIVATE_SHA: 7751ec7d0e0535036c500e315078646ef1dc81f2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+      - name: Build filename-only migration diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir sanitized
+          {
+            echo "private_sha=$PRIVATE_SHA"
+            echo "migration_count=$(find private-repo/supabase/migrations -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+            echo '[first_30_sorted]'
+            find private-repo/supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | head -30
+            echo '[classroom_sessions_create_files]'
+            grep -Eil 'create[[:space:]]+table([[:space:]]+if[[:space:]]+not[[:space:]]+exists)?[[:space:]]+(public\.)?classroom_sessions' private-repo/supabase/migrations/*.sql | xargs -r -n1 basename | sort
+            echo '[attempts_create_files]'
+            grep -Eil 'create[[:space:]]+table([[:space:]]+if[[:space:]]+not[[:space:]]+exists)?[[:space:]]+(public\.)?attempts' private-repo/supabase/migrations/*.sql | xargs -r -n1 basename | sort
+          } > sanitized/migration-order.txt
+          rm -rf private-repo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trainingos-migration-order-diagnosis
+          path: sanitized/migration-order.txt
+          if-no-files-found: error
+          retention-days: 1
