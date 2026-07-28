@@ -1,0 +1,89 @@
+name: Classroom Agent Queue PR338 database diagnosis
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/classroom-agent-queue-pr338-db-diagnose.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sanitized-diagnosis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PRIVATE_SHA: 7751ec7d0e0535036c500e315078646ef1dc81f2
+      BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+    steps:
+      - name: Check out exact private commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify exact scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Produce sanitized replay diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir replay-project sanitized
+          cd replay-project
+          supabase init
+          rm -rf supabase/migrations
+          cp -R ../private-repo/supabase/migrations supabase/migrations
+          rm -f supabase/seed.sql
+          set +e
+          supabase db start > "$RUNNER_TEMP/caq-db-diagnose.log" 2>&1
+          code=$?
+          set -e
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/caq-db-diagnose.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/caq-db-diagnose.log" | tail -1 | sed -E 's/.*Applying migration ([A-Za-z0-9_.-]+).*/\1/' || true)"
+          marker="$(grep -oE 'TRAININGOS_[A-Z0-9_]+' "$RUNNER_TEMP/caq-db-diagnose.log" | tail -1 || true)"
+          classification=none
+          if [[ "$code" != 0 ]]; then
+            classification="${marker:-unclassified_migration_failure}"
+            grep -qi 'does not exist' "$RUNNER_TEMP/caq-db-diagnose.log" && classification="${marker:-dependency_object_missing}"
+            grep -qi 'syntax error' "$RUNNER_TEMP/caq-db-diagnose.log" && classification="${marker:-sql_syntax_error}"
+            grep -qi 'duplicate' "$RUNNER_TEMP/caq-db-diagnose.log" && classification="${marker:-duplicate_object_or_key}"
+            grep -qi 'permission denied' "$RUNNER_TEMP/caq-db-diagnose.log" && classification="${marker:-permission_denied}"
+          fi
+          {
+            echo "private_sha=$PRIVATE_SHA"
+            echo "base_sha=$BASE_SHA"
+            echo "status=$([[ "$code" == 0 ]] && echo PASS || echo FAIL)"
+            echo "applied_count=$applied"
+            echo "last_migration=${last:-none}"
+            echo "classification=$classification"
+          } > ../sanitized/diagnosis.txt
+          rm -f "$RUNNER_TEMP/caq-db-diagnose.log"
+          supabase stop --no-backup || true
+          rm -rf ../private-repo
+
+      - name: Upload sanitized diagnosis
+        uses: actions/upload-artifact@v4
+        with:
+          name: classroom-agent-queue-pr338-db-diagnosis
+          path: sanitized/diagnosis.txt
+          if-no-files-found: error
+          retention-days: 1
