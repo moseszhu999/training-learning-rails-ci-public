@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - .github/workflows/classroom-lark-db-diagnostic-6663e16e.yml
+      - scripts/reorder-migrations-for-replay.py
   workflow_dispatch:
 
 permissions:
@@ -24,6 +25,12 @@ jobs:
       PRIVATE_SHA: f55b6383861bb604c83e4423add51ff1fb994a87
 
     steps:
+      - name: Check out public CI runner
+        uses: actions/checkout@v4
+        with:
+          path: ci-runner
+          persist-credentials: false
+
       - name: Check out exact private commit
         uses: actions/checkout@v4
         with:
@@ -39,22 +46,25 @@ jobs:
         with:
           version: latest
 
-      - name: Replay all migrations in dependency order
+      - name: Replay exact head with dependency ordering
         id: classify
         working-directory: private-repo
         shell: bash
         run: |
           set +e
           db_log="$RUNNER_TEMP/classroom-lark-db-diagnostic.log"
-          saved_migrations="$RUNNER_TEMP/classroom-lark-migrations"
+          normalizer_log="$RUNNER_TEMP/classroom-lark-normalizer.log"
           order_report="$RUNNER_TEMP/classroom-lark-order-report.txt"
+          saved_migrations="$RUNNER_TEMP/classroom-lark-migrations"
           : > "$db_log"
+          : > "$normalizer_log"
+
           supabase init --force >> "$db_log" 2>&1
           init_code=$?
           start_code=1
+          normalize_code=1
           reset_code=1
-          normalized_count=0
-          order_status=NOT_RUN
+
           if [[ "$init_code" == "0" ]]; then
             mv supabase/migrations "$saved_migrations"
             mkdir -p supabase/migrations
@@ -63,263 +73,55 @@ jobs:
             rm -rf supabase/migrations
             mv "$saved_migrations" supabase/migrations
           fi
+
           if [[ "$start_code" == "0" ]]; then
-            normalized_count="$(python - "$order_report" <<'PY'
-          from collections import defaultdict
-          from datetime import datetime, timedelta
-          from pathlib import Path
-          import heapq
-          import re
-          import subprocess
-          import sys
-
-          report_path = Path(sys.argv[1])
-          root = Path('supabase/migrations')
-          paths = sorted(root.glob('*.sql'))
-          texts = {path: path.read_text(encoding='utf-8', errors='replace') for path in paths}
-
-          def git_created(path):
-              result = subprocess.run(
-                  ['git', 'log', '--diff-filter=A', '--format=%ct', '--', str(path)],
-                  check=False,
-                  capture_output=True,
-                  text=True,
-              )
-              values = [int(item) for item in result.stdout.split() if item.isdigit()]
-              return min(values) if values else 0
-
-          def base_key(path):
-              prefix = path.name.split('_', 1)[0]
-              if len(prefix) == 8 and prefix.isdigit():
-                  return (int(prefix), 0, git_created(path), path.name)
-              if len(prefix) == 14 and prefix.isdigit():
-                  return (int(prefix[:8]), 1, int(prefix[8:]), path.name)
-              return (99999999, 9, 0, path.name)
-
-          keys = {path: base_key(path) for path in paths}
-          table_create = re.compile(
-              r'create\s+table(?:\s+if\s+not\s+exists)?\s+(?:public\.)?([a-z_][a-z0-9_]*)',
-              re.I,
-          )
-          function_create = re.compile(
-              r'create(?:\s+or\s+replace)?\s+function\s+(?:public\.)?([a-z_][a-z0-9_]*)\s*\(',
-              re.I,
-          )
-          type_create = re.compile(
-              r'create\s+type\s+(?:public\.)?([a-z_][a-z0-9_]*)',
-              re.I,
-          )
-          public_ref = re.compile(r'\bpublic\.([a-z_][a-z0-9_]*)', re.I)
-          public_call = re.compile(r'\bpublic\.([a-z_][a-z0-9_]*)\s*\(', re.I)
-          alter_add = re.compile(
-              r'alter\s+table\s+(?:if\s+exists\s+)?(?:public\.)?([a-z_][a-z0-9_]*)'
-              r'(?P<body>[\s\S]{0,3000}?)(?=;)',
-              re.I,
-          )
-          add_column = re.compile(
-              r'add\s+column(?:\s+if\s+not\s+exists)?\s+([a-z_][a-z0-9_]*)',
-              re.I,
-          )
-
-          def first_owner(mapping, name, path):
-              current = mapping.get(name)
-              if current is None or keys[path] < keys[current]:
-                  mapping[name] = path
-
-          table_owner = {}
-          function_owner = {}
-          type_owner = {}
-          column_owner = {}
-          for path in paths:
-              text = texts[path]
-              for name in table_create.findall(text):
-                  first_owner(table_owner, name.lower(), path)
-              for name in function_create.findall(text):
-                  first_owner(function_owner, name.lower(), path)
-              for name in type_create.findall(text):
-                  first_owner(type_owner, name.lower(), path)
-              for match in alter_add.finditer(text):
-                  table = match.group(1).lower()
-                  for column in add_column.findall(match.group('body')):
-                      key = (table, column.lower())
-                      current = column_owner.get(key)
-                      if current is None or keys[path] < keys[current]:
-                          column_owner[key] = path
-
-          adjacency = {path: set() for path in paths}
-          edge_reasons = defaultdict(list)
-
-          def add_edge(producer, consumer, reason):
-              if producer is None or producer == consumer or consumer in adjacency[producer]:
-                  return
-              adjacency[producer].add(consumer)
-              edge_reasons[(producer, consumer)].append(reason)
-
-          for consumer in paths:
-              text = texts[consumer]
-              refs = {name.lower() for name in public_ref.findall(text)}
-              calls = {name.lower() for name in public_call.findall(text)}
-              for name in refs:
-                  add_edge(table_owner.get(name), consumer, f'table:{name}')
-                  add_edge(type_owner.get(name), consumer, f'type:{name}')
-              for name in calls:
-                  add_edge(function_owner.get(name), consumer, f'function:{name}')
-              lower_text = text.lower()
-              for (table, column), producer in column_owner.items():
-                  if table in refs and re.search(rf'\b{re.escape(column)}\b', lower_text):
-                      add_edge(producer, consumer, f'column:{table}.{column}')
-
-          index = 0
-          stack = []
-          on_stack = set()
-          indices = {}
-          lowlink = {}
-          components = []
-
-          def strongconnect(node):
-              nonlocal index
-              indices[node] = index
-              lowlink[node] = index
-              index += 1
-              stack.append(node)
-              on_stack.add(node)
-              for neighbor in adjacency[node]:
-                  if neighbor not in indices:
-                      strongconnect(neighbor)
-                      lowlink[node] = min(lowlink[node], lowlink[neighbor])
-                  elif neighbor in on_stack:
-                      lowlink[node] = min(lowlink[node], indices[neighbor])
-              if lowlink[node] == indices[node]:
-                  component = []
-                  while True:
-                      member = stack.pop()
-                      on_stack.remove(member)
-                      component.append(member)
-                      if member == node:
-                          break
-                  components.append(component)
-
-          for path in paths:
-              if path not in indices:
-                  strongconnect(path)
-
-          component_of = {}
-          for component_id, members in enumerate(components):
-              for member in members:
-                  component_of[member] = component_id
-
-          component_edges = {component_id: set() for component_id in range(len(components))}
-          indegree = {component_id: 0 for component_id in range(len(components))}
-          for producer, consumers in adjacency.items():
-              producer_component = component_of[producer]
-              for consumer in consumers:
-                  consumer_component = component_of[consumer]
-                  if producer_component == consumer_component:
-                      continue
-                  if consumer_component not in component_edges[producer_component]:
-                      component_edges[producer_component].add(consumer_component)
-                      indegree[consumer_component] += 1
-
-          component_key = {
-              component_id: min(keys[member] for member in members)
-              for component_id, members in enumerate(components)
-          }
-          heap = []
-          for component_id in range(len(components)):
-              if indegree[component_id] == 0:
-                  heapq.heappush(heap, (component_key[component_id], component_id))
-
-          ordered_components = []
-          while heap:
-              _, component_id = heapq.heappop(heap)
-              ordered_components.append(component_id)
-              for neighbor in sorted(component_edges[component_id], key=lambda item: component_key[item]):
-                  indegree[neighbor] -= 1
-                  if indegree[neighbor] == 0:
-                      heapq.heappush(heap, (component_key[neighbor], neighbor))
-
-          if len(ordered_components) != len(components):
-              report_path.write_text('status=COMPONENT_DAG_FAILURE', encoding='utf-8')
-              raise SystemExit(2)
-
-          ordered_paths = []
-          cyclic_components = 0
-          for component_id in ordered_components:
-              members = sorted(components[component_id], key=lambda path: keys[path])
-              if len(members) > 1:
-                  cyclic_components += 1
-              ordered_paths.extend(members)
-
-          staging = root / '.dependency-order-staging'
-          staging.mkdir()
-          staged = []
-          for index, path in enumerate(ordered_paths):
-              suffix = path.name.split('_', 1)[1] if '_' in path.name else path.name
-              staged_path = staging / f'{index:06d}_{suffix}'
-              path.rename(staged_path)
-              staged.append((staged_path, suffix))
-
-          start = datetime(2000, 1, 1, 0, 0, 0)
-          final_names = []
-          for index, (staged_path, suffix) in enumerate(staged):
-              version = (start + timedelta(seconds=index)).strftime('%Y%m%d%H%M%S')
-              target = root / f'{version}_{suffix}'
-              staged_path.rename(target)
-              final_names.append(target.name)
-          staging.rmdir()
-
-          edge_count = sum(len(consumers) for consumers in adjacency.values())
-          report_path.write_text(
-              f'status=PASS count={len(final_names)} edges={edge_count} '
-              f'components={len(components)} cyclic_components={cyclic_components} '
-              f'first={final_names[0] if final_names else "none"} '
-              f'last={final_names[-1] if final_names else "none"}',
-              encoding='utf-8',
-          )
-          print(len(final_names))
-          PY
-            )"
+            python ../ci-runner/scripts/reorder-migrations-for-replay.py \
+              supabase/migrations --report "$order_report" \
+              > "$normalizer_log" 2>&1
             normalize_code=$?
-            order_status="$(cat "$order_report" 2>/dev/null || echo status=FAILED)"
-            if [[ "$normalize_code" == "0" ]]; then
-              supabase db reset --local --no-seed --debug >> "$db_log" 2>&1
-              reset_code=$?
-            fi
           fi
-          diagnostic="$(python - "$db_log" "$init_code" "$start_code" "$reset_code" "$normalized_count" "$order_status" <<'PY'
+
+          if [[ "$normalize_code" == "0" ]]; then
+            supabase db reset --local --no-seed --debug >> "$db_log" 2>&1
+            reset_code=$?
+          fi
+
+          diagnostic="$(python - "$db_log" "$normalizer_log" "$order_report" "$init_code" "$start_code" "$normalize_code" "$reset_code" <<'PY'
           import hashlib
           import pathlib
           import re
           import sys
 
-          path = pathlib.Path(sys.argv[1])
-          raw = path.read_text(encoding='utf-8', errors='replace')
+          db_path = pathlib.Path(sys.argv[1])
+          normalizer_path = pathlib.Path(sys.argv[2])
+          report_path = pathlib.Path(sys.argv[3])
+          raw = db_path.read_text(encoding='utf-8', errors='replace')
+          normalizer = normalizer_path.read_text(encoding='utf-8', errors='replace')
+          report = report_path.read_text(encoding='utf-8', errors='replace') if report_path.exists() else 'status=NO_REPORT'
           text = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', raw)
           applying = re.findall(r'Applying migration\s+([^\s]+)', text, flags=re.I)
           candidates = []
           for line in text.splitlines():
               stripped = re.sub(r'\s+', ' ', line.strip())
-              if not re.search(
+              if re.search(
                   r'(ERROR:|FATAL:|SQLSTATE|DETAIL:|HINT:|CONTEXT:|failed to apply|migration failed|syntax error|does not exist|already exists|duplicate|violates|permission denied|effect/sql/SqlError|Failed to execute statement)',
                   stripped,
                   flags=re.I,
-              ):
-                  continue
-              if 'Try rerunning the command with --debug' in stripped:
-                  continue
-              candidates.append(stripped)
-          selected = candidates[-12:]
-          error = ' | '.join(selected) if selected else 'none-captured'
+              ) and 'Try rerunning the command with --debug' not in stripped:
+                  candidates.append(stripped)
+          if int(sys.argv[6]) != 0:
+              candidates.extend(normalizer.splitlines()[-8:])
+          error = ' | '.join(candidates[-12:]) if candidates else 'none-captured'
           error = re.sub(r'https?://\S+', '<url>', error)
           error = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<uuid>', error, flags=re.I)
           error = re.sub(r"'[^']*'", "'<redacted>'", error)
           error = re.sub(r'\s+', ' ', error)[:2400]
-          order_status = re.sub(r'\s+', '_', sys.argv[6])[:900]
+          report = re.sub(r'\s+', '_', report)[:1000]
           digest = hashlib.sha256(raw.encode('utf-8', errors='replace')).hexdigest()
           print(
               'DB_REPLAY_DIAGNOSTIC '
-              f'init={sys.argv[2]} start={sys.argv[3]} reset={sys.argv[4]} '
-              f'normalized_all={sys.argv[5]} order={order_status} '
+              f'init={sys.argv[4]} start={sys.argv[5]} normalize={sys.argv[6]} reset={sys.argv[7]} '
+              f'order={report} '
               f'last_migration={pathlib.Path(applying[-1]).name if applying else "none"} '
               f'error={error} log_sha256={digest}'
           )
@@ -327,7 +129,7 @@ jobs:
           )"
           echo "diagnostic=$diagnostic" >> "$GITHUB_OUTPUT"
           supabase stop --no-backup > /dev/null 2>&1 || true
-          rm -f "$db_log" "$order_report"
+          rm -f "$db_log" "$normalizer_log" "$order_report"
           exit 0
 
   report:
