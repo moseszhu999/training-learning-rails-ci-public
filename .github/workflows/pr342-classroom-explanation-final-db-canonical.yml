@@ -1,0 +1,447 @@
+name: PR342 Classroom Explanation canonical database replay
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-classroom-explanation-final-app.yml
+      - .github/workflows/pr342-classroom-explanation-final-db-canonical.yml
+      - carriers/pr342-final-7c575a2e.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-final-db-canonical-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 7c575a2e42e76d564e4ba15dfe8f682da8dee366
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+  DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  canonical-database-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Validate exact inputs and credential
+        id: credential
+        continue-on-error: true
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate
+        id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Python
+        id: python_setup
+        if: always()
+        continue-on-error: true
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Supabase CLI
+        id: supabase_setup
+        if: always()
+        continue-on-error: true
+        uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Build canonical bootstrap and run two-pass acceptance
+        id: database
+        if: always()
+        continue-on-error: true
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr342-canonical-supabase"
+          bootstrap_log="$RUNNER_TEMP/pr342-bootstrap.log"
+          start_log="$RUNNER_TEMP/pr342-start.log"
+          first_out="$RUNNER_TEMP/pr342-first.out"
+          first_err="$RUNNER_TEMP/pr342-first.err"
+          second_out="$RUNNER_TEMP/pr342-second.out"
+          second_err="$RUNNER_TEMP/pr342-second.err"
+          reset_log="$RUNNER_TEMP/pr342-reset.log"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+
+          precheck_code=1
+          bootstrap_code=1
+          start_code=1
+          first_reset_code=1
+          first_e2e_code=1
+          catalog_code=1
+          second_reset_code=1
+          second_e2e_code=1
+
+          actual_sha="$(git rev-parse HEAD 2>/dev/null)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA" 2>/dev/null)"
+          behind="$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA" 2>/dev/null)"
+          [[ "$actual_sha" == "$PRIVATE_SHA" && "$merge_base" == "$BASE_SHA" && "$behind" == 0 ]]
+          precheck_code=$?
+
+          if [[ "$precheck_code" == 0 ]]; then
+            {
+              supabase --workdir "$workdir" init --force --yes
+              python scripts/build-trainingos-fresh-bootstrap.py \
+                --repo-root "$PWD" \
+                --output-dir "$workdir/supabase/migrations" \
+                --commit-sha "$PRIVATE_SHA"
+            } > "$bootstrap_log" 2>&1
+            bootstrap_code=$?
+          fi
+
+          if [[ "$bootstrap_code" == 0 ]]; then
+            supabase --workdir "$workdir" start > "$start_log" 2>&1
+            start_code=$?
+          fi
+
+          if [[ "$start_code" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed > "$reset_log" 2>&1
+            first_reset_code=$?
+          fi
+
+          validate_evidence() {
+            python - "$1" "$GITHUB_OUTPUT" "$2" <<'PY'
+          import json, pathlib, sys
+          path=pathlib.Path(sys.argv[1])
+          prefix=sys.argv[3]
+          lines=path.read_text(encoding='utf-8',errors='replace').splitlines() if path.exists() else []
+          payload=next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{')),None)
+          required=(
+            'oneActiveExplanationEnforced','activeSlotReleasedAfterUpload','secondExplanationStarted',
+            'classEndedStartRejected','agentRecordingRejected','agentInferencePersisted',
+            'prohibitedCandidateRejected','teacherEvaluationConfirmed','agentConfirmRejected',
+            'staleVersionRejected','staleTranscriptRejected','crossClassRejected',
+            'transcriptUpdateRejected','transcriptDeleteRejected','rawAudioHidden',
+            'idempotencyConflictRejected','transcriptIdempotencyConflictRejected')
+          remaining={k:v for k,v in (payload or {}).items() if k.startswith('remaining')}
+          zero=bool(remaining) and all(v==0 for v in remaining.values())
+          valid=(bool(payload) and payload.get('status')=='PASS'
+                 and payload.get('fixtureCleanup')=='PLPGSQL_SUBTRANSACTION_ROLLBACK'
+                 and all(payload.get(k) is True for k in required)
+                 and len(remaining)>=13 and zero)
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+            out.write(f"{prefix}_status={(payload or {}).get('status','MISSING')}\n")
+            out.write(f"{prefix}_valid={str(valid).lower()}\n")
+            out.write(f"{prefix}_zero={str(zero).lower()}\n")
+            out.write(f"{prefix}_remaining={len(remaining)}\n")
+          raise SystemExit(0 if valid else 1)
+          PY
+          }
+
+          if [[ "$first_reset_code" == 0 ]]; then
+            psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql \
+              > "$first_out" 2> "$first_err"
+            first_e2e_code=$?
+            if [[ "$first_e2e_code" == 0 ]]; then
+              validate_evidence "$first_out" first
+              first_e2e_code=$?
+            fi
+          fi
+
+          if [[ "$first_e2e_code" == 0 ]]; then
+            catalog_json="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL'
+          with expected_tables(name) as (
+            values
+              ('trainingos_classroom_explanations'),
+              ('trainingos_classroom_explanation_captures'),
+              ('trainingos_classroom_explanation_transcript_imports'),
+              ('trainingos_classroom_explanation_speech_turns'),
+              ('trainingos_classroom_explanation_analysis_candidates'),
+              ('trainingos_classroom_explanation_evaluations'),
+              ('trainingos_classroom_explanation_events')
+          ), table_security as (
+            select count(*) filter (where c.relrowsecurity and c.relforcerowsecurity) secure_count
+            from expected_tables e
+            join pg_class c on c.relname=e.name
+            join pg_namespace n on n.oid=c.relnamespace and n.nspname='public'
+          ), raw_grants as (
+            select count(*) grant_count
+            from information_schema.role_table_grants g
+            join expected_tables e on e.name=g.table_name
+            where g.table_schema='public'
+              and g.grantee in ('PUBLIC','anon','authenticated',('service'||'_role'))
+          ), private_grants as (
+            select count(*) grant_count
+            from information_schema.routine_privileges r
+            where r.specific_schema='private'
+              and r.routine_name like 'trainingos_classroom_explanation%'
+              and r.grantee in ('PUBLIC','anon','authenticated',('service'||'_role'))
+          ), public_functions as (
+            select count(*) function_count,
+              count(*) filter (
+                where p.prosecdef
+                  and exists(select 1 from unnest(coalesce(p.proconfig,array[]::text[])) setting where setting='search_path=')
+              ) secure_count
+            from pg_proc p
+            join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='public'
+              and p.proname in (
+                'prepare_trainingos_classroom_explanation',
+                'start_trainingos_classroom_explanation',
+                'create_trainingos_classroom_explanation_capture',
+                'complete_trainingos_classroom_explanation_capture_upload',
+                'append_trainingos_classroom_explanation_transcript',
+                'get_trainingos_classroom_explanation_analysis_input',
+                'propose_trainingos_classroom_explanation_analysis',
+                'confirm_trainingos_classroom_explanation_evaluation',
+                'get_trainingos_classroom_explanation')
+          ), bad_function_grants as (
+            select count(*) grant_count
+            from information_schema.routine_privileges r
+            where r.specific_schema='public'
+              and r.routine_name in (
+                'prepare_trainingos_classroom_explanation',
+                'start_trainingos_classroom_explanation',
+                'create_trainingos_classroom_explanation_capture',
+                'complete_trainingos_classroom_explanation_capture_upload',
+                'append_trainingos_classroom_explanation_transcript',
+                'get_trainingos_classroom_explanation_analysis_input',
+                'propose_trainingos_classroom_explanation_analysis',
+                'confirm_trainingos_classroom_explanation_evaluation',
+                'get_trainingos_classroom_explanation')
+              and r.grantee in ('PUBLIC','anon',('service'||'_role'))
+          ), active_index as (
+            select count(*) index_count
+            from pg_indexes
+            where schemaname='public'
+              and indexname='trainingos_classroom_explanation_one_active_per_control_idx'
+              and indexdef ilike '%started%'
+              and indexdef ilike '%capture_open%'
+          ), immutable_triggers as (
+            select count(*) trigger_count
+            from pg_trigger t
+            join pg_class c on c.oid=t.tgrelid
+            join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and not t.tgisinternal
+              and t.tgname in (
+                'trainingos_classroom_explanation_transcript_immutable',
+                'trainingos_classroom_explanation_turn_immutable',
+                'trainingos_classroom_explanation_candidate_immutable',
+                'trainingos_classroom_explanation_evaluation_immutable',
+                'trainingos_classroom_explanation_event_immutable')
+          )
+          select jsonb_build_object(
+            'rlsForcedCount',(select secure_count from table_security),
+            'rawGrantCount',(select grant_count from raw_grants),
+            'privateHelperGrantCount',(select grant_count from private_grants),
+            'publicFunctionCount',(select function_count from public_functions),
+            'publicFunctionSecureCount',(select secure_count from public_functions),
+            'publicBadGrantCount',(select grant_count from bad_function_grants),
+            'activeIndexCount',(select index_count from active_index),
+            'appendOnlyTriggerCount',(select trigger_count from immutable_triggers));
+          SQL
+            )"
+            catalog_code=$?
+            if [[ "$catalog_code" == 0 ]]; then
+              python - "$catalog_json" "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          value=json.loads(sys.argv[1])
+          valid=(value.get('rlsForcedCount')==7
+                 and value.get('rawGrantCount')==0
+                 and value.get('privateHelperGrantCount')==0
+                 and value.get('publicFunctionCount')==9
+                 and value.get('publicFunctionSecureCount')==9
+                 and value.get('publicBadGrantCount')==0
+                 and value.get('activeIndexCount')==1
+                 and value.get('appendOnlyTriggerCount')==5)
+          with open(sys.argv[2],'a',encoding='utf-8') as out:
+            for key,val in value.items(): out.write(f'{key}={val}\n')
+            out.write(f'catalog_valid={str(valid).lower()}\n')
+          raise SystemExit(0 if valid else 1)
+          PY
+              catalog_code=$?
+            fi
+          fi
+
+          if [[ "$catalog_code" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed >> "$reset_log" 2>&1
+            second_reset_code=$?
+          fi
+
+          if [[ "$second_reset_code" == 0 ]]; then
+            psql "$DB_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql \
+              > "$second_out" 2> "$second_err"
+            second_e2e_code=$?
+            if [[ "$second_e2e_code" == 0 ]]; then
+              validate_evidence "$second_out" second
+              second_e2e_code=$?
+            fi
+          fi
+
+          last_migration="$(grep -hEo 'Applying migration [0-9]{14}_[A-Za-z0-9_]+\.sql' "$start_log" "$reset_log" 2>/dev/null | tail -1 | awk '{print $3}')"
+          marker="$(grep -hEo '\b(TRAININGOS|CLASSROOM|CE)_[A-Z0-9_]+' "$bootstrap_log" "$start_log" "$reset_log" "$first_err" "$second_err" 2>/dev/null | tail -1)"
+          sqlstate="$(grep -hEo 'SQLSTATE[ =:]+[A-Z0-9]{5}|SQL state:[[:space:]]*[A-Z0-9]{5}|ERROR:[[:space:]]*[A-Z0-9]{5}:' "$start_log" "$reset_log" "$first_err" "$second_err" 2>/dev/null | tail -1 | grep -Eo '[A-Z0-9]{5}' | tail -1)"
+          signature="$(grep -hE 'ERROR:|FATAL:|failed to|Error:' "$bootstrap_log" "$start_log" "$reset_log" "$first_err" "$second_err" 2>/dev/null | tail -1 | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}/<uuid>/g; s#/home/runner/[^ :]+#<runner-path>#g; s#postgresql://[^ ]+#<database-url>#g' | cut -c1-420)"
+
+          {
+            echo "actual_sha=$actual_sha"
+            echo "merge_base=$merge_base"
+            echo "behind=$behind"
+            echo "precheck_code=$precheck_code"
+            echo "bootstrap_code=$bootstrap_code"
+            echo "start_code=$start_code"
+            echo "first_reset_code=$first_reset_code"
+            echo "first_e2e_code=$first_e2e_code"
+            echo "catalog_code=$catalog_code"
+            echo "second_reset_code=$second_reset_code"
+            echo "second_e2e_code=$second_e2e_code"
+            echo "last_migration=${last_migration:-NONE}"
+            echo "failure_marker=${marker:-NONE}"
+            echo "sqlstate=${sqlstate:-NONE}"
+            echo "error_signature=${signature:-NONE}"
+          } >> "$GITHUB_OUTPUT"
+
+          [[ "$precheck_code" == 0 && "$bootstrap_code" == 0 && "$start_code" == 0 \
+             && "$first_reset_code" == 0 && "$first_e2e_code" == 0 && "$catalog_code" == 0 \
+             && "$second_reset_code" == 0 && "$second_e2e_code" == 0 ]]
+          exit $?
+
+      - name: Publish sanitized database evidence
+        if: always()
+        env:
+          DATABASE: ${{ steps.database.outcome }}
+          ACTUAL_SHA: ${{ steps.database.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.database.outputs.merge_base }}
+          BEHIND: ${{ steps.database.outputs.behind }}
+          PRECHECK: ${{ steps.database.outputs.precheck_code }}
+          BOOTSTRAP: ${{ steps.database.outputs.bootstrap_code }}
+          START: ${{ steps.database.outputs.start_code }}
+          FIRST_RESET: ${{ steps.database.outputs.first_reset_code }}
+          FIRST_E2E: ${{ steps.database.outputs.first_e2e_code }}
+          FIRST_STATUS: ${{ steps.database.outputs.first_status }}
+          FIRST_VALID: ${{ steps.database.outputs.first_valid }}
+          FIRST_ZERO: ${{ steps.database.outputs.first_zero }}
+          FIRST_REMAINING: ${{ steps.database.outputs.first_remaining }}
+          CATALOG: ${{ steps.database.outputs.catalog_code }}
+          CATALOG_VALID: ${{ steps.database.outputs.catalog_valid }}
+          RLS_COUNT: ${{ steps.database.outputs.rlsForcedCount }}
+          RAW_GRANTS: ${{ steps.database.outputs.rawGrantCount }}
+          PRIVATE_GRANTS: ${{ steps.database.outputs.privateHelperGrantCount }}
+          PUBLIC_FUNCTIONS: ${{ steps.database.outputs.publicFunctionCount }}
+          PUBLIC_SECURE: ${{ steps.database.outputs.publicFunctionSecureCount }}
+          PUBLIC_BAD_GRANTS: ${{ steps.database.outputs.publicBadGrantCount }}
+          ACTIVE_INDEX: ${{ steps.database.outputs.activeIndexCount }}
+          APPEND_TRIGGERS: ${{ steps.database.outputs.appendOnlyTriggerCount }}
+          SECOND_RESET: ${{ steps.database.outputs.second_reset_code }}
+          SECOND_E2E: ${{ steps.database.outputs.second_e2e_code }}
+          SECOND_STATUS: ${{ steps.database.outputs.second_status }}
+          SECOND_VALID: ${{ steps.database.outputs.second_valid }}
+          SECOND_ZERO: ${{ steps.database.outputs.second_zero }}
+          SECOND_REMAINING: ${{ steps.database.outputs.second_remaining }}
+          LAST_MIGRATION: ${{ steps.database.outputs.last_migration }}
+          MARKER: ${{ steps.database.outputs.failure_marker }}
+          SQLSTATE: ${{ steps.database.outputs.sqlstate }}
+          SIGNATURE: ${{ steps.database.outputs.error_signature }}
+        shell: bash
+        run: |
+          report=pr342-final-canonical-database-result.txt
+          {
+            echo "exact_private_sha=${ACTUAL_SHA:-$PRIVATE_SHA}"
+            echo "exact_base_sha=${MERGE_BASE:-$BASE_SHA}"
+            echo "behind=${BEHIND:-missing}"
+            echo "database_stage=${DATABASE:-missing}"
+            echo "precheck_exit=${PRECHECK:-missing}"
+            echo "bootstrap_exit=${BOOTSTRAP:-missing}"
+            echo "start_exit=${START:-missing}"
+            echo "first_reset_exit=${FIRST_RESET:-missing}"
+            echo "first_sql_e2e_exit=${FIRST_E2E:-missing}"
+            echo "first_status=${FIRST_STATUS:-MISSING}"
+            echo "first_acceptance_valid=${FIRST_VALID:-false}"
+            echo "first_remaining_count=${FIRST_REMAINING:-0}"
+            echo "first_remaining_zero=${FIRST_ZERO:-false}"
+            echo "catalog_exit=${CATALOG:-missing}"
+            echo "catalog_valid=${CATALOG_VALID:-false}"
+            echo "rls_forced_count=${RLS_COUNT:-0}"
+            echo "raw_grant_count=${RAW_GRANTS:-missing}"
+            echo "private_helper_grant_count=${PRIVATE_GRANTS:-missing}"
+            echo "public_function_count=${PUBLIC_FUNCTIONS:-0}"
+            echo "public_function_secure_count=${PUBLIC_SECURE:-0}"
+            echo "public_bad_grant_count=${PUBLIC_BAD_GRANTS:-missing}"
+            echo "active_index_count=${ACTIVE_INDEX:-0}"
+            echo "append_only_trigger_count=${APPEND_TRIGGERS:-0}"
+            echo "second_reset_exit=${SECOND_RESET:-missing}"
+            echo "second_sql_e2e_exit=${SECOND_E2E:-missing}"
+            echo "second_status=${SECOND_STATUS:-MISSING}"
+            echo "second_acceptance_valid=${SECOND_VALID:-false}"
+            echo "second_remaining_count=${SECOND_REMAINING:-0}"
+            echo "second_remaining_zero=${SECOND_ZERO:-false}"
+            echo "last_migration=${LAST_MIGRATION:-NONE}"
+            echo "failure_marker=${MARKER:-NONE}"
+            echo "sqlstate=${SQLSTATE:-NONE}"
+            echo "error_signature=${SIGNATURE:-NONE}"
+            echo 'raw_database_logs_private_source_and_fixture_output=SEALED_AND_DELETED'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+
+      - name: Upload sanitized database evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr342-final-7c575a2e-canonical-database-result
+          path: pr342-final-canonical-database-result.txt
+          retention-days: 3
+
+      - name: Cleanup isolated database and sealed output
+        if: always()
+        shell: bash
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr342-canonical-supabase" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-* pr342-final-canonical-database-result.txt
+
+      - name: Final canonical database enforcement
+        if: always()
+        env:
+          CREDENTIAL: ${{ steps.credential.outcome }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          PYTHON_SETUP: ${{ steps.python_setup.outcome }}
+          SUPABASE_SETUP: ${{ steps.supabase_setup.outcome }}
+          DATABASE: ${{ steps.database.outcome }}
+          PRECHECK: ${{ steps.database.outputs.precheck_code }}
+          BOOTSTRAP: ${{ steps.database.outputs.bootstrap_code }}
+          START: ${{ steps.database.outputs.start_code }}
+          FIRST_RESET: ${{ steps.database.outputs.first_reset_code }}
+          FIRST_E2E: ${{ steps.database.outputs.first_e2e_code }}
+          FIRST_VALID: ${{ steps.database.outputs.first_valid }}
+          FIRST_ZERO: ${{ steps.database.outputs.first_zero }}
+          CATALOG: ${{ steps.database.outputs.catalog_code }}
+          CATALOG_VALID: ${{ steps.database.outputs.catalog_valid }}
+          SECOND_RESET: ${{ steps.database.outputs.second_reset_code }}
+          SECOND_E2E: ${{ steps.database.outputs.second_e2e_code }}
+          SECOND_VALID: ${{ steps.database.outputs.second_valid }}
+          SECOND_ZERO: ${{ steps.database.outputs.second_zero }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CREDENTIAL" == success && "$CHECKOUT" == success ]]
+          [[ "$PYTHON_SETUP" == success && "$SUPABASE_SETUP" == success ]]
+          [[ "$DATABASE" == success ]]
+          [[ "$PRECHECK" == 0 && "$BOOTSTRAP" == 0 && "$START" == 0 ]]
+          [[ "$FIRST_RESET" == 0 && "$FIRST_E2E" == 0 && "$FIRST_VALID" == true && "$FIRST_ZERO" == true ]]
+          [[ "$CATALOG" == 0 && "$CATALOG_VALID" == true ]]
+          [[ "$SECOND_RESET" == 0 && "$SECOND_E2E" == 0 && "$SECOND_VALID" == true && "$SECOND_ZERO" == true ]]
