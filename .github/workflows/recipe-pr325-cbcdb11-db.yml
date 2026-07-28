@@ -1,9 +1,10 @@
 name: Recipe PR325 cbcdb11 isolated database gates
 
+# Execution marker: exact-head finalization run 1.
 on:
   push:
     branches:
-      - ci/recipe-pr325-cbcdb11-final
+      - ci/recipe-pr325-cbcdb11-run
   pull_request:
     branches:
       - main
