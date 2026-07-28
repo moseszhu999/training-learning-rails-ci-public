@@ -1,0 +1,359 @@
+name: Classroom Agent Queue PR338 final v5
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr338-final-v5.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr338-final-v5-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 1a60d5d0107120d8267e5c0f2e03094962613ae0
+  BASE_SHA: e15dbe5d1e6513c8b1816d61c8e0978fdaebaae0
+
+jobs:
+  contracts-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Validate exact inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Exact-head latest-main and 15-file scope PASS
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          expected=$'docs/product/trainingos-classroom-agent-queue-integration-v1.md\nlib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs\nlib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs\nlib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs\nlib/trainingos-agent-gateway/persistent-teacher-agent.mjs\nlib/trainingos-agent-gateway/teacher-action-queue.mjs\nprototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs\nprototypes/trainingos-agent-mvp-v1/teacher-action-queue.test.mjs\nprototypes/trainingos-agent-mvp-v1/zero-permission-mcp-composition.test.mjs\nsupabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql\nsupabase/migrations/20260728180100_trainingos_classroom_explanation_queue_binding_v1.sql\ntests/sql/trainingos_classroom_agent_queue_integration_e2e.sql\ntests/test_trainingos_classroom_agent_queue_integration_contract.py\ntests/test_trainingos_persistent_teacher_agent_contract.py\ntests/test_trainingos_teacher_action_queue_contract.py'
+          actual="$(git diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git rev-list --count "$BASE_SHA..$PRIVATE_SHA")" == 1 ]]
+          [[ "$actual" == "$expected" ]]
+          [[ "$(printf '%s\n' "$actual" | sed '/^$/d' | wc -l | tr -d ' ')" == 15 ]]
+          [[ -f supabase/migrations/20260728161500_trainingos_classroom_explanation_question_source_hardening_v1.sql ]]
+          [[ -f supabase/migrations/20260728195400_trainingos_database_replay_source_assets_catalog_metadata_v1.sql ]]
+
+      - name: Gateway syntax PASS
+        working-directory: private-repo
+        run: |
+          node --check lib/trainingos-agent-gateway/classroom-agent-queue-integration.mjs
+          node --check lib/trainingos-agent-gateway/persistent-teacher-agent.mjs
+          node --check lib/trainingos-agent-gateway/teacher-action-queue.mjs
+          node --check lib/trainingos-agent-gateway/mcp-teacher-action-queue-server.mjs
+          node --check lib/trainingos-agent-gateway/mcp-persistent-teacher-agent-server.mjs
+
+      - name: Focused Node contracts PASS 5/5
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          node --test prototypes/trainingos-agent-mvp-v1/classroom-agent-queue-integration.test.mjs > "$RUNNER_TEMP/pr338-focused-node.log" 2>&1
+          [[ "$(grep -E '^# tests ' "$RUNNER_TEMP/pr338-focused-node.log" | awk '{print $3}' | tail -1)" == 5 ]]
+          [[ "$(grep -E '^# pass ' "$RUNNER_TEMP/pr338-focused-node.log" | awk '{print $3}' | tail -1)" == 5 ]]
+          [[ "$(grep -E '^# fail ' "$RUNNER_TEMP/pr338-focused-node.log" | awk '{print $3}' | tail -1)" == 0 ]]
+
+      - name: Focused Python contracts PASS 13/13
+        working-directory: private-repo
+        run: |
+          set -euo pipefail
+          python tests/test_trainingos_classroom_agent_queue_integration_contract.py > "$RUNNER_TEMP/pr338-focused-python.log" 2>&1
+          [[ "$(grep -Eo 'Ran [0-9]+ tests?' "$RUNNER_TEMP/pr338-focused-python.log" | awk '{print $2}' | tail -1)" == 13 ]]
+
+      - name: Teacher Queue Node regression PASS
+        working-directory: private-repo
+        run: node --test prototypes/trainingos-agent-mvp-v1/teacher-action-queue.test.mjs
+
+      - name: Persistent Agent Node regression PASS
+        working-directory: private-repo
+        run: node --test prototypes/trainingos-agent-mvp-v1/persistent-teacher-agent.test.mjs
+
+      - name: Canonical Explanation Node regression PASS
+        working-directory: private-repo
+        run: node --test prototypes/trainingos-agent-mvp-v1/test/classroom-explanation-runtime.test.mjs
+
+      - name: Teacher Queue Python regression PASS
+        working-directory: private-repo
+        run: python tests/test_trainingos_teacher_action_queue_contract.py
+
+      - name: Persistent Agent Python regression PASS
+        working-directory: private-repo
+        run: python tests/test_trainingos_persistent_teacher_agent_contract.py
+
+      - name: Persistent draft execution Python regression PASS
+        working-directory: private-repo
+        run: python tests/test_trainingos_persistent_teacher_agent_draft_execution_contract.py
+
+      - name: Canonical Explanation Python regression PASS
+        working-directory: private-repo
+        run: python tests/test_trainingos_classroom_explanation_contract.py
+
+      - name: Install dependencies PASS
+        working-directory: private-repo
+        run: npm ci
+
+      - name: Typecheck PASS
+        working-directory: private-repo
+        run: npm run typecheck
+
+      - name: Native Classroom PASS
+        working-directory: private-repo
+        run: node scripts/run-trainingos-native-classroom-validation.mjs
+
+      - name: Zero-permission bridge PASS
+        working-directory: private-repo
+        run: node scripts/run-trainingos-zero-permission-bridge-validation.mjs
+
+      - name: Learning Workspace bridge PASS
+        working-directory: private-repo
+        run: node scripts/run-trainingos-learning-workspace-bridge-validation.mjs
+
+      - name: VS Code production bundle PASS
+        working-directory: private-repo
+        run: node extensions/trainingos-classroom-vscode/esbuild.mjs --production
+
+      - name: Production build PASS
+        working-directory: private-repo
+        run: npx vite build --config vite.config.ts
+
+      - name: Publish contracts/build evidence and clean
+        if: always()
+        run: |
+          {
+            echo '## PR338 authoritative final v5 — contracts/build'
+            echo "- exactHead: \`$PRIVATE_SHA\`"
+            echo "- exactMain: \`$BASE_SHA\`"
+            echo '- exact 15-file scope and one-commit latest-main ancestry enforced'
+            echo '- focused Node 5/5 and focused Python 13/13 enforced'
+            echo '- Queue, Persistent Agent and canonical Explanation regressions enforced'
+            echo '- typecheck, zero-permission, VS Code bundle and production build enforced'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -rf private-repo
+          rm -f "$RUNNER_TEMP"/pr338-*.log
+
+  canonical-database:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Validate exact inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Canonical bootstrap PASS
+        run: |
+          set -euo pipefail
+          [[ "$(git -C private-repo rev-parse HEAD)" == "$PRIVATE_SHA" ]]
+          [[ "$(git -C private-repo merge-base "$BASE_SHA" "$PRIVATE_SHA")" == "$BASE_SHA" ]]
+          [[ "$(git -C private-repo rev-list --count "$BASE_SHA..$PRIVATE_SHA")" == 1 ]]
+          [[ -f private-repo/supabase/migrations/20260728161500_trainingos_classroom_explanation_question_source_hardening_v1.sql ]]
+          [[ -f private-repo/supabase/migrations/20260728180000_trainingos_classroom_agent_queue_integration_v1.sql ]]
+          [[ -f private-repo/supabase/migrations/20260728180100_trainingos_classroom_explanation_queue_binding_v1.sql ]]
+          [[ -f private-repo/supabase/migrations/20260728195400_trainingos_database_replay_source_assets_catalog_metadata_v1.sql ]]
+          mkdir replay-project
+          supabase --workdir replay-project init --force --yes > "$RUNNER_TEMP/pr338-db-init.log" 2>&1
+          rm -rf replay-project/supabase/migrations
+          python private-repo/scripts/build-trainingos-fresh-bootstrap.py \
+            --repo-root private-repo \
+            --output-dir replay-project/supabase/migrations \
+            --commit-sha "$PRIVATE_SHA" > "$RUNNER_TEMP/pr338-db-bootstrap.log" 2>&1
+          [[ -f replay-project/supabase/migrations/20260728180100_trainingos_classroom_explanation_queue_binding_v1.sql ]]
+          [[ -f replay-project/supabase/migrations/20260728195400_trainingos_database_replay_source_assets_catalog_metadata_v1.sql ]]
+
+      - name: Initial canonical replay PASS
+        working-directory: replay-project
+        run: supabase start > "$RUNNER_TEMP/pr338-db-first.log" 2>&1
+
+      - name: Deterministic destructive replay PASS
+        working-directory: replay-project
+        run: supabase db reset --local --no-seed > "$RUNNER_TEMP/pr338-db-second.log" 2>&1
+
+      - name: Existing Persistent Agent SQL E2E PASS
+        working-directory: replay-project
+        run: |
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_persistent_teacher_agent_e2e.sql \
+            > "$RUNNER_TEMP/pr338-persistent-sql.log" 2>&1
+
+      - name: Canonical Explanation queue-binding SQL E2E PASS
+        working-directory: replay-project
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+            -f ../private-repo/tests/sql/trainingos_classroom_agent_queue_integration_e2e.sql \
+            > "$RUNNER_TEMP/pr338-queue-sql.log" 2>&1
+          grep -q 'canonicalExplanationEvaluationProjected' "$RUNNER_TEMP/pr338-queue-sql.log"
+          grep -q 'EVALUATED_EXPLANATION_REMAINED_IN_QUEUE' ../private-repo/tests/sql/trainingos_classroom_agent_queue_integration_e2e.sql
+
+      - name: Ownership source truth trigger guard RLS and ACL PASS
+        working-directory: replay-project
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env | grep '^DB_URL=')"
+          psql "$DB_URL" -X -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/pr338-db-acl.log" 2>&1 <<'SQL'
+          do $verify$
+          declare
+            v_count integer;
+            v_trigger text;
+            v_queue text;
+            v_provider_definition text;
+            v_provider jsonb;
+          begin
+            select count(*) into v_count from information_schema.tables
+            where table_schema='public' and table_name in (
+              'teacher_queue_items','trainingos_classroom_agent_queue_items',
+              'trainingos_classroom_agent_executions','trainingos_classroom_agent_execution_events');
+            if v_count<>0 then raise exception 'SECOND_OWNER_CREATED'; end if;
+
+            select count(*) into v_count from information_schema.tables
+            where table_schema='public' and table_name in (
+              'trainingos_agent_executions','trainingos_agent_execution_events','trainingos_teacher_agent_policies',
+              'trainingos_classroom_explanations','trainingos_classroom_explanation_analysis_candidates',
+              'trainingos_classroom_explanation_evaluations');
+            if v_count<>6 then raise exception 'CANONICAL_OWNER_MISSING'; end if;
+
+            select count(*) into v_count
+            from pg_class c join pg_namespace n on n.oid=c.relnamespace
+            where n.nspname='public' and c.relname='trainingos_teacher_agent_policies'
+              and c.relrowsecurity and c.relforcerowsecurity;
+            if v_count<>1 then raise exception 'POLICY_RLS_NOT_FORCED'; end if;
+
+            select count(*) into v_count from information_schema.role_table_grants
+            where table_schema='public' and table_name='trainingos_teacher_agent_policies'
+              and grantee in ('PUBLIC','anon','authenticated','service_role');
+            if v_count<>0 then raise exception 'POLICY_DIRECT_GRANT'; end if;
+
+            select count(*) into v_count from information_schema.routine_privileges
+            where specific_schema='private'
+              and routine_name in (
+                'trainingos_classroom_agent_queue_provider',
+                'trainingos_native_classroom_agent_queue_candidates',
+                'trainingos_classroom_agent_queue_candidates')
+              and grantee in ('PUBLIC','anon','authenticated','service_role')
+              and privilege_type='EXECUTE';
+            if v_count<>0 then raise exception 'PRIVATE_PROVIDER_EXECUTE_GRANT'; end if;
+
+            if not has_function_privilege('authenticated','public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)','EXECUTE')
+               or has_function_privilege('anon','public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)','EXECUTE')
+               or has_function_privilege('service_role','public.get_trainingos_teacher_action_queue_v2(uuid,timestamp with time zone,integer,integer)','EXECUTE') then
+              raise exception 'QUEUE_RPC_ACL_INVALID';
+            end if;
+
+            select pg_get_functiondef(p.oid) into v_trigger
+            from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='public' and p.proname='trigger_trainingos_teacher_agent_from_queue'
+              and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_device_id uuid, p_queue_item_key text, p_expected_source_version text, p_expected_source_digest text, p_trigger_key text, p_executor_context jsonb, p_trigger_context jsonb';
+            if v_trigger is null
+               or position('get_trainingos_teacher_action_queue_v2' in v_trigger)=0
+               or position('elsif v_requires_human' in v_trigger)=0
+               or position('agentDraftEligible' in v_trigger)=0
+               or position('classroom_plan_draft' in v_trigger)=0
+               or position('classroom_explanation_analysis' in v_trigger)=0
+               or position('classroom_follow_up_draft' in v_trigger)=0 then
+              raise exception 'TRIGGER_DRAFT_GUARD_INVALID';
+            end if;
+
+            select pg_get_functiondef(p.oid) into v_queue
+            from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='public' and p.proname='get_trainingos_teacher_action_queue_v2'
+              and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_as_of timestamp with time zone, p_horizon_days integer, p_limit integer';
+            if v_queue is null
+               or position('classroomExplanationEvaluationSource' in v_queue)=0
+               or position('classroomPlanSource' in v_queue)=0
+               or position('classroomTranscriptionFailureSource' in v_queue)=0
+               or position('classroomPlanExplanationSources' in v_queue)>0 then
+              raise exception 'QUEUE_SOURCE_AVAILABILITY_INVALID';
+            end if;
+
+            select pg_get_functiondef(p.oid) into v_provider_definition
+            from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+            where n.nspname='private' and p.proname='trainingos_classroom_agent_queue_provider'
+              and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_as_of timestamp with time zone, p_horizon_end timestamp with time zone';
+            if v_provider_definition is null
+               or position('trainingos_classroom_explanations' in v_provider_definition)=0
+               or position('trainingos_classroom_explanation_analysis_candidates' in v_provider_definition)=0
+               or position('trainingos_classroom_explanation_evaluations' in v_provider_definition)=0
+               or position('analysis_proposed' in v_provider_definition)=0
+               or position('agent_inference' in v_provider_definition)=0
+               or position('formalWritePerformed' in v_provider_definition)=0
+               or position('candidate_payload' in v_provider_definition)>0
+               or position('evaluation_payload' in v_provider_definition)>0
+               or position('private_object_key' in v_provider_definition)>0 then
+              raise exception 'CANONICAL_EXPLANATION_PROVIDER_INVALID';
+            end if;
+
+            v_provider := private.trainingos_classroom_agent_queue_provider(
+              extensions.gen_random_uuid(),clock_timestamp(),clock_timestamp()+interval '1 day');
+            if v_provider<>'[]'::jsonb then raise exception 'EMPTY_CLASS_PROVIDER_NOT_EMPTY'; end if;
+          end;
+          $verify$;
+          SQL
+
+      - name: Publish database evidence and clean
+        if: always()
+        run: |
+          {
+            echo '## PR338 authoritative final v5 — database'
+            echo "- exactHead: \`$PRIVATE_SHA\`"
+            echo "- exactMain: \`$BASE_SHA\`"
+            echo '- canonical bootstrap, initial replay and destructive replay enforced'
+            echo '- Persistent Agent and canonical Explanation Queue SQL E2E enforced'
+            echo '- ownership, source truth, trigger guard, RLS and ACL enforced'
+          } >> "$GITHUB_STEP_SUMMARY"
+          supabase --workdir replay-project stop --no-backup || true
+          rm -rf private-repo replay-project
+          rm -f "$RUNNER_TEMP"/pr338-*.log
