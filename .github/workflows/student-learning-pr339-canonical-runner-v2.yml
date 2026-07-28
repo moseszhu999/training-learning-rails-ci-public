@@ -1,0 +1,433 @@
+name: PR339 canonical student learning exact-head final
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/pr339-canonical-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr339-canonical-final-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: dc28f4b05763f3ef996b24e9c5c376452b36d774
+  BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+jobs:
+  exact-head-final-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Validate exact inputs and read-only credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Verify exact SHA latest-main ancestry and clean checkout
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          test "$(git merge-base "$BASE_SHA" "$PRIVATE_SHA")" = "$BASE_SHA"
+          test "$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA")" = "0"
+          test -z "$(git status --porcelain)"
+          echo PASS > "$RUNNER_TEMP/exact.status"
+
+      - name: Focused Node contracts
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node --test \
+            prototypes/trainingos-agent-mvp-v1/student-exercise-execution.test.mjs \
+            prototypes/trainingos-agent-mvp-v1/student-assessment-resume.test.mjs \
+            prototypes/trainingos-agent-mvp-v1/student-learning-canonical-reconciliation.test.mjs \
+            > "$RUNNER_TEMP/node.log" 2>&1
+          code=$?
+          count="$(grep -E '^# tests [0-9]+' "$RUNNER_TEMP/node.log" | tail -1 | awk '{print $3}')"
+          if [[ "$code" == 0 && "${count:-0}" -gt 0 ]]; then
+            echo "PASS ${count}/${count}" > "$RUNNER_TEMP/node.status"
+            exit 0
+          fi
+          echo "FAIL ${count:-0}" > "$RUNNER_TEMP/node.status"
+          exit 1
+
+      - name: Focused Python contracts
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          : > "$RUNNER_TEMP/python.log"
+          code=0
+          for test_file in \
+            tests/test_trainingos_student_exercise_execution_contract.py \
+            tests/test_trainingos_assessment_resume_execution_contract.py \
+            tests/test_trainingos_learning_workspace_assessment_contract.py
+          do
+            python "$test_file" >> "$RUNNER_TEMP/python.log" 2>&1 || code=1
+          done
+          count="$(grep -Eo 'Ran [0-9]+ tests?' "$RUNNER_TEMP/python.log" | awk '{sum+=$2} END {print sum+0}')"
+          if [[ "$code" == 0 && "$count" -gt 0 ]]; then
+            echo "PASS ${count}/${count}" > "$RUNNER_TEMP/python.status"
+            exit 0
+          fi
+          echo "FAIL ${count}" > "$RUNNER_TEMP/python.status"
+          exit 1
+
+      - name: Install exact dependencies
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/npm-ci.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo PASS > "$RUNNER_TEMP/npm-ci.status"; else echo FAIL > "$RUNNER_TEMP/npm-ci.status"; fi
+          exit "$code"
+
+      - name: Repository typecheck
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/typecheck.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo PASS > "$RUNNER_TEMP/typecheck.status"; else echo FAIL > "$RUNNER_TEMP/typecheck.status"; fi
+          exit "$code"
+
+      - name: VS Code production bundle
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          node extensions/trainingos-classroom-vscode/esbuild.mjs --production > "$RUNNER_TEMP/vscode.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo PASS > "$RUNNER_TEMP/vscode.status"; else echo FAIL > "$RUNNER_TEMP/vscode.status"; fi
+          exit "$code"
+
+      - name: Learning Workspace bridge
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run validate:learning-workspace-bridge > "$RUNNER_TEMP/workspace.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo PASS > "$RUNNER_TEMP/workspace.status"; else echo FAIL > "$RUNNER_TEMP/workspace.status"; fi
+          exit "$code"
+
+      - name: Zero-permission bridge
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run validate:zero-permission-bridge > "$RUNNER_TEMP/zero-permission.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo PASS > "$RUNNER_TEMP/zero-permission.status"; else echo FAIL > "$RUNNER_TEMP/zero-permission.status"; fi
+          exit "$code"
+
+      - name: Production build
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/build.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo PASS > "$RUNNER_TEMP/build.status"; else echo FAIL > "$RUNNER_TEMP/build.status"; fi
+          exit "$code"
+
+      - name: Independent canonical boundary review
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          python - <<'PY' > "$RUNNER_TEMP/review.log" 2>&1
+          from pathlib import Path
+          root = Path('.')
+          migration_path = root / 'supabase/migrations/20260728100300_trainingos_student_learning_execution_canonical_reconciliation_v1.sql'
+          migration = migration_path.read_text(encoding='utf-8')
+          exercise = (root / 'lib/trainingos-agent-gateway/student-exercise-execution.mjs').read_text(encoding='utf-8')
+          assessment = (root / 'lib/trainingos-agent-gateway/student-assessment-resume.mjs').read_text(encoding='utf-8')
+          web = (root / 'apps/training-web/src/lib/trainingos-assessment-runtime.ts').read_text(encoding='utf-8')
+          used = {path.name for path in (root / 'supabase/migrations').glob('2026072810*.sql')}
+          allowed = {
+              '20260728100000_trainingos_student_exercise_execution_v1.sql',
+              '20260728100100_trainingos_assessment_answer_resume_projection_v1.sql',
+              '20260728100200_trainingos_student_exercise_start_concurrency_v1.sql',
+              '20260728100300_trainingos_student_learning_execution_canonical_reconciliation_v1.sql',
+          }
+          gates = {
+              'reserved_migrations_only': used == allowed,
+              'no_second_fact_table': 'create table' not in migration.lower(),
+              'canonical_owners': all(token in migration for token in (
+                  'trainingos_assessment_attempts', 'trainingos_assessment_answers',
+                  'trainingos_assessment_results', 'trainingos_assessment_result_items',
+                  'exercise_submissions')),
+              'exact_attempt_version': 'p_expected_attempt_version integer' in migration,
+              'exact_previous_answer_version': 'p_expected_previous_answer_version integer' in migration,
+              'answer_set_digest': 'answer_set_digest' in migration,
+              'answer_idempotency_conflict': 'TRAININGOS_ASSESSMENT_ANSWER_IDEMPOTENCY_CONFLICT' in migration,
+              'submission_idempotency_conflict': 'TRAININGOS_ASSESSMENT_SUBMISSION_IDEMPOTENCY_CONFLICT' in migration,
+              'formal_freeze': 'is_submitted_version = true' in migration,
+              'current_result': "r.status in ('finalized','corrected')" in migration,
+              'weak_save_revoked': 'save_trainingos_assessment_answer(uuid,uuid,integer,jsonb)' in migration,
+              'weak_submit_revoked': 'submit_trainingos_assessment_attempt(uuid,integer,jsonb)' in migration,
+              'old_exercise_confirm_revoked': 'confirm_my_trainingos_exercise_submission(uuid,bigint,text,boolean,text)' in migration,
+              'exercise_human_gateway': "p_actor_kind: actor.actorKind" in exercise,
+              'assessment_agent_denial': 'TRAININGOS_ASSESSMENT_AGENT_CONFIRMATION_FORBIDDEN' in assessment,
+              'web_prepare_confirm': all(token in web for token in (
+                  'prepare_trainingos_assessment_submission',
+                  'confirm_trainingos_assessment_submission')),
+              'no_service_role_client': 'service_role' not in (exercise + assessment).lower(),
+              'transaction_e2e': all((root / name).is_file() for name in (
+                  'tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql',
+                  'tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql')),
+          }
+          failed = [name for name, passed in gates.items() if not passed]
+          print(f'gates={len(gates)} passed={len(gates)-len(failed)} failed={len(failed)}')
+          raise SystemExit(1 if failed else 0)
+          PY
+          code=$?
+          count="$(grep -Eo 'gates=[0-9]+' "$RUNNER_TEMP/review.log" | cut -d= -f2)"
+          if [[ "$code" == 0 ]]; then echo "PASS ${count}/${count}" > "$RUNNER_TEMP/review.status"; else echo "FAIL ${count:-0}" > "$RUNNER_TEMP/review.status"; fi
+          exit "$code"
+
+      - name: First isolated Supabase migration replay
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          supabase start > "$RUNNER_TEMP/db-first.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/db-first.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/db-first.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          if [[ "$code" == 0 ]]; then
+            echo "PASS ${applied} last=${last:-none}" > "$RUNNER_TEMP/db-first.status"
+            exit 0
+          fi
+          echo "FAIL ${applied} last=${last:-none}" > "$RUNNER_TEMP/db-first.status"
+          exit 1
+
+      - name: Second deterministic Supabase migration replay
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          supabase db reset --local > "$RUNNER_TEMP/db-second.log" 2>&1
+          code=$?
+          applied="$(grep -c 'Applying migration ' "$RUNNER_TEMP/db-second.log" || true)"
+          last="$(grep 'Applying migration ' "$RUNNER_TEMP/db-second.log" | tail -1 | sed 's/.*Applying migration //' || true)"
+          if [[ "$code" == 0 ]]; then
+            echo "PASS ${applied} last=${last:-none}" > "$RUNNER_TEMP/db-second.status"
+            exit 0
+          fi
+          echo "FAIL ${applied} last=${last:-none}" > "$RUNNER_TEMP/db-second.status"
+          exit 1
+
+      - name: Canonical ACL and single-owner verification
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          eval "$(supabase status -o env 2>/dev/null | grep '^DB_URL=')"
+          if [[ -z "${DB_URL:-}" ]]; then echo FAIL > "$RUNNER_TEMP/db-acl.status"; exit 1; fi
+          result="$(psql "$DB_URL" -X -Atv ON_ERROR_STOP=1 <<'SQL' 2> "$RUNNER_TEMP/db-acl.log"
+          select jsonb_build_object(
+            'duplicateTables',(
+              select count(*) from information_schema.tables
+              where table_schema='public' and table_name in (
+                'student_exercise_submissions','student_exercise_answers',
+                'student_assessment_attempts','student_assessment_answers',
+                'assessment_resume_answers','assessment_execution_state'
+              )
+            ),
+            'assessmentDirectPrivileges',(
+              select count(*) from information_schema.role_table_grants
+              where grantee='authenticated' and table_schema='public'
+                and table_name in ('trainingos_assessment_attempts','trainingos_assessment_answers')
+                and privilege_type in ('INSERT','UPDATE','DELETE')
+            ),
+            'oldAssessmentSave',case
+              when to_regprocedure('public.save_trainingos_assessment_answer(uuid,uuid,integer,jsonb)') is null then false
+              else has_function_privilege('authenticated','public.save_trainingos_assessment_answer(uuid,uuid,integer,jsonb)','execute')
+            end,
+            'oldAssessmentSubmit',case
+              when to_regprocedure('public.submit_trainingos_assessment_attempt(uuid,integer,jsonb)') is null then false
+              else has_function_privilege('authenticated','public.submit_trainingos_assessment_attempt(uuid,integer,jsonb)','execute')
+            end,
+            'newAssessmentSave',has_function_privilege(
+              'authenticated','public.save_trainingos_assessment_answer(uuid,uuid,integer,integer,jsonb,text)','execute'
+            ),
+            'newAssessmentConfirm',has_function_privilege(
+              'authenticated','public.confirm_trainingos_assessment_submission(uuid,integer,text,text)','execute'
+            ),
+            'oldExerciseConfirm',case
+              when to_regprocedure('public.confirm_my_trainingos_exercise_submission(uuid,bigint,text,boolean,text)') is null then false
+              else has_function_privilege('authenticated','public.confirm_my_trainingos_exercise_submission(uuid,bigint,text,boolean,text)','execute')
+            end,
+            'newExerciseConfirm',has_function_privilege(
+              'authenticated','public.confirm_my_trainingos_exercise_submission(uuid,bigint,text,text,text)','execute'
+            )
+          );
+SQL
+          )"
+          psql_code=$?
+          if [[ "$psql_code" != 0 ]]; then echo FAIL > "$RUNNER_TEMP/db-acl.status"; exit 1; fi
+          python - "$result" "$RUNNER_TEMP/db-acl.status" <<'PY'
+          import json, pathlib, sys
+          data = json.loads(sys.argv[1])
+          passed = (
+              data.get('duplicateTables') == 0
+              and data.get('assessmentDirectPrivileges') == 0
+              and data.get('oldAssessmentSave') is False
+              and data.get('oldAssessmentSubmit') is False
+              and data.get('newAssessmentSave') is True
+              and data.get('newAssessmentConfirm') is True
+              and data.get('oldExerciseConfirm') is False
+              and data.get('newExerciseConfirm') is True
+          )
+          pathlib.Path(sys.argv[2]).write_text('PASS 8/8' if passed else 'FAIL', encoding='utf-8')
+          raise SystemExit(0 if passed else 1)
+          PY
+
+      - name: Ordinary exercise transaction E2E and zero residue
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          eval "$(supabase status -o env 2>/dev/null | grep '^DB_URL=')"
+          if [[ -z "${DB_URL:-}" ]]; then echo FAIL > "$RUNNER_TEMP/exercise-e2e.status"; exit 1; fi
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+            -f tests/sql/trainingos_student_exercise_canonical_reconciliation_e2e.sql \
+            > "$RUNNER_TEMP/exercise-e2e.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo 'PASS zero-residue' > "$RUNNER_TEMP/exercise-e2e.status"; else echo FAIL > "$RUNNER_TEMP/exercise-e2e.status"; fi
+          exit "$code"
+
+      - name: Stage assessment transaction E2E and zero residue
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          eval "$(supabase status -o env 2>/dev/null | grep '^DB_URL=')"
+          if [[ -z "${DB_URL:-}" ]]; then echo FAIL > "$RUNNER_TEMP/assessment-e2e.status"; exit 1; fi
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+            -f tests/sql/trainingos_student_learning_canonical_reconciliation_e2e.sql \
+            > "$RUNNER_TEMP/assessment-e2e.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo 'PASS zero-residue' > "$RUNNER_TEMP/assessment-e2e.status"; else echo FAIL > "$RUNNER_TEMP/assessment-e2e.status"; fi
+          exit "$code"
+
+      - name: Current finalized and corrected Result regression E2E
+        if: always()
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          eval "$(supabase status -o env 2>/dev/null | grep '^DB_URL=')"
+          if [[ -z "${DB_URL:-}" ]]; then echo FAIL > "$RUNNER_TEMP/result-e2e.status"; exit 1; fi
+          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 \
+            -f tests/sql/trainingos_wave3_assessment_grading_result_e2e.sql \
+            > "$RUNNER_TEMP/result-e2e.log" 2>&1
+          code=$?
+          if [[ "$code" == 0 ]]; then echo 'PASS finalized-corrected' > "$RUNNER_TEMP/result-e2e.status"; else echo FAIL > "$RUNNER_TEMP/result-e2e.status"; fi
+          exit "$code"
+
+      - name: Publish sanitized final result
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const read = (name) => {
+            try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8').trim(); }
+            catch { return 'NOT_RUN'; }
+          };
+          const lines = [
+            '## PR #339 canonical exact-head final gates',
+            '',
+            `- Exact private SHA: \`${process.env.PRIVATE_SHA}\``,
+            `- Latest-main ancestry: **${read('exact.status')}**`,
+            `- Focused Node contracts: **${read('node.status')}**`,
+            `- Focused Python contracts: **${read('python.status')}**`,
+            `- Dependency install: **${read('npm-ci.status')}**`,
+            `- Repository typecheck: **${read('typecheck.status')}**`,
+            `- VS Code production bundle: **${read('vscode.status')}**`,
+            `- Learning Workspace bridge: **${read('workspace.status')}**`,
+            `- Zero-permission bridge: **${read('zero-permission.status')}**`,
+            `- Production build: **${read('build.status')}**`,
+            `- Independent canonical review: **${read('review.status')}**`,
+            `- First isolated migration replay: **${read('db-first.status')}**`,
+            `- Second deterministic migration replay: **${read('db-second.status')}**`,
+            `- Canonical ACL / single owner: **${read('db-acl.status')}**`,
+            `- Ordinary exercise transaction E2E: **${read('exercise-e2e.status')}**`,
+            `- Stage assessment transaction E2E: **${read('assessment-e2e.status')}**`,
+            `- Current finalized/corrected Result regression: **${read('result-e2e.status')}**`,
+            '',
+            'Private source, migrations, build output, fixtures, and raw logs are not uploaded. Raw logs remain sealed and are deleted.'
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          NODE
+
+      - name: Stop database and delete private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d private-repo ]]; then
+            (cd private-repo && supabase stop --no-backup >/dev/null 2>&1 || true)
+          fi
+          rm -rf private-repo
+          find "$RUNNER_TEMP" -maxdepth 1 -type f \
+            \( -name '*.log' -o -name '*.status' \) -delete
