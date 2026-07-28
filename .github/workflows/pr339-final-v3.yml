@@ -1,0 +1,79 @@
+name: PR339 canonical exact-head final v3
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/pr339-final-v3-trigger.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PRIVATE_SHA: dc28f4b05763f3ef996b24e9c5c376452b36d774
+  BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+
+jobs:
+  final:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out public controller
+        uses: actions/checkout@v4
+        with:
+          path: ci-repo
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate read-only private credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Run sealed exact-head application and database gates
+        shell: bash
+        run: bash ci-repo/scripts/run-pr339-final-v3.sh private-repo
+
+      - name: Stop database and delete private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d private-repo ]]; then
+            (cd private-repo && supabase stop --no-backup >/dev/null 2>&1 || true)
+          fi
+          rm -rf private-repo
+          find "$RUNNER_TEMP" -maxdepth 2 -type f -name 'pr339-*' -delete
+          rm -rf "$RUNNER_TEMP/pr339-status"
