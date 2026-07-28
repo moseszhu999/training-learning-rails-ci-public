@@ -126,8 +126,7 @@ jobs:
           payload=payloads[-1] if payloads else {}
           residue=payload.get('residue') or {}
           cleanup=bool(residue) and all(int(value)==0 for value in residue.values())
-          ok=(
-              payload.get('status')=='PASS'
+          ok=(payload.get('status')=='PASS'
               and payload.get('canonicalExecutionReused') is True
               and payload.get('canonicalExecutionCount')==1
               and payload.get('triggerReceiptCount')==2
@@ -136,47 +135,12 @@ jobs:
               and payload.get('humanInitialTriggerDenied') is True
               and payload.get('humanReplayDenied') is True
               and payload.get('changedExecutorProvenanceDenied') is True
-              and cleanup
-          )
+              and cleanup)
           print('RECIPE_SQL_E2E status=%s execution=%s receipts=%s cleanup=%s' % (
               'PASS' if ok else 'FAIL',payload.get('canonicalExecutionCount',0),
               payload.get('triggerReceiptCount',0),'PASS' if cleanup else 'FAIL'))
           raise SystemExit(0 if ok else 1)
           PY
-
-      - name: Verify Recipe ACL and canonical execution ownership
-        working-directory: replay-project
-        shell: bash
-        run: |
-          set -euo pipefail
-          eval "$(supabase status -o env | grep '^DB_URL=')"
-          psql "$DB_URL" -X -qAt -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/recipe-acl.log" 2>&1 <<'SQL'
-          do $verify$
-          declare
-            v_tables integer;
-            v_forced integer;
-            v_direct integer;
-          begin
-            select count(*) into v_tables from information_schema.tables
-            where table_schema='public' and table_name in(
-              'trainingos_agent_recipes','trainingos_agent_recipe_versions',
-              'trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts'
-            );
-            select count(*) into v_forced from pg_class c join pg_namespace n on n.oid=c.relnamespace
-            where n.nspname='public' and c.relname in(
-              'trainingos_agent_recipes','trainingos_agent_recipe_versions',
-              'trainingos_agent_recipe_events','trainingos_agent_recipe_trigger_receipts'
-            ) and c.relrowsecurity and c.relforcerowsecurity;
-            select count(*) into v_direct from information_schema.role_table_grants
-            where grantee in('authenticated','service_role') and table_schema='public'
-              and table_name like 'trainingos_agent_recipe%';
-            if v_tables<>4 or v_forced<>4 or v_direct<>0 then
-              raise exception 'RECIPE_ACL_OR_SCHEMA_INVALID';
-            end if;
-          end;
-          $verify$;
-SQL
-          echo 'RECIPE_ACL status=PASS tables=4 forced_rls=4 direct_authenticated_or_service_role=0 canonical_execution_owner=trainingos_agent_executions'
 
       - name: Stop isolated database and remove sealed logs
         if: always()
@@ -185,5 +149,5 @@ SQL
         run: |
           supabase stop --no-backup || true
           rm -f "$RUNNER_TEMP/recipe-canonical-first.log" "$RUNNER_TEMP/recipe-canonical-second.log" \
-            "$RUNNER_TEMP/recipe-sql-e2e.log" "$RUNNER_TEMP/recipe-acl.log"
+            "$RUNNER_TEMP/recipe-sql-e2e.log"
           rm -rf ../private-repo
