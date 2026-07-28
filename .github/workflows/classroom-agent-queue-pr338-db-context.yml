@@ -81,7 +81,7 @@ jobs:
           {
             echo "original_status=$([[ "$original_code" == 0 ]] && echo PASS || echo FAIL)"
             echo '[original_redacted_error_context]'
-            grep -Ei -B4 -A8 'TRAININGOS_TEACHER_ACTION_QUEUE_LIMIT_INVALID|SQLSTATE|CONTEXT:|PL/pgSQL|ERROR' \
+            grep -Ei -B4 -A8 'unexpected end of function definition|SQLSTATE|CONTEXT:|PL/pgSQL|ERROR' \
               "$RUNNER_TEMP/pr338-original.log" \
               | tail -40 \
               | sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g; s#https?://[^ ]+#<url>#g' \
@@ -96,8 +96,8 @@ jobs:
           from pathlib import Path
           path = Path('held-migrations/candidate.sql')
           text = path.read_text()
-          old = 'v_base := public.get_trainingos_teacher_action_queue(p_class_id,p_as_of,p_horizon_days,500);'
-          new = 'v_base := public.get_trainingos_teacher_action_queue(p_class_id,p_as_of,p_horizon_days,least(p_limit,200));'
+          old = '        )) as item,'
+          new = '        ))) as item,'
           if text.count(old) != 1:
               raise SystemExit(f'candidate_anchor_count={text.count(old)}')
           path.write_text(text.replace(old,new))
