@@ -10,11 +10,11 @@ permissions:
 
 concurrency:
   group: recipe-runtime-pr325-ui-post-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
-  BASE_SHA: bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100
-  PRIVATE_SHA: 9328a7f64f76d2ce05a746d56a5e7919ebb6cbf5
+  BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+  PRIVATE_SHA: 8670b6cbc20154985c51e344cdd83eece6997e17
 
 jobs:
   agent-ui-baseline-comparison:
@@ -84,17 +84,21 @@ jobs:
           base = summarize(sys.argv[1], sys.argv[2])
           candidate = summarize(sys.argv[3], sys.argv[4])
           same = base['status'] == 'FAIL' and candidate['status'] == 'FAIL' and base['errorMessage'] == candidate['errorMessage'] and base['errorMessage'] is not None
+          both_pass = base['status'] == 'PASS' and candidate['status'] == 'PASS'
+          no_regression = same or both_pass
           payload = {
-              'schemaVersion': 'trainingos-public-ci-agent-ui-comparison-v1',
-              'baseSha': 'bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100',
-              'candidateSha': '9328a7f64f76d2ce05a746d56a5e7919ebb6cbf5',
+              'schemaVersion': 'trainingos-public-ci-agent-ui-comparison-v2',
+              'baseSha': '9b8f04f29d572d22434ea577b5ed3543e4f6a2d3',
+              'candidateSha': '8670b6cbc20154985c51e344cdd83eece6997e17',
               'base': base,
               'candidate': candidate,
               'sameBaselineFailure': same,
+              'bothPass': both_pass,
+              'noRegression': no_regression,
               'rawOutputPublished': False,
           }
           pathlib.Path(sys.argv[5]).write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
-          print(f'AGENT_UI_BASELINE_COMPARISON same={same} base={base["status"]} candidate={candidate["status"]}')
+          print(f'AGENT_UI_BASELINE_COMPARISON no_regression={no_regression} base={base["status"]} candidate={candidate["status"]}')
           PY
           exit 0
 
@@ -106,13 +110,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Enforce no Agent UI regression beyond base
+      - name: Enforce no Agent UI regression beyond current base
         shell: bash
         run: |
           python - "$RUNNER_TEMP/recipe-agent-ui-comparison.json" <<'PY'
           import json, pathlib, sys
           payload = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-          raise SystemExit(0 if payload.get('sameBaselineFailure') is True else 1)
+          raise SystemExit(0 if payload.get('noRegression') is True else 1)
           PY
 
       - name: Remove private checkouts and sealed logs
