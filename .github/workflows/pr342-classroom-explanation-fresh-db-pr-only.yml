@@ -59,10 +59,10 @@ jobs:
               --commit-sha "$PRIVATE_SHA"
             supabase --workdir "$workdir" start
             supabase --workdir "$workdir" db reset --local --no-seed
-            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -At \
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
               -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$first"
             supabase --workdir "$workdir" db reset --local --no-seed
-            psql "$LOCAL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -At \
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
               -f tests/sql/trainingos_classroom_explanation_e2e.sql > "$second"
           } > "$log" 2>&1
           code=$?
