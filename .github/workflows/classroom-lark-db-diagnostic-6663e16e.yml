@@ -66,13 +66,14 @@ jobs:
           import sys
 
           path = pathlib.Path(sys.argv[1])
-          text = path.read_text(encoding='utf-8', errors='replace')
+          raw = path.read_text(encoding='utf-8', errors='replace')
+          text = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', raw)
           applying = re.findall(r'Applying migration\s+([^\s]+)', text, flags=re.I)
           candidates = []
           for line in text.splitlines():
-              stripped = line.strip()
+              stripped = re.sub(r'\s+', ' ', line.strip())
               if not re.search(
-                  r'(ERROR:|FATAL:|SQLSTATE|failed to apply|migration failed|syntax error|does not exist|already exists|duplicate|violates|permission denied|container.*failed|health check)',
+                  r'(ERROR:|FATAL:|SQLSTATE|DETAIL:|HINT:|CONTEXT:|failed to apply|migration failed|syntax error|does not exist|already exists|duplicate|violates|permission denied|effect/sql/SqlError|Failed to execute statement)',
                   stripped,
                   flags=re.I,
               ):
@@ -80,13 +81,13 @@ jobs:
               if 'Try rerunning the command with --debug' in stripped:
                   continue
               candidates.append(stripped)
-          selected = candidates[-6:]
+          selected = candidates[-12:]
           error = ' | '.join(selected) if selected else 'none-captured'
           error = re.sub(r'https?://\S+', '<url>', error)
           error = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<uuid>', error, flags=re.I)
           error = re.sub(r"'[^']*'", "'<redacted>'", error)
-          error = re.sub(r'\s+', ' ', error)[:1200]
-          digest = hashlib.sha256(text.encode('utf-8', errors='replace')).hexdigest()
+          error = re.sub(r'\s+', ' ', error)[:2400]
+          digest = hashlib.sha256(raw.encode('utf-8', errors='replace')).hexdigest()
           print(
               'DB_REPLAY_DIAGNOSTIC '
               f'init={sys.argv[2]} start={sys.argv[3]} reset={sys.argv[4]} '
