@@ -14,7 +14,7 @@ concurrency:
 
 env:
   BASE_SHA: bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100
-  PRIVATE_SHA: 7f8118afd2e8a5d12154d678cab9fa929a76d079
+  PRIVATE_SHA: 028871119c5cbf68923308b4478ca7438348457b
 
 jobs:
   agent-ui-baseline-comparison:
@@ -80,17 +80,14 @@ jobs:
           def summarize(path, code):
               text = pathlib.Path(path).read_text(encoding='utf-8', errors='replace')
               messages = re.findall(r'^Error:\s+(.+)$', text, flags=re.M)
-              return {
-                  'status': 'PASS' if int(code) == 0 else 'FAIL',
-                  'errorMessage': messages[0].strip() if messages else None,
-              }
+              return {'status': 'PASS' if int(code) == 0 else 'FAIL', 'errorMessage': messages[0].strip() if messages else None}
           base = summarize(sys.argv[1], sys.argv[2])
           candidate = summarize(sys.argv[3], sys.argv[4])
           same = base['status'] == 'FAIL' and candidate['status'] == 'FAIL' and base['errorMessage'] == candidate['errorMessage'] and base['errorMessage'] is not None
           payload = {
               'schemaVersion': 'trainingos-public-ci-agent-ui-comparison-v1',
               'baseSha': 'bd3c0cdc9e1d331723ae0ad3e2ff6a2bad0b4100',
-              'candidateSha': '7f8118afd2e8a5d12154d678cab9fa929a76d079',
+              'candidateSha': '028871119c5cbf68923308b4478ca7438348457b',
               'base': base,
               'candidate': candidate,
               'sameBaselineFailure': same,
@@ -104,7 +101,7 @@ jobs:
       - name: Upload sanitized Agent UI comparison
         uses: actions/upload-artifact@v4
         with:
-          name: recipe-pr325-agent-ui-comparison
+          name: recipe-pr325-agent-ui-comparison-current
           path: ${{ runner.temp }}/recipe-agent-ui-comparison.json
           if-no-files-found: error
           retention-days: 7
