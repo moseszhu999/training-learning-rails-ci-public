@@ -164,12 +164,52 @@ jobs:
           npm ci > "$RUNNER_TEMP/owned-npm-ci.log" 2>&1
           echo 'OWNED_STAGE npm-ci PASS'
 
-      - name: Stage python-contracts
+      - name: Capture sanitized python-contracts result
+        id: python_full
         working-directory: private-repo
         shell: bash
         run: |
+          set +e
           npm run test:python > "$RUNNER_TEMP/owned-python-contracts.log" 2>&1
-          echo 'OWNED_STAGE python-contracts PASS'
+          code=$?
+          python - "$RUNNER_TEMP/owned-python-contracts.log" "$code" "$RUNNER_TEMP/recipe-python-contract-summary.json" "$GITHUB_OUTPUT" <<'PY'
+          import json, pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          code = int(sys.argv[2])
+          ran = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          failures = re.findall(r'^FAIL:\s+([^\n]+)$', text, flags=re.M)
+          errors = re.findall(r'^ERROR:\s+([^\n]+)$', text, flags=re.M)
+          status = 'PASS' if code == 0 else 'FAIL'
+          payload = {
+              'schemaVersion': 'trainingos-public-ci-python-summary-v1',
+              'privateSha': '7f8118afd2e8a5d12154d678cab9fa929a76d079',
+              'status': status,
+              'testCount': int(ran.group(1)) if ran else 0,
+              'failureIds': failures[:50],
+              'errorIds': errors[:50],
+              'rawOutputPublished': False,
+          }
+          pathlib.Path(sys.argv[3]).write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
+          with open(sys.argv[4], 'a', encoding='utf-8') as out:
+              out.write(f'status={status}\n')
+          print(f'OWNED_STAGE python-contracts {status} count={payload["testCount"]} failures={len(failures)} errors={len(errors)}')
+          PY
+          exit 0
+
+      - name: Upload sanitized python-contracts summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recipe-pr325-python-contract-summary
+          path: ${{ runner.temp }}/recipe-python-contract-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce python-contracts
+        shell: bash
+        env:
+          PYTHON_STATUS: ${{ steps.python_full.outputs.status }}
+        run: test "$PYTHON_STATUS" = PASS
 
       - name: Stage typecheck
         working-directory: private-repo
@@ -244,4 +284,4 @@ jobs:
       - name: Remove owned-CI private checkout and sealed logs
         if: always()
         shell: bash
-        run: rm -rf private-repo "$RUNNER_TEMP"/owned-*.log
+        run: rm -rf private-repo "$RUNNER_TEMP"/owned-*.log "$RUNNER_TEMP/recipe-python-contract-summary.json"
