@@ -15,9 +15,9 @@ jobs:
   exact-sync-inputs:
     runs-on: ubuntu-24.04
     env:
-      MAIN_SHA: cf3a6cd4062c00c6798ea0c20e7c2f1c642f7d37
-      PRIVATE_SHA: c5caf2e145d72ae4b22bc02cc56ceb176ee6589c
-      OLD_BASE_SHA: 9b8f04f29d572d22434ea577b5ed3543e4f6a2d3
+      MAIN_SHA: 542c590e6ce8ebefeb0c5a010e4dc3bfa9f75547
+      PRIVATE_SHA: 3203894f89d956023d5f399c9a5c02f33447a03a
+      OLD_BASE_SHA: cf3a6cd4062c00c6798ea0c20e7c2f1c642f7d37
     steps:
       - uses: actions/checkout@v4
         with:
