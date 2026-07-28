@@ -33,8 +33,7 @@ jobs:
         with:
           version: latest
           github-token: ${{ github.token }}
-      - name: Diagnose canonical trigger anchor and candidate fix
-        continue-on-error: true
+      - name: Verify canonical trigger insertion candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -58,66 +57,36 @@ jobs:
           supabase --workdir replay-project start > "$RUNNER_TEMP/pr338-base-start.log" 2>&1
           eval "$(supabase --workdir replay-project status -o env | grep '^DB_URL=')"
 
-          psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 > "$RUNNER_TEMP/pr338-base-definitions.txt" <<'SQL'
-          select pg_get_functiondef(p.oid)
-          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-          where n.nspname='public'
-            and p.proname in ('get_trainingos_teacher_action_queue','trigger_trainingos_teacher_agent_from_queue')
-          order by p.proname,pg_get_function_identity_arguments(p.oid);
-          SQL
-
-          {
-            echo "private_sha=$PRIVATE_SHA"
-            echo "base_sha=$BASE_SHA"
-            echo "main_sha=$MAIN_SHA"
-            echo "private_tree=$(git -C private-repo rev-parse "$PRIVATE_SHA^{tree}")"
-            echo "main_tree=$(git -C private-repo rev-parse "$MAIN_SHA^{tree}")"
-            echo '[base_queue_contract_lines]'
-            grep -Ei 'p_limit|LIMIT_INVALID|get_trainingos_teacher_action_queue\(' "$RUNNER_TEMP/pr338-base-definitions.txt" | head -40 || true
-            echo '[base_confirmation_guard_context]'
-            grep -n -Ei -B6 -A10 'v_requires_human|suggestion_only' "$RUNNER_TEMP/pr338-base-definitions.txt" | head -80 || true
-          } > sanitized/pr338-db-context.txt
-
-          set +e
-          psql "$DB_URL" -X -v ON_ERROR_STOP=1 -f held-migrations/original.sql \
-            > "$RUNNER_TEMP/pr338-original.log" 2>&1
-          original_code=$?
-          set -e
-          {
-            echo "original_status=$([[ "$original_code" == 0 ]] && echo PASS || echo FAIL)"
-            echo '[original_redacted_error_context]'
-            grep -Ei -B4 -A8 'TRAININGOS_[A-Z0-9_]+|SQLSTATE|CONTEXT:|PL/pgSQL|ERROR' \
-              "$RUNNER_TEMP/pr338-original.log" | tail -40 | cut -c1-600 || true
-          } >> sanitized/pr338-db-context.txt
-
-          supabase --workdir replay-project db reset --local --no-seed \
-            > "$RUNNER_TEMP/pr338-base-reset.log" 2>&1
-
           cp held-migrations/original.sql held-migrations/candidate.sql
           python - <<'PY'
           from pathlib import Path
           migration = Path('held-migrations/candidate.sql')
-          definition = Path('/home/runner/work/_temp/pr338-base-definitions.txt').read_text()
-          guards = []
-          for raw in definition.splitlines():
-              line = raw.strip()
-              if 'v_requires_human' in line and line.lower().endswith(' then') and line.lower().split()[0] in {'if','elsif'}:
-                  guards.append(line)
-          guards = list(dict.fromkeys(guards))
-          Path('sanitized/canonical-guard-candidates.txt').write_text(repr(guards) + '\n')
-          if len(guards) != 1:
-              raise SystemExit(f'canonical_guard_candidates={guards!r}')
-          actual = guards[0]
-          keyword = actual.split()[0]
           text = migration.read_text()
-          anchor_decl = "v_confirmation_anchor constant text := 'elsif v_requires_human then';"
-          replacement_open = '$replacement$elsif v_requires_human\n'
-          if text.count(anchor_decl) != 1 or text.count(replacement_open) != 1:
-              raise SystemExit('migration_confirmation_anchor_not_unique')
-          text = text.replace(anchor_decl, f"v_confirmation_anchor constant text := '{actual}';")
-          text = text.replace(replacement_open, f'$replacement${keyword} v_requires_human\n')
-          migration.write_text(text)
-          Path('sanitized/canonical-guard.txt').write_text(actual + '\n')
+          old_decl = "v_confirmation_anchor constant text := 'elsif v_requires_human then';"
+          old_replacement = """v_confirmation_replacement constant text := $replacement$elsif v_requires_human
+      and not (
+        coalesce((v_item->>'agentDraftEligible')::boolean,false)
+        and v_workflow in (
+          'classroom_plan_draft',
+          'classroom_explanation_analysis',
+          'classroom_follow_up_draft'
+        )
+      ) then$replacement$;"""
+          new_decl = "v_confirmation_anchor constant text := $$elsif v_policy_projection->>'effectiveMode'='assisted' then$$;"
+          new_replacement = """v_confirmation_replacement constant text := $replacement$elsif v_requires_human
+      and not (
+        coalesce((v_item->>'agentDraftEligible')::boolean,false)
+        and v_workflow in (
+          'classroom_plan_draft',
+          'classroom_explanation_analysis',
+          'classroom_follow_up_draft'
+        )
+      ) then
+    v_disposition := 'suggestion_only';
+  elsif v_policy_projection->>'effectiveMode'='assisted' then$replacement$;"""
+          if text.count(old_decl) != 1 or text.count(old_replacement) != 1:
+              raise SystemExit('candidate_anchor_source_not_unique')
+          migration.write_text(text.replace(old_decl,new_decl).replace(old_replacement,new_replacement))
           PY
 
           set +e
@@ -125,22 +94,46 @@ jobs:
             > "$RUNNER_TEMP/pr338-candidate.log" 2>&1
           candidate_code=$?
           set -e
+
+          if [[ "$candidate_code" == 0 ]]; then
+            trigger_definition="$(psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 <<'SQL'
+          select pg_get_functiondef(p.oid)
+          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname='public'
+            and p.proname='trigger_trainingos_teacher_agent_from_queue'
+            and pg_get_function_identity_arguments(p.oid)='p_class_id uuid, p_device_id uuid, p_queue_item_key text, p_expected_source_version text, p_expected_source_digest text, p_trigger_key text, p_executor_context jsonb, p_trigger_context jsonb';
+          SQL
+          )"
+            [[ "$(grep -o "elsif v_requires_human" <<<"$trigger_definition" | wc -l | tr -d ' ')" == 1 ]]
+            [[ "$(grep -o "agentDraftEligible" <<<"$trigger_definition" | wc -l | tr -d ' ')" == 1 ]]
+            [[ "$(grep -o "v_disposition := 'suggestion_only'" <<<"$trigger_definition" | wc -l | tr -d ' ')" -ge 2 ]]
+            trigger_status=PASS
+          else
+            trigger_status=FAIL
+          fi
+
           {
-            echo "canonical_guard=$(cat sanitized/canonical-guard.txt)"
+            echo "private_sha=$PRIVATE_SHA"
+            echo "base_sha=$BASE_SHA"
+            echo "main_sha=$MAIN_SHA"
+            echo "private_tree=$(git -C private-repo rev-parse "$PRIVATE_SHA^{tree}")"
+            echo "main_tree=$(git -C private-repo rev-parse "$MAIN_SHA^{tree}")"
             echo "candidate_status=$([[ "$candidate_code" == 0 ]] && echo PASS || echo FAIL)"
+            echo "trigger_guard_status=$trigger_status"
             echo '[candidate_redacted_error_context]'
             grep -Ei -B4 -A8 'TRAININGOS_[A-Z0-9_]+|SQLSTATE|CONTEXT:|PL/pgSQL|ERROR' \
               "$RUNNER_TEMP/pr338-candidate.log" | tail -40 | cut -c1-600 || true
-          } >> sanitized/pr338-db-context.txt
-          rm -f sanitized/canonical-guard.txt sanitized/canonical-guard-candidates.txt
+          } > sanitized/pr338-db-context.txt
 
           supabase --workdir replay-project stop --no-backup || true
           rm -rf private-repo replay-project held-migrations
-          rm -f "$RUNNER_TEMP"/pr338-*.log "$RUNNER_TEMP/pr338-base-definitions.txt"
+          rm -f "$RUNNER_TEMP"/pr338-*.log
+          [[ "$candidate_code" == 0 ]]
+          [[ "$trigger_status" == PASS ]]
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: classroom-agent-queue-pr338-db-context
-          path: sanitized
+          path: sanitized/pr338-db-context.txt
           if-no-files-found: error
           retention-days: 1
