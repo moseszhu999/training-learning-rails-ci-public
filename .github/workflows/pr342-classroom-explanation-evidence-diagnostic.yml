@@ -1,0 +1,205 @@
+name: PR342 Classroom Explanation evidence assertion diagnostic
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pr342-classroom-explanation-evidence-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr342-evidence-diagnostic-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 7c575a2e42e76d564e4ba15dfe8f682da8dee366
+  BASE_SHA: a2875b971b513f667caa67272eb4271485d2858c
+  LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+
+jobs:
+  diagnose-evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Validate exact private inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run sealed canonical evidence probe
+        id: probe
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          workdir="$RUNNER_TEMP/pr342-evidence-supabase"
+          raw="$RUNNER_TEMP/pr342-evidence-bootstrap.log"
+          output="$RUNNER_TEMP/pr342-evidence.out"
+          errors="$RUNNER_TEMP/pr342-evidence.err"
+          rm -rf "$workdir" && mkdir -p "$workdir"
+
+          precheck=1; bootstrap=1; start=1; reset=1; e2e=1; parse=1
+          actual_sha="$(git rev-parse HEAD 2>/dev/null)"
+          merge_base="$(git merge-base "$BASE_SHA" "$PRIVATE_SHA" 2>/dev/null)"
+          behind="$(git rev-list --count "$PRIVATE_SHA..$BASE_SHA" 2>/dev/null)"
+          [[ "$actual_sha" == "$PRIVATE_SHA" && "$merge_base" == "$BASE_SHA" && "$behind" == 0 ]]
+          precheck=$?
+
+          if [[ "$precheck" == 0 ]]; then
+            {
+              supabase --workdir "$workdir" init --force --yes
+              python scripts/build-trainingos-fresh-bootstrap.py \
+                --repo-root "$PWD" \
+                --output-dir "$workdir/supabase/migrations" \
+                --commit-sha "$PRIVATE_SHA"
+            } > "$raw" 2>&1
+            bootstrap=$?
+          fi
+
+          if [[ "$bootstrap" == 0 ]]; then
+            supabase --workdir "$workdir" start >> "$raw" 2>&1
+            start=$?
+          fi
+
+          if [[ "$start" == 0 ]]; then
+            supabase --workdir "$workdir" db reset --local --no-seed >> "$raw" 2>&1
+            reset=$?
+          fi
+
+          if [[ "$reset" == 0 ]]; then
+            psql "$LOCAL_DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -At \
+              -f tests/sql/trainingos_classroom_explanation_e2e.sql \
+              > "$output" 2> "$errors"
+            e2e=$?
+          fi
+
+          if [[ "$e2e" == 0 ]]; then
+            python - "$output" "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          lines = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace').splitlines()
+          payload = next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{')), None)
+          required = (
+              'oneActiveExplanationEnforced',
+              'activeSlotReleasedAfterUpload',
+              'secondExplanationStarted',
+              'classEndedStartRejected',
+              'agentRecordingRejected',
+              'agentInferencePersisted',
+              'prohibitedCandidateRejected',
+              'teacherEvaluationConfirmed',
+              'agentConfirmRejected',
+              'staleVersionRejected',
+              'staleTranscriptRejected',
+              'crossClassRejected',
+              'transcriptUpdateRejected',
+              'transcriptDeleteRejected',
+              'rawAudioHidden',
+              'idempotencyConflictRejected',
+              'transcriptIdempotencyConflictRejected',
+          )
+          failed = [key for key in required if (payload or {}).get(key) is not True]
+          remaining = {key: value for key, value in (payload or {}).items() if key.startswith('remaining')}
+          status = (payload or {}).get('status', 'MISSING')
+          cleanup = (payload or {}).get('fixtureCleanup', 'MISSING')
+          zero = bool(remaining) and all(value == 0 for value in remaining.values())
+          with open(sys.argv[2], 'a', encoding='utf-8') as out:
+              out.write(f'status={status}\n')
+              out.write(f'cleanup={cleanup}\n')
+              out.write(f'remaining_count={len(remaining)}\n')
+              out.write(f'remaining_zero={str(zero).lower()}\n')
+              out.write(f'failed_assertion_count={len(failed)}\n')
+              out.write(f'failed_assertions={",".join(failed) if failed else "NONE"}\n')
+          raise SystemExit(0 if payload else 1)
+          PY
+            parse=$?
+          fi
+
+          {
+            echo "actual_sha=$actual_sha"
+            echo "merge_base=$merge_base"
+            echo "behind=$behind"
+            echo "precheck_code=$precheck"
+            echo "bootstrap_code=$bootstrap"
+            echo "start_code=$start"
+            echo "reset_code=$reset"
+            echo "e2e_code=$e2e"
+            echo "parse_code=$parse"
+          } >> "$GITHUB_OUTPUT"
+
+          exit "$parse"
+
+      - name: Publish sanitized assertion disposition
+        if: always()
+        env:
+          ACTUAL_SHA: ${{ steps.probe.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.probe.outputs.merge_base }}
+          BEHIND: ${{ steps.probe.outputs.behind }}
+          PRECHECK: ${{ steps.probe.outputs.precheck_code }}
+          BOOTSTRAP: ${{ steps.probe.outputs.bootstrap_code }}
+          START: ${{ steps.probe.outputs.start_code }}
+          RESET: ${{ steps.probe.outputs.reset_code }}
+          E2E: ${{ steps.probe.outputs.e2e_code }}
+          PARSE: ${{ steps.probe.outputs.parse_code }}
+          STATUS: ${{ steps.probe.outputs.status }}
+          CLEANUP: ${{ steps.probe.outputs.cleanup }}
+          REMAINING_COUNT: ${{ steps.probe.outputs.remaining_count }}
+          REMAINING_ZERO: ${{ steps.probe.outputs.remaining_zero }}
+          FAILED_COUNT: ${{ steps.probe.outputs.failed_assertion_count }}
+          FAILED_ASSERTIONS: ${{ steps.probe.outputs.failed_assertions }}
+        shell: bash
+        run: |
+          {
+            echo "exact_private_sha=${ACTUAL_SHA:-MISSING}"
+            echo "exact_base_sha=${MERGE_BASE:-MISSING}"
+            echo "behind=${BEHIND:-MISSING}"
+            echo "precheck_code=${PRECHECK:-MISSING}"
+            echo "bootstrap_code=${BOOTSTRAP:-MISSING}"
+            echo "start_code=${START:-MISSING}"
+            echo "reset_code=${RESET:-MISSING}"
+            echo "e2e_code=${E2E:-MISSING}"
+            echo "parse_code=${PARSE:-MISSING}"
+            echo "status=${STATUS:-MISSING}"
+            echo "cleanup=${CLEANUP:-MISSING}"
+            echo "remaining_count=${REMAINING_COUNT:-0}"
+            echo "remaining_zero=${REMAINING_ZERO:-false}"
+            echo "failed_assertion_count=${FAILED_COUNT:-0}"
+            echo "failed_assertions=${FAILED_ASSERTIONS:-MISSING}"
+            echo "raw_private_output=SEALED_AND_DELETED"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup sealed database probe
+        if: always()
+        shell: bash
+        run: |
+          supabase --workdir "$RUNNER_TEMP/pr342-evidence-supabase" stop --no-backup >/dev/null 2>&1 || true
+          rm -rf private-repo "$RUNNER_TEMP"/pr342-evidence-*
