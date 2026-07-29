@@ -74,6 +74,15 @@ export const profileCommands = Object.freeze({
     command('vscode-bundle', 'node', ['extensions/trainingos-classroom-vscode/esbuild.mjs', '--production']),
     command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
   ],
+  'challenge-runtime': [
+    command('install', 'npm', ['ci']),
+    command('syntax-package', 'node', ['--check', 'packages/training-challenge-proof/src/index.mjs']),
+    command('syntax-gateway', 'node', ['--check', 'lib/trainingos-agent-gateway/challenge-proof-share.mjs']),
+    command('node-contract', 'node', ['--test', 'prototypes/trainingos-agent-mvp-v1/test/challenge-proof-share-v1.test.mjs'], 'node'),
+    command('python-contract', 'python', ['-m', 'unittest', '-v', 'tests.test_trainingos_challenge_proof_share_v1_contract'], 'python'),
+    command('typecheck', 'npm', ['run', 'typecheck']),
+    command('production-build', 'npm', ['run', 'build']),
+  ],
   'generic-owned': [
     command('install', 'npm', ['ci']),
     command('owned-validation', 'npm', ['run', 'ci:owned'], 'status', {
