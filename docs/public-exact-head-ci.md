@@ -35,12 +35,13 @@ Inputs may declare SHAs, counts, ranges, booleans, and a profile. They cannot su
 - `docs-launch` enforces docs-only scope, Markdown structure, secret/PII scanning, and no runtime, migration, UI, or Gateway delta.
 - `main-release` enforces exact live private main, complete migration count and fingerprint, full-history fresh/second/upgrade replay, database and application contracts, Node/Python, typecheck/build, critical role E2E, and zero residue.
 
-The reusable request driver may prepare a dispatch request, but it cannot weaken these profile contracts or turn a stale result green.
+The reusable request driver accepts only a same-repository pull request whose branch starts with `ci/exact-head-request/` and whose only request payload is `.github/exact-head-request.json`. The reviewed carrier supplies fixed metadata, dispatches the controller on public `main`, observes the final run, and reports only sanitized identifiers and conclusions. It cannot weaken profile contracts or turn a stale result green.
 
 ## Security and evidence boundary
 
-- workflow permissions are `contents: read`;
-- `PRIVATE_REPO_READ_TOKEN` is used only for read-only private checkout;
+- workflow permissions are `contents: read` plus narrowly required `actions: write` and `issues: write` on the request transport;
+- request carriers from forks or unapproved branch namespaces do not run;
+- `PRIVATE_REPO_READ_TOKEN` is used only for read-only private checkout inside the reusable controller;
 - every private checkout uses `persist-credentials=false`;
 - private source and raw command output remain in mode-restricted runner-local files;
 - no artifact is uploaded;
@@ -66,4 +67,4 @@ A stale SHA cannot pass. `NOT_RUN` is never GO. A deterministic current-main con
 
 ## Carrier lifecycle
 
-One-time carriers are allowed only to bootstrap or diagnose the reusable controller. After immutable evidence is recorded, remove or close the carrier and retain its historical run. Do not create one workflow per private PR when a reusable profile covers the scope.
+Use a small reviewed request PR rather than an unobservable App-created push. The carrier changes only `.github/exact-head-request.json`, remains separate from the controller, and is closed after its immutable run result is recorded. Do not create one workflow per private PR when a reusable profile covers the scope.
