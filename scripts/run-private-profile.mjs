@@ -159,6 +159,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
   let nodeFailed = 0;
   let pythonTests = 0;
   let passedSteps = 0;
+  const failedLabels = [];
 
   try {
     for (let index = 0; index < commands.length; index += 1) {
@@ -181,6 +182,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
       }
       if (item.kind === 'python' || item.kind === 'mixed') pythonTests += parsePython(text).tests;
       if (result.status === 0) passedSteps += 1;
+      else failedLabels.push(item.label);
     }
   } finally {
     await rm(path.join(runnerTemp, 'trainingos-scope-contract.env'), { force: true });
@@ -190,6 +192,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
   const expectedPython = Number(expectedPythonCount);
   const commandsPassed = passedSteps === commands.length;
   const countsPassed = nodeTests === expectedNode && nodePassed === expectedNode && nodeFailed === 0 && pythonTests === expectedPython;
+  if (!countsPassed) failedLabels.push('focused-counts');
   return {
     ok: commandsPassed && countsPassed,
     stepCount: commands.length,
@@ -198,6 +201,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
     nodePassed,
     nodeFailed,
     pythonTests,
+    failedLabels: [...new Set(failedLabels)],
   };
 }
 
@@ -211,6 +215,7 @@ async function main() {
     expectedNodeCount: process.env.EXPECTED_NODE_COUNT,
     expectedPythonCount: process.env.EXPECTED_PYTHON_COUNT,
   });
+  const failedLabels = result.failedLabels.join(',') || 'none';
   await appendFile(outputPath, [
     `status=${result.ok ? 'PASS' : 'FAIL'}`,
     `step_count=${result.stepCount}`,
@@ -218,8 +223,9 @@ async function main() {
     `node_tests=${result.nodeTests}`,
     `node_passed=${result.nodePassed}`,
     `python_tests=${result.pythonTests}`,
+    `failed_labels=${failedLabels}`,
   ].join('\n') + '\n', 'utf8');
-  console.log(`PROFILE_VALIDATION status=${result.ok ? 'PASS' : 'FAIL'} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests}`);
+  console.log(`PROFILE_VALIDATION status=${result.ok ? 'PASS' : 'FAIL'} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests} failed=${failedLabels}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
