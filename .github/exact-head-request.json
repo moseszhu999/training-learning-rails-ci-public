@@ -1,0 +1,18 @@
+{
+  "requestId": "pr372-challenge-web-v3-e3000561",
+  "reportIssueNumber": 104,
+  "privateExactSha": "e300056195a9d267cacb86da88ffe62368d954ea",
+  "expectedBaseSha": "5e9edc6b5c7c1d62d9441b3fd2db8d709296fff3",
+  "expectedMainSha": "",
+  "validationProfile": "challenge-web",
+  "expectedChangedFileCount": "15",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=0;python=10",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": false,
+  "runTypecheck": false,
+  "runProductionBuild": false,
+  "runCriticalE2E": false
+}
