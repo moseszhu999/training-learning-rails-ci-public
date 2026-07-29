@@ -12,6 +12,7 @@ export const standardValidationProfiles = Object.freeze([
   'challenge-web',
   'teacher-hub',
   'docs-launch',
+  'education-ecosystem',
   'generic-owned',
 ]);
 
