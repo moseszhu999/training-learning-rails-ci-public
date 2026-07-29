@@ -83,6 +83,18 @@ export const profileCommands = Object.freeze({
     command('typecheck', 'npm', ['run', 'typecheck']),
     command('production-build', 'npm', ['run', 'build']),
   ],
+  'teacher-hub': [
+    command('install', 'npm', ['ci']),
+    command('syntax-composition', 'node', ['--check', 'lib/trainingos-agent-gateway/teacher-operations-hub-composition.mjs']),
+    command('node-contract', 'node', ['--test', 'prototypes/trainingos-agent-mvp-v1/teacher-operations-hub-composition.test.mjs'], 'node'),
+    command('python-contract', 'python', [
+      '-m', 'unittest', '-v',
+      'tests.test_trainingos_teacher_operations_hub_mount_contract',
+      'tests.test_trainingos_teacher_operations_hub_adapter_contract',
+    ], 'python'),
+    command('typecheck', 'npm', ['run', 'typecheck']),
+    command('production-build', 'npm', ['run', 'build']),
+  ],
   'generic-owned': [
     command('install', 'npm', ['ci']),
     command('owned-validation', 'npm', ['run', 'ci:owned'], 'status', {
@@ -114,6 +126,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
   let nodeFailed = 0;
   let pythonTests = 0;
   let passedSteps = 0;
+  const failedLabels = [];
 
   for (let index = 0; index < commands.length; index += 1) {
     const item = commands[index];
@@ -135,6 +148,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
     }
     if (item.kind === 'python' || item.kind === 'mixed') pythonTests += parsePython(text).tests;
     if (result.status === 0) passedSteps += 1;
+    else failedLabels.push(item.label);
   }
 
   const expectedNode = Number(expectedNodeCount);
@@ -145,6 +159,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
     ok: commandsPassed && countsPassed,
     stepCount: commands.length,
     passedStepCount: passedSteps,
+    failedLabels,
     nodeTests,
     nodePassed,
     nodeFailed,
@@ -166,11 +181,12 @@ async function main() {
     `status=${result.ok ? 'PASS' : 'FAIL'}`,
     `step_count=${result.stepCount}`,
     `passed_step_count=${result.passedStepCount}`,
+    `failed_labels=${result.failedLabels.join(',') || 'none'}`,
     `node_tests=${result.nodeTests}`,
     `node_passed=${result.nodePassed}`,
     `python_tests=${result.pythonTests}`,
   ].join('\n') + '\n', 'utf8');
-  console.log(`PROFILE_VALIDATION status=${result.ok ? 'PASS' : 'FAIL'} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests}`);
+  console.log(`PROFILE_VALIDATION status=${result.ok ? 'PASS' : 'FAIL'} steps=${result.passedStepCount}/${result.stepCount} failed=${result.failedLabels.join(',') || 'none'} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
