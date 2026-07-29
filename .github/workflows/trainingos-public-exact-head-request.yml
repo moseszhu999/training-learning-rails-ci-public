@@ -50,10 +50,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PRIVATE_EXACT_SHA: ${{ steps.request.outputs.private_exact_sha }}
           EXPECTED_BASE_SHA: ${{ steps.request.outputs.expected_base_sha }}
+          EXPECTED_MAIN_SHA: ${{ steps.request.outputs.expected_main_sha }}
           VALIDATION_PROFILE: ${{ steps.request.outputs.validation_profile }}
           EXPECTED_CHANGED_FILE_COUNT: ${{ steps.request.outputs.expected_changed_file_count }}
           EXPECTED_MIGRATION_RANGE: ${{ steps.request.outputs.expected_migration_range }}
           EXPECTED_FOCUSED_TEST_COUNTS: ${{ steps.request.outputs.expected_focused_test_counts }}
+          EXPECTED_MIGRATION_COUNT: ${{ steps.request.outputs.expected_migration_count }}
+          RUN_FRESH_REPLAY: ${{ steps.request.outputs.run_fresh_replay }}
+          RUN_UPGRADE_REPLAY: ${{ steps.request.outputs.run_upgrade_replay }}
+          RUN_APPLICATION_CONTRACTS: ${{ steps.request.outputs.run_application_contracts }}
+          RUN_TYPECHECK: ${{ steps.request.outputs.run_typecheck }}
+          RUN_PRODUCTION_BUILD: ${{ steps.request.outputs.run_production_build }}
+          RUN_CRITICAL_E2E: ${{ steps.request.outputs.run_critical_e2e }}
         run: |
           set -euo pipefail
           started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -62,10 +70,18 @@ jobs:
             --ref main \
             -f privateExactSha="$PRIVATE_EXACT_SHA" \
             -f expectedBaseSha="$EXPECTED_BASE_SHA" \
+            -f expectedMainSha="$EXPECTED_MAIN_SHA" \
             -f validationProfile="$VALIDATION_PROFILE" \
             -f expectedChangedFileCount="$EXPECTED_CHANGED_FILE_COUNT" \
             -f expectedMigrationRange="$EXPECTED_MIGRATION_RANGE" \
             -f expectedFocusedTestCounts="$EXPECTED_FOCUSED_TEST_COUNTS" \
+            -f expectedMigrationCount="$EXPECTED_MIGRATION_COUNT" \
+            -f runFreshReplay="$RUN_FRESH_REPLAY" \
+            -f runUpgradeReplay="$RUN_UPGRADE_REPLAY" \
+            -f runApplicationContracts="$RUN_APPLICATION_CONTRACTS" \
+            -f runTypecheck="$RUN_TYPECHECK" \
+            -f runProductionBuild="$RUN_PRODUCTION_BUILD" \
+            -f runCriticalE2E="$RUN_CRITICAL_E2E" \
             > "$RUNNER_TEMP/exact-head-dispatch.log" 2>&1
           echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
 
@@ -136,6 +152,8 @@ jobs:
           REPORT_ISSUE_NUMBER: ${{ steps.request.outputs.report_issue_number }}
           PRIVATE_EXACT_SHA: ${{ steps.request.outputs.private_exact_sha }}
           EXPECTED_BASE_SHA: ${{ steps.request.outputs.expected_base_sha }}
+          EXPECTED_MAIN_SHA: ${{ steps.request.outputs.expected_main_sha }}
+          EXPECTED_MIGRATION_COUNT: ${{ steps.request.outputs.expected_migration_count }}
           VALIDATION_PROFILE: ${{ steps.request.outputs.validation_profile }}
           RUN_ID: ${{ steps.locate.outputs.run_id }}
           RUN_URL: ${{ steps.locate.outputs.run_url }}
@@ -156,6 +174,8 @@ jobs:
             echo "- Validation profile: **${VALIDATION_PROFILE:-NOT_RUN}**"
             echo "- Exact private SHA: \`${PRIVATE_EXACT_SHA:-NOT_RUN}\`"
             echo "- Exact base SHA: \`${EXPECTED_BASE_SHA:-NOT_RUN}\`"
+            echo "- Exact main SHA: \`${EXPECTED_MAIN_SHA:-NOT_APPLICABLE}\`"
+            echo "- Expected migration count: \`${EXPECTED_MIGRATION_COUNT:-NOT_RUN}\`"
             echo "- Public run ID: \`${RUN_ID:-NOT_RUN}\`"
             echo "- Public run: ${RUN_URL:-NOT_RUN}"
             echo "- Final status: **${RUN_STATUS:-NOT_RUN}**"
