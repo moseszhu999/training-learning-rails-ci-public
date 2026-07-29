@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { profileCommands } from '../../scripts/run-private-profile.mjs';
-import { profileAllowlist } from '../../scripts/verify-private-scope.mjs';
+import { profileAllowlist, SECRET_PATTERNS } from '../../scripts/verify-private-scope.mjs';
 
 const expectedOwnedFiles = [
   'apps/training-web/src/RootApp.tsx',
@@ -21,6 +21,8 @@ const expectedOwnedFiles = [
   'tests/trainingos-ui-e2e/challenge-web-state-contracts.spec.ts',
   'tests/trainingos-ui-e2e/challenge-web.spec.ts',
 ];
+
+const containsSecret = (text) => SECRET_PATTERNS.some((rule) => rule.test(text));
 
 test('challenge-web profile runs the dedicated contract and browser suites', () => {
   const commands = profileCommands['challenge-web'];
@@ -45,6 +47,13 @@ test('challenge-web allowlist covers its exact shared Web ownership and excludes
   }
   assert.equal(rules.some((rule) => rule.test('supabase/migrations/20260729000000_forbidden.sql')), false);
   assert.equal(rules.some((rule) => rule.test('lib/trainingos-agent-gateway/challenge-runtime.mjs')), false);
+});
+
+test('secret token scan requires a real token prefix boundary', () => {
+  assert.equal(containsSecret('def test_task_response_has_answer_leakage_guard(self):'), false);
+  assert.equal(containsSecret('const risk_summary_with_a_long_safe_identifier = true;'), false);
+  assert.equal(containsSecret(`credential=${'sk_'}${'a'.repeat(24)}`), true);
+  assert.equal(containsSecret(`credential=${'github_pat_'}${'b'.repeat(24)}`), true);
 });
 
 test('direct Supabase guard is limited to production Web source', async () => {

@@ -38,9 +38,9 @@ export const profileAllowlist = Object.freeze({
   'docs-launch': [/^docs\//, /^README\.md$/],
 });
 
-const SECRET_PATTERNS = [
+export const SECRET_PATTERNS = [
   /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/,
-  /(?:sk|sk-proj|ghp|github_pat)_[A-Za-z0-9_-]{20,}/,
+  /\b(?:sk|sk-proj|ghp|github_pat)_[A-Za-z0-9_-]{20,}/,
   privilegedKeyPattern,
   /postgres(?:ql)?:\/\/[^\s\u0060]+/i,
 ];
