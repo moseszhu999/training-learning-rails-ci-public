@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
+umask 077
 
 required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT RUNNER_TEMP)
 for name in "${required[@]}"; do
@@ -31,13 +32,14 @@ profile="$(read_scope validation_profile)"
 fresh_project="$RUNNER_TEMP/trainingos-challenge-fresh"
 upgrade_project="$RUNNER_TEMP/trainingos-challenge-upgrade"
 base_worktree="$RUNNER_TEMP/trainingos-challenge-base"
-runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_proof_share_v1_e2e_runner.sql"
+runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql"
 
 cleanup() {
   supabase --workdir "$fresh_project" stop --no-backup >/dev/null 2>&1 || true
   supabase --workdir "$upgrade_project" stop --no-backup >/dev/null 2>&1 || true
   git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_worktree" >/dev/null 2>&1 || true
   rm -rf "$fresh_project" "$upgrade_project" "$base_worktree"
+  rm -f "$RUNNER_TEMP"/trainingos-challenge-*-status.env
 }
 trap cleanup EXIT
 
@@ -48,12 +50,23 @@ actual_count="$(git -C "$PRIVATE_REPO_PATH" diff --name-only "$expected_base_sha
 [[ -f "$runner_sql" ]]
 grep -Eiq '^[[:space:]]*rollback;' "$runner_sql"
 
+expected_migrations=(
+  supabase/migrations/20260729200000_trainingos_challenge_runtime_v1_schema.sql
+  supabase/migrations/20260729200100_trainingos_challenge_runtime_v1_evidence_review_schema.sql
+  supabase/migrations/20260729201000_trainingos_challenge_runtime_v1_private_helpers.sql
+  supabase/migrations/20260729202000_trainingos_challenge_runtime_v1_teacher_rpc.sql
+  supabase/migrations/20260729203000_trainingos_challenge_runtime_v1_learner_rpc.sql
+  supabase/migrations/20260729204000_trainingos_challenge_runtime_v1_review_rpc.sql
+  supabase/migrations/20260729205000_trainingos_challenge_runtime_v1_check_result_acl.sql
+  supabase/migrations/20260729205100_trainingos_challenge_runtime_v1_private_acl.sql
+)
 mapfile -t migrations < <(
   git -C "$PRIVATE_REPO_PATH" diff --name-only "$expected_base_sha" "$PRIVATE_EXACT_SHA" -- supabase/migrations |
-    grep -E '^supabase/migrations/[0-9]{14}_[^/]*(challenge|invite|growth|attribution|evaluation|proof|sharing|entitlement|offer|launch)[^/]*\.sql$' |
+    grep -E '^supabase/migrations/[0-9]{14}_trainingos_challenge_runtime_v1_[^/]+\.sql$' |
     sort
 )
-[[ "${#migrations[@]}" -gt 0 ]]
+[[ "${#migrations[@]}" == "${#expected_migrations[@]}" ]]
+[[ "$(printf '%s\n' "${migrations[@]}")" == "$(printf '%s\n' "${expected_migrations[@]}")" ]]
 for migration in "${migrations[@]}"; do
   stamp="$(basename "$migration" | cut -c1-14)"
   [[ "$stamp" -ge "$migration_start" && "$stamp" -le "$migration_end" ]]
