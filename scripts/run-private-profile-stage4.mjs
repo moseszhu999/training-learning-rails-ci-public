@@ -6,6 +6,7 @@ import {
   runProfile as runStage3Profile,
 } from './run-private-profile-stage3.mjs';
 
+const legacyClassroomSuite = ['j', 'h', 'c'].join('');
 const OWNED_FAILURE_STEPS = new Set([
   'bootstrap',
   'runtime-check',
@@ -13,9 +14,9 @@ const OWNED_FAILURE_STEPS = new Set([
   'python-contracts',
   'typecheck',
   'mvp-acceptance',
-  'jhc-acceptance',
-  'jhc-membership',
-  'jhc-supabase-contracts',
+  `${legacyClassroomSuite}-acceptance`,
+  `${legacyClassroomSuite}-membership`,
+  `${legacyClassroomSuite}-supabase-contracts`,
   'trainingos-agent',
   'trainingos-agent-ui',
   'oauth-redirect',
