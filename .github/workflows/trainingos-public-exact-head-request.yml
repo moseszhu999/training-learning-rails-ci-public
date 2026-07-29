@@ -186,10 +186,17 @@ jobs:
             echo 'Only sanitized status and immutable identifiers are reported. No artifact, private source, migration body, raw command output, or secret is published.'
           } > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          report_status='NOT_REQUESTED'
           if [[ "${REPORT_ISSUE_NUMBER:-}" =~ ^[0-9]+$ ]]; then
-            gh issue comment "$REPORT_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$report" \
-              > "$RUNNER_TEMP/exact-head-comment.log" 2>&1
+            if gh issue comment "$REPORT_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$report" \
+              > "$RUNNER_TEMP/exact-head-comment.log" 2>&1; then
+              report_status='PASS'
+            else
+              report_status='COMMENT_FAILED'
+            fi
           fi
+          echo "EXACT_HEAD_REPORT status=$report_status" >> "$GITHUB_STEP_SUMMARY"
+          echo "EXACT_HEAD_REPORT status=$report_status"
 
       - name: Enforce request and dispatched run result
         if: always()
