@@ -31,7 +31,8 @@ fi
 changed_files="$(git -C "$PRIVATE_REPO_PATH" diff --name-only "$expected_base_sha" "$PRIVATE_EXACT_SHA" | sort)"
 postmerge_expected="$(printf '%s\n' \
   tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql \
-  tests/test_trainingos_assessment_resume_execution_contract.py | sort)"
+  tests/test_trainingos_assessment_resume_execution_contract.py \
+  tests/test_trainingos_student_exercise_execution_contract.py | sort)"
 suite=''
 runner_sql=''
 concurrency_runner=''
