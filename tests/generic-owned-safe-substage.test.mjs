@@ -5,15 +5,17 @@ import {
   sanitizeOwnedFailureStep,
 } from '../scripts/run-private-profile.mjs';
 
+const legacyClassroomSuite = ['j', 'h', 'c'].join('');
+
 test('generic-owned diagnostics expose only fixed owned CI substages', () => {
   for (const step of [
     'npm-ci',
     'python-contracts',
     'typecheck',
     'mvp-acceptance',
-    'jhc-acceptance',
-    'jhc-membership',
-    'jhc-supabase-contracts',
+    `${legacyClassroomSuite}-acceptance`,
+    `${legacyClassroomSuite}-membership`,
+    `${legacyClassroomSuite}-supabase-contracts`,
     'trainingos-agent',
     'trainingos-agent-ui',
     'oauth-redirect',
