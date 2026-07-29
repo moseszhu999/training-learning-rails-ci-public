@@ -17,6 +17,7 @@ export const profileAllowlist = Object.freeze({
     new RegExp(`^supabase/migrations/[0-9]{14}_.*${challengeToken}.*\\.sql$`),
     new RegExp(`^prototypes/trainingos-agent-mvp-v1/.*${challengeToken}.*\\.(mjs|js)$`),
     new RegExp(`^tests/(sql/)?[^/]*${challengeToken}[^/]*\\.(py|sql|mjs|js)$`),
+    /^tests\/test_trainingos_assessment_resume_execution_contract\.py$/,
     new RegExp(`^docs/(architecture|verification|testing|product)/.*${challengeToken}.*\\.md$`),
   ],
   'challenge-web': [
