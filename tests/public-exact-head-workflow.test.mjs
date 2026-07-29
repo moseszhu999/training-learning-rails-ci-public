@@ -31,8 +31,8 @@ test('dispatch input contract is strict, lowercase, and profile-specific', () =>
   assert.equal(validateInputs({ ...valid, expectedMigrationRange: '20260728125999-20260728120000' }).ok, false);
   assert.equal(validateInputs({ ...valid, expectedFocusedTestCounts: 'node=1,python=2' }).ok, false);
   assert.equal(validateInputs({ ...valid, expectedMigrationRange: 'none' }).ok, true);
-  assert.equal(validateInputs({ ...valid, validationProfile: 'challenge-runtime', expectedMigrationCount: '305' }).ok, true);
-  assert.equal(validateInputs({ ...valid, validationProfile: 'challenge-runtime', expectedMigrationRange: 'none', expectedMigrationCount: '305' }).ok, false);
+  assert.equal(validateInputs({ ...valid, validationProfile: 'challenge-runtime', expectedMigrationCount: '313' }).ok, true);
+  assert.equal(validateInputs({ ...valid, validationProfile: 'challenge-runtime', expectedMigrationRange: 'none', expectedMigrationCount: '313' }).ok, false);
   const mainSha = 'c'.repeat(40);
   assert.equal(validateInputs({
     ...valid,
@@ -66,12 +66,17 @@ test('all feature profiles are fixed command maps', () => {
   }
 });
 
-test('Challenge profile preserves focused proof/share contracts and isolated database replay', () => {
+test('Challenge profile locks the canonical Runtime contracts and isolated database replay', () => {
   const commands = profileCommands['challenge-runtime'];
   assert.deepEqual(commands.map((item) => item.label), [
     'install',
+    'syntax-definition',
+    'syntax-runtime',
     'syntax-package',
     'syntax-gateway',
+    'syntax-mcp',
+    'syntax-vercel-entrypoint',
+    'syntax-netlify-entrypoint',
     'node-contract',
     'python-contract',
     'typecheck',
@@ -79,9 +84,13 @@ test('Challenge profile preserves focused proof/share contracts and isolated dat
     'database-replay',
   ]);
   const serialized = JSON.stringify(commands);
-  assert.match(serialized, /challenge-proof-share-v1/);
+  assert.match(serialized, /packages\/training-challenge\/src\/index\.mjs/);
+  assert.match(serialized, /challenge-runtime-v1\.test\.mjs/);
+  assert.match(serialized, /challenge-gateway-mcp-v1\.test\.mjs/);
+  assert.match(serialized, /test_trainingos_challenge_runtime_v1_contract/);
+  assert.match(serialized, /test_trainingos_challenge_mcp_composition_v1/);
   assert.match(serialized, /run-challenge-runtime-database\.sh/);
-  assert.doesNotMatch(serialized, /deploy|production database/i);
+  assert.doesNotMatch(serialized, /challenge-proof-share|deploy|production database/i);
 });
 
 test('web, hub, and docs profiles are fixed and non-deploying', () => {
@@ -121,16 +130,20 @@ test('workflow keeps public boundary, exact-main, and sealed-output rules', asyn
   assert.ok(enforcement > 0 && cleanup > enforcement);
 });
 
-test('Challenge database script is fixed, syntax-valid, sealed, and non-deploying', async () => {
+test('Challenge database script is canonical, syntax-valid, sealed, and non-deploying', async () => {
   const script = await readFile(challengeDatabasePath, 'utf8');
   const syntax = spawnSync('bash', ['-n', challengeDatabasePath], { cwd: root, encoding: 'utf8' });
   assert.equal(syntax.status, 0, syntax.stderr);
-  assert.match(script, /trainingos_challenge_proof_share_v1_e2e_runner\.sql/);
+  assert.match(script, /set -euo pipefail/);
+  assert.match(script, /umask 077/);
+  assert.match(script, /trainingos_challenge_runtime_v1_e2e_runner\.sql/);
+  assert.match(script, /20260729200000_trainingos_challenge_runtime_v1_schema\.sql/);
+  assert.match(script, /20260729205100_trainingos_challenge_runtime_v1_private_acl\.sql/);
   assert.match(script, /supabase db reset --local --no-seed/);
   assert.match(script, /supabase migration up --local/);
   assert.match(script, /worktree add --detach/);
   assert.match(script, /cleanup=PASS/);
-  assert.doesNotMatch(script, /upload-artifact|PRIVATE_REPO_READ_TOKEN|supabase link|supabase db push|vercel|netlify/i);
+  assert.doesNotMatch(script, /challenge_proof_share|upload-artifact|PRIVATE_REPO_READ_TOKEN|supabase link|supabase db push|vercel|netlify/i);
   assert.doesNotMatch(script, /\beval\b/);
 });
 
