@@ -33,6 +33,37 @@ const challengePostMergeFiles = Object.freeze([
   'tests/test_trainingos_assessment_resume_execution_contract.py',
 ]);
 
+const databaseStageAllowlist = new Set([
+  'scope-file',
+  'scope-contract',
+  'suite-selection',
+  'runner-contract',
+  'migration-contract',
+  'fresh-init',
+  'fresh-bootstrap',
+  'fresh-manifest',
+  'fresh-start',
+  'fresh-reset-one',
+  'fresh-reset-two',
+  'fresh-status',
+  'fresh-e2e',
+  'fresh-stop',
+  'upgrade-worktree',
+  'upgrade-init',
+  'upgrade-bootstrap',
+  'upgrade-start',
+  'upgrade-migrations',
+  'upgrade-status',
+  'upgrade-e2e',
+  'upgrade-stop',
+]);
+
+export function databaseFailureLabel(text) {
+  const match = String(text).match(/CHALLENGE_DATABASE status=FAIL stage=([a-z0-9-]+)/);
+  const stage = match?.[1] ?? '';
+  return databaseStageAllowlist.has(stage) ? `database-${stage}` : 'database-replay';
+}
+
 export function isChallengePostMergeFiles(files) {
   const normalized = [...files].sort();
   return normalized.length === challengePostMergeFiles.length
@@ -49,7 +80,24 @@ export const challengePostMergeProfileCommands = Object.freeze([
   ], 'python'),
   command('native-validation', 'node', ['scripts/run-trainingos-native-classroom-validation.mjs']),
   command('zero-permission-validation', 'node', ['scripts/run-trainingos-zero-permission-bridge-validation.mjs']),
-  command('learning-workspace-validation', 'node', ['scripts/run-trainingos-learning-workspace-bridge-validation.mjs']),
+  command('learning-workspace-node', 'node', [
+    '--test',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-bridge.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-native-classroom-coding-adapter.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-native-classroom-web-adapter.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-exercise-activity-projection.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-assessment-activity-projection.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/student-learning-inbox.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/student-exercise-execution.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/student-assessment-resume.test.mjs',
+  ]),
+  command('learning-workspace-core-python', 'python', ['tests/test_trainingos_learning_workspace_bridge_contract.py']),
+  command('learning-workspace-web-python', 'python', ['tests/test_trainingos_learning_workspace_web_adapter_contract.py']),
+  command('learning-workspace-assessment-python', 'python', ['tests/test_trainingos_learning_workspace_assessment_projection_contract.py']),
+  command('vscode-classroom-python', 'python', ['tests/test_trainingos_vscode_classroom_extension_contract.py']),
+  command('student-exercise-python', 'python', ['tests/test_trainingos_student_exercise_execution_contract.py']),
+  command('vscode-exercise-python', 'python', ['tests/test_trainingos_vscode_exercise_execution_contract.py']),
+  command('assessment-resume-python', 'python', ['tests/test_trainingos_assessment_resume_execution_contract.py']),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('vscode-bundle', 'node', ['extensions/trainingos-classroom-vscode/esbuild.mjs', '--production']),
   command('vite-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
@@ -144,6 +192,7 @@ async function runFixedProfile({
       }
       if (item.kind === 'python') pythonTests += parsePython(text).tests;
       if (result.status === 0) passedSteps += 1;
+      else if (item.label === 'database-replay') failedLabels.push(databaseFailureLabel(text));
       else failedLabels.push(item.label);
     }
   } finally {
