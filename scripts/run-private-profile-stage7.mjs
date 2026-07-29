@@ -7,7 +7,10 @@ import {
   profileCommands,
   runProfile as runStage6Profile,
 } from './run-private-profile-stage6.mjs';
-import { isYouthLearningFiles } from './run-private-profile-stage5.mjs';
+import {
+  isYouthGuardianFiles,
+  isYouthLearningFiles,
+} from './run-private-profile-stage5.mjs';
 
 async function changedFiles({ privateRepoPath, runnerTemp }) {
   const scopeText = await readFile(
@@ -34,7 +37,8 @@ export async function runProfile(input) {
   let selectedSuite = null;
   if (input.profile === 'generic-owned') {
     const files = await changedFiles(input);
-    if (isYouthLearningFiles(files)) selectedSuite = 'youth-learning';
+    if (isYouthGuardianFiles(files)) selectedSuite = 'youth-guardian';
+    else if (isYouthLearningFiles(files)) selectedSuite = 'youth-learning';
   }
 
   const result = await runStage6Profile(input);

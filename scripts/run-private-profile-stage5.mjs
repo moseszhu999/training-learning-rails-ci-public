@@ -49,6 +49,25 @@ export const youthLearningProfileCommands = Object.freeze([
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
 
+export const youthGuardianProfileCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('syntax-package', 'node', ['--check', 'packages/training-youth-safety/src/index.mjs']),
+  command('syntax-gateway', 'node', ['--check', 'lib/trainingos-agent-gateway/youth-safety-runtime.mjs']),
+  command('node-contract', 'node', [
+    '--test',
+    'prototypes/trainingos-agent-mvp-v1/test/youth-safety-v1.test.mjs',
+  ], 'node'),
+  command('python-contract', 'python', [
+    '-m',
+    'unittest',
+    '-v',
+    'tests.test_trainingos_youth_guardian_safety_v1_contract',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-youth-guardian-database.sh')]),
+]);
+
 const YOUTH_LEARNING_PREFIXES = Object.freeze([
   'apps/training-web/src/youth-mode/',
   'packages/training-youth-learning/',
@@ -56,6 +75,20 @@ const YOUTH_LEARNING_PREFIXES = Object.freeze([
   'docs/testing/trainingos-youth-learning-',
   'tests/test_trainingos_youth_learning_',
 ]);
+
+const YOUTH_GUARDIAN_EXACT_FILES = new Set([
+  'docs/architecture/trainingos-youth-safety-runtime-v1.md',
+  'docs/testing/trainingos-youth-safety-runtime-v1-verification.md',
+  'lib/trainingos-agent-gateway/youth-safety-runtime.mjs',
+  'packages/training-youth-safety/package.json',
+  'packages/training-youth-safety/src/index.mjs',
+  'prototypes/trainingos-agent-mvp-v1/test/youth-safety-v1.test.mjs',
+  'tests/sql/trainingos_youth_guardian_safety_v1_e2e.sql',
+  'tests/sql/trainingos_youth_guardian_safety_v1_e2e_runner.sql',
+  'tests/test_trainingos_youth_guardian_safety_v1_contract.py',
+]);
+
+const YOUTH_GUARDIAN_MIGRATION = /^supabase\/migrations\/2026073009[0-5][0-9]{2}_trainingos_youth_guardian_safety_v1_[a-z0-9_]+\.sql$/;
 
 export function isChallengeOfferFiles(files) {
   const names = [...files];
@@ -82,6 +115,20 @@ export function isYouthLearningFiles(files) {
     YOUTH_LEARNING_PREFIXES.some((prefix) => name.startsWith(prefix))
   ));
   return hasProductPackage && hasFocusedContract && allOwned;
+}
+
+export function isYouthGuardianFiles(files) {
+  const names = [...files];
+  if (!names.length) return false;
+  const migrations = names.filter((name) => name.startsWith('supabase/migrations/'));
+  const allOwned = names.every((name) => (
+    YOUTH_GUARDIAN_EXACT_FILES.has(name) || YOUTH_GUARDIAN_MIGRATION.test(name)
+  ));
+  return allOwned
+    && names.includes('packages/training-youth-safety/src/index.mjs')
+    && names.includes('tests/test_trainingos_youth_guardian_safety_v1_contract.py')
+    && names.includes('tests/sql/trainingos_youth_guardian_safety_v1_e2e_runner.sql')
+    && migrations.length === 4;
 }
 
 function parseNode(text) {
@@ -187,6 +234,9 @@ export async function runProfile(input) {
   }
   if (input.profile === 'generic-owned') {
     const files = await changedFiles(input);
+    if (isYouthGuardianFiles(files)) {
+      return runFixedProfile({ ...input, commands: youthGuardianProfileCommands });
+    }
     if (isYouthLearningFiles(files)) {
       return runFixedProfile({ ...input, commands: youthLearningProfileCommands });
     }
