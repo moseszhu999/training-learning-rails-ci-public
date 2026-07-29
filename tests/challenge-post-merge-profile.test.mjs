@@ -15,12 +15,13 @@ const databasePath = path.join(root, 'scripts/run-challenge-runtime-database.sh'
 const expectedFiles = [
   'tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql',
   'tests/test_trainingos_assessment_resume_execution_contract.py',
+  'tests/test_trainingos_student_exercise_execution_contract.py',
 ];
 
 test('post-merge suite selection is exact and fails closed', () => {
   assert.equal(isChallengePostMergeFiles(expectedFiles), true);
   assert.equal(isChallengePostMergeFiles([...expectedFiles].reverse()), true);
-  assert.equal(isChallengePostMergeFiles(expectedFiles.slice(0, 1)), false);
+  assert.equal(isChallengePostMergeFiles(expectedFiles.slice(0, 2)), false);
   assert.equal(isChallengePostMergeFiles([...expectedFiles, 'README.md']), false);
 });
 
@@ -63,7 +64,7 @@ test('database diagnostics expose allowlisted stage labels only', () => {
   assert.equal(databaseFailureLabel('raw private output'), 'database-replay');
 });
 
-test('challenge-runtime scope permits only the two bounded fix paths through existing rules', () => {
+test('challenge-runtime scope permits only the three bounded fix paths through existing rules', () => {
   const allowlist = profileAllowlist['challenge-runtime'];
   for (const file of expectedFiles) {
     assert.equal(allowlist.some((rule) => rule.test(file)), true, file);
@@ -78,6 +79,7 @@ test('database controller supports no-migration post-merge replay safely', async
   for (const marker of [
     'suite=postmerge',
     'tests/test_trainingos_assessment_resume_execution_contract.py',
+    'tests/test_trainingos_student_exercise_execution_contract.py',
     'trainingos_challenge_runtime_v1_e2e_runner.sql',
     'CURRENT_STAGE="fresh-bootstrap"',
     'CURRENT_STAGE="fresh-reset-one"',

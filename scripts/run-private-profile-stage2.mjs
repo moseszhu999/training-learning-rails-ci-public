@@ -31,6 +31,7 @@ if (unrelatedLearningWorkspaceIndex >= 0) {
 const challengePostMergeFiles = Object.freeze([
   'tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql',
   'tests/test_trainingos_assessment_resume_execution_contract.py',
+  'tests/test_trainingos_student_exercise_execution_contract.py',
 ]);
 
 const databaseStageAllowlist = new Set([
