@@ -1,0 +1,10 @@
+{
+  "requestId": "education-partner-supply-pr395-ac22637c-v9",
+  "privateExactSha": "ac22637c4cc87c0caf2e19b21718b583ea0d866d",
+  "expectedBaseSha": "6e5d4510a17f7aedf1f17366d8895b0651423798",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": 14,
+  "expectedMigrationRange": "20260730100000-20260730105959",
+  "expectedFocusedTestCounts": "node=9;python=25",
+  "reportIssueNumber": 222
+}
