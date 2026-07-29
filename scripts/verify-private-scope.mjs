@@ -13,6 +13,7 @@ export const profileAllowlist = Object.freeze({
     new RegExp(`^lib/trainingos-agent-gateway/.*${challengeToken}`),
     /^api\/integrations\/agents\/mcp\.mjs$/,
     /^netlify\/functions\/trainingos-mcp\.mjs$/,
+    /^scripts\/run-trainingos-invite-growth-concurrency-e2e\.sh$/,
     new RegExp(`^supabase/migrations/[0-9]{14}_.*${challengeToken}.*\\.sql$`),
     new RegExp(`^prototypes/trainingos-agent-mvp-v1/.*${challengeToken}.*\\.(mjs|js)$`),
     new RegExp(`^tests/(sql/)?[^/]*${challengeToken}[^/]*\\.(py|sql|mjs|js)$`),
