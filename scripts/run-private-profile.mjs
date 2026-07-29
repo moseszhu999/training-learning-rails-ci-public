@@ -1,10 +1,10 @@
-export * from './run-private-profile-stage6.mjs';
+export * from './run-private-profile-stage7.mjs';
 export * from './youth-guardian-release-gate.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runProfile as runBaseProfile } from './run-private-profile-stage6.mjs';
+import { runProfile as runBaseProfile } from './run-private-profile-stage7.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -22,8 +22,16 @@ async function readSealedProfileLog(runnerTemp, index) {
   }
 }
 
-export function formatPublicProfileStatus({ profile, status, typecheckDiagnostics, buildSubstage }) {
-  if (profile !== 'challenge-web' || status === 'PASS') return status;
+export function formatPublicProfileStatus({
+  profile,
+  selectedSuite,
+  status,
+  typecheckDiagnostics,
+  buildSubstage,
+}) {
+  const supportsSanitizedDiagnostics = profile === 'challenge-web'
+    || selectedSuite === 'youth-learning';
+  if (!supportsSanitizedDiagnostics || status === 'PASS') return status;
   return `${status}|ts=${typecheckDiagnostics}|build=${buildSubstage}`;
 }
 
@@ -53,7 +61,9 @@ async function main() {
 
   let typecheckDiagnostics = 'NOT_APPLICABLE';
   let buildSubstage = 'NOT_APPLICABLE';
-  if (profile === 'challenge-web') {
+  const supportsSanitizedDiagnostics = profile === 'challenge-web'
+    || result.selectedSuite === 'youth-learning';
+  if (supportsSanitizedDiagnostics) {
     if (result.failedLabels.includes('typecheck')) {
       typecheckDiagnostics = sanitizeTypeScriptDiagnostics(
         await readSealedProfileLog(runnerTemp, 3),
@@ -68,6 +78,7 @@ async function main() {
 
   const publicStatus = formatPublicProfileStatus({
     profile,
+    selectedSuite: result.selectedSuite,
     status: result.status,
     typecheckDiagnostics,
     buildSubstage,
@@ -81,10 +92,11 @@ async function main() {
     `python_tests=${result.pythonTests}`,
     `typecheck_diagnostics=${typecheckDiagnostics}`,
     `build_substage=${buildSubstage}`,
+    `selected_suite=${result.selectedSuite ?? 'NOT_APPLICABLE'}`,
     `youth_guardian_gate=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
   ].join('\n') + '\n', 'utf8');
   console.log(
-    `PROFILE_VALIDATION status=${publicStatus} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests} youth_guardian=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
+    `PROFILE_VALIDATION status=${publicStatus} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests} suite=${result.selectedSuite ?? 'NOT_APPLICABLE'} youth_guardian=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
   );
 }
 
