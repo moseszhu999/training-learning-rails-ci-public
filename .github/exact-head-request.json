@@ -1,0 +1,18 @@
+{
+  "requestId": "challenge-proof-pr373-c67da05b-v10",
+  "reportIssueNumber": 162,
+  "privateExactSha": "c67da05b163107026a3395905d0a0d27c4256e22",
+  "expectedBaseSha": "6e5d4510a17f7aedf1f17366d8895b0651423798",
+  "expectedMainSha": "",
+  "validationProfile": "challenge-runtime",
+  "expectedChangedFileCount": "16",
+  "expectedMigrationRange": "20260729220000-20260729225959",
+  "expectedFocusedTestCounts": "node=5;python=6",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": true,
+  "runUpgradeReplay": true,
+  "runApplicationContracts": true,
+  "runTypecheck": true,
+  "runProductionBuild": true,
+  "runCriticalE2E": true
+}
