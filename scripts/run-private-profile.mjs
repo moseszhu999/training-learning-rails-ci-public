@@ -1,9 +1,14 @@
-export * from './run-private-profile-stage3.mjs';
+export * from './run-private-profile-stage5.mjs';
+export * from './youth-guardian-release-gate.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runProfile } from './run-private-profile-stage3.mjs';
+import { runProfile as runBaseProfile } from './run-private-profile-stage5.mjs';
+import {
+  applyYouthGuardianReleaseGate,
+  runYouthGuardianReleaseGate,
+} from './youth-guardian-release-gate.mjs';
 import {
   sanitizeBuildSubstage,
   sanitizeTypeScriptDiagnostics,
@@ -20,6 +25,17 @@ async function readSealedProfileLog(runnerTemp, index) {
 export function formatPublicProfileStatus({ profile, status, typecheckDiagnostics, buildSubstage }) {
   if (profile !== 'challenge-web' || status === 'PASS') return status;
   return `${status}|ts=${typecheckDiagnostics}|build=${buildSubstage}`;
+}
+
+export async function runProfile(input) {
+  const result = await runBaseProfile(input);
+  if (input.profile !== 'challenge-web') return result;
+
+  const guardianGate = await runYouthGuardianReleaseGate({
+    privateRepoPath: input.privateRepoPath,
+    runnerTemp: input.runnerTemp,
+  });
+  return applyYouthGuardianReleaseGate(result, guardianGate);
 }
 
 async function main() {
@@ -65,9 +81,10 @@ async function main() {
     `python_tests=${result.pythonTests}`,
     `typecheck_diagnostics=${typecheckDiagnostics}`,
     `build_substage=${buildSubstage}`,
+    `youth_guardian_gate=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
   ].join('\n') + '\n', 'utf8');
   console.log(
-    `PROFILE_VALIDATION status=${publicStatus} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests}`,
+    `PROFILE_VALIDATION status=${publicStatus} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests} youth_guardian=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
   );
 }
 
