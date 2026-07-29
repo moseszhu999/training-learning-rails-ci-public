@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const command = (label, executable, args, kind = 'status', env = {}) => ({ label, executable, args, kind, env });
 const legacyClassroomSuite = ['j', 'h', 'c'].join('');
+const SAFE_FAILURE_LABEL = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
 const markdownContract = String.raw`
 const fs=require('node:fs'),path=require('node:path');
@@ -149,6 +150,13 @@ function parsePython(text) {
   return { tests };
 }
 
+export function formatProfileStatus({ ok, failedLabels = [], countsPassed = true } = {}) {
+  if (ok) return 'PASS';
+  const labels = failedLabels.filter((label) => SAFE_FAILURE_LABEL.test(label));
+  if (!countsPassed) labels.push('focused-counts');
+  return `FAIL:${[...new Set(labels)].join(',') || 'unknown-stage'}`;
+}
+
 export async function runProfile({ profile, privateRepoPath, runnerTemp, expectedNodeCount, expectedPythonCount }) {
   const commands = profileCommands[profile];
   if (!commands) throw new Error('unsupported profile');
@@ -159,6 +167,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
   let nodeFailed = 0;
   let pythonTests = 0;
   let passedSteps = 0;
+  const failedLabels = [];
 
   try {
     for (let index = 0; index < commands.length; index += 1) {
@@ -181,6 +190,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
       }
       if (item.kind === 'python' || item.kind === 'mixed') pythonTests += parsePython(text).tests;
       if (result.status === 0) passedSteps += 1;
+      else failedLabels.push(item.label);
     }
   } finally {
     await rm(path.join(runnerTemp, 'trainingos-scope-contract.env'), { force: true });
@@ -190,8 +200,11 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
   const expectedPython = Number(expectedPythonCount);
   const commandsPassed = passedSteps === commands.length;
   const countsPassed = nodeTests === expectedNode && nodePassed === expectedNode && nodeFailed === 0 && pythonTests === expectedPython;
+  const ok = commandsPassed && countsPassed;
   return {
-    ok: commandsPassed && countsPassed,
+    ok,
+    status: formatProfileStatus({ ok, failedLabels, countsPassed }),
+    failedLabels: Object.freeze([...failedLabels]),
     stepCount: commands.length,
     passedStepCount: passedSteps,
     nodeTests,
@@ -212,14 +225,14 @@ async function main() {
     expectedPythonCount: process.env.EXPECTED_PYTHON_COUNT,
   });
   await appendFile(outputPath, [
-    `status=${result.ok ? 'PASS' : 'FAIL'}`,
+    `status=${result.status}`,
     `step_count=${result.stepCount}`,
     `passed_step_count=${result.passedStepCount}`,
     `node_tests=${result.nodeTests}`,
     `node_passed=${result.nodePassed}`,
     `python_tests=${result.pythonTests}`,
   ].join('\n') + '\n', 'utf8');
-  console.log(`PROFILE_VALIDATION status=${result.ok ? 'PASS' : 'FAIL'} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests}`);
+  console.log(`PROFILE_VALIDATION status=${result.status} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests}`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
