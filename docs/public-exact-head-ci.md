@@ -29,7 +29,7 @@ main-release
 
 Inputs may declare SHAs, counts, ranges, booleans, and a profile. They cannot supply shell commands, executables, arguments, SQL, or dynamic expressions.
 
-- `challenge-runtime` preserves the focused Challenge Proof/Sharing contracts, declared scope and migration range, typecheck/build, isolated fresh replay, second pass, exact-base upgrade replay, fixed SQL E2E, rollback contract, and cleanup.
+- `challenge-runtime` locks the domain-neutral Challenge Canonical Runtime package, Gateway/MCP composition, exact focused Node/Python contracts, declared 8-migration range, typecheck/build, isolated fresh replay, second pass, exact-base upgrade replay, fixed SQL E2E, rollback contract, and cleanup.
 - `challenge-web` enforces the route allowlist, direct-Supabase prohibition, secret scan, typecheck, production build, and Playwright.
 - `teacher-hub` enforces Hub mount and role contracts, deep-link/stale/offline validation, typecheck/build, and Playwright.
 - `docs-launch` enforces docs-only scope, Markdown structure, secret/PII scanning, and no runtime, migration, UI, or Gateway delta.
