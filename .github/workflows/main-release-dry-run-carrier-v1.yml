@@ -1,0 +1,174 @@
+name: TrainingOS main-release dry-run carrier v1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/main-release-dry-run-carrier-v1.yml
+      - .github/workflows/trainingos-public-exact-head.yml
+      - scripts/exact-head-inputs.mjs
+      - scripts/main-release-verdict.mjs
+      - scripts/run-main-release-database.sh
+      - scripts/run-main-release-gate.mjs
+      - scripts/run-private-profile.mjs
+      - scripts/verify-private-scope.mjs
+      - tests/public-exact-head-workflow.test.mjs
+      - tests/public-main-release-gate.test.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trainingos-main-release-dry-run-v1
+  cancel-in-progress: true
+
+env:
+  PRIVATE_EXACT_SHA: 5e9edc6b5c7c1d62d9441b3fd2db8d709296fff3
+  EXPECTED_MAIN_SHA: 5e9edc6b5c7c1d62d9441b3fd2db8d709296fff3
+  EXPECTED_BASE_SHA: 5e9edc6b5c7c1d62d9441b3fd2db8d709296fff3
+  EXPECTED_MIGRATION_COUNT: '305'
+
+jobs:
+  exact-main-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 210
+    steps:
+      - name: Check out public controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Public controller contracts
+        run: |
+          npm test
+          bash -n scripts/run-main-release-database.sh
+          shellcheck scripts/run-main-release-database.sh
+
+      - name: Validate immutable main-release inputs
+        id: inputs
+        env:
+          VALIDATION_PROFILE: main-release
+          EXPECTED_CHANGED_FILE_COUNT: '0'
+          EXPECTED_MIGRATION_RANGE: none
+          EXPECTED_FOCUSED_TEST_COUNTS: node=0;python=0
+          RUN_FRESH_REPLAY: 'true'
+          RUN_UPGRADE_REPLAY: 'true'
+          RUN_APPLICATION_CONTRACTS: 'true'
+          RUN_TYPECHECK: 'true'
+          RUN_PRODUCTION_BUILD: 'true'
+          RUN_CRITICAL_E2E: 'true'
+        run: node scripts/exact-head-inputs.mjs
+
+      - name: Check out exact private main candidate
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_EXACT_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Check out live private main ref
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-main
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Enforce exact private main equality
+        id: scope
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          PRIVATE_MAIN_REPO_PATH: ${{ github.workspace }}/private-main
+          VALIDATION_PROFILE: main-release
+          EXPECTED_CHANGED_FILE_COUNT: '0'
+          MIGRATION_START: none
+          MIGRATION_END: none
+        run: node scripts/verify-private-scope.mjs
+
+      - name: Run exact latest-main release gate
+        id: release
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          RUN_FRESH_REPLAY: 'true'
+          RUN_UPGRADE_REPLAY: 'true'
+          RUN_APPLICATION_CONTRACTS: 'true'
+          RUN_TYPECHECK: 'true'
+          RUN_PRODUCTION_BUILD: 'true'
+          RUN_CRITICAL_E2E: 'true'
+        run: node scripts/run-main-release-gate.mjs
+
+      - name: Publish sanitized dry-run verdict
+        if: always()
+        env:
+          FINAL_VERDICT: ${{ steps.release.outputs.final_verdict }}
+          FRESH: ${{ steps.release.outputs.fresh_replay }}
+          SECOND_PASS: ${{ steps.release.outputs.second_pass }}
+          UPGRADE: ${{ steps.release.outputs.upgrade_replay }}
+          CANONICAL_DB: ${{ steps.release.outputs.canonical_database_contracts }}
+          NODE_CONTRACTS: ${{ steps.release.outputs.focused_node_contracts }}
+          PYTHON_CONTRACTS: ${{ steps.release.outputs.focused_python_contracts }}
+          APP_CONTRACTS: ${{ steps.release.outputs.application_contracts }}
+          TYPECHECK: ${{ steps.release.outputs.typecheck }}
+          BUILD: ${{ steps.release.outputs.production_build }}
+          ROLE_PERMISSION: ${{ steps.release.outputs.role_permission_contracts }}
+          TEACHER_STUDENT: ${{ steps.release.outputs.teacher_student_e2e }}
+          ZERO_RESIDUE: ${{ steps.release.outputs.zero_residue }}
+          MIGRATION_COUNT: ${{ steps.release.outputs.migration_count }}
+          MIGRATION_FINGERPRINT: ${{ steps.release.outputs.migration_fingerprint }}
+          FIRST_MIGRATION: ${{ steps.release.outputs.first_migration }}
+          LAST_MIGRATION: ${{ steps.release.outputs.last_migration }}
+          FAILURE_STAGE: ${{ steps.release.outputs.failure_stage }}
+          FAILURE_LABELS: ${{ steps.release.outputs.failure_labels }}
+        run: |
+          {
+            echo '## TrainingOS exact latest-main release dry run'
+            echo "- privateExactSha: \`$PRIVATE_EXACT_SHA\`"
+            echo "- expectedMainSha: \`$EXPECTED_MAIN_SHA\`"
+            echo "- exactMainEquality: **${{ steps.scope.outputs.main_ref_equality || 'NOT_RUN' }}**"
+            echo "- freshReplay: **${FRESH:-NOT_RUN}**"
+            echo "- secondPass: **${SECOND_PASS:-NOT_RUN}**"
+            echo "- upgradeReplay: **${UPGRADE:-NOT_RUN}**"
+            echo "- canonicalDatabaseContracts: **${CANONICAL_DB:-NOT_RUN}**"
+            echo "- focusedNodeContracts: **${NODE_CONTRACTS:-NOT_RUN}**"
+            echo "- focusedPythonContracts: **${PYTHON_CONTRACTS:-NOT_RUN}**"
+            echo "- applicationContracts: **${APP_CONTRACTS:-NOT_RUN}**"
+            echo "- typecheck: **${TYPECHECK:-NOT_RUN}**"
+            echo "- productionBuild: **${BUILD:-NOT_RUN}**"
+            echo "- rolePermissionContracts: **${ROLE_PERMISSION:-NOT_RUN}**"
+            echo "- teacherStudentE2E: **${TEACHER_STUDENT:-NOT_RUN}**"
+            echo "- zeroResidue: **${ZERO_RESIDUE:-NOT_RUN}**"
+            echo "- migrationCount: **${MIGRATION_COUNT:-0}**"
+            echo "- migrationFingerprint: \`${MIGRATION_FINGERPRINT:-NOT_RUN}\`"
+            echo "- migrationRange: \`${FIRST_MIGRATION:-NOT_RUN}\` → \`${LAST_MIGRATION:-NOT_RUN}\`"
+            echo "- failureStage: **${FAILURE_STAGE:-NONE}**"
+            echo "- failureLabels: \`${FAILURE_LABELS:-NONE}\`"
+            echo "- finalVerdict: **${FINAL_VERDICT:-NOT_RUN}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove private checkouts and sealed output
+        if: always()
+        run: |
+          rm -rf private-repo private-main \
+            "$RUNNER_TEMP"/trainingos-main-release-* \
+            "$RUNNER_TEMP"/trainingos-*.log
