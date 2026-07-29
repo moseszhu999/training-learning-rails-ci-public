@@ -93,9 +93,9 @@ else
     [[ "$stamp" -ge "$migration_start" && "$stamp" -le "$migration_end" ]]
   done
 fi
-canonical_count="$(find "$PRIVATE_REPO_PATH/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+source_migration_count="$(find "$PRIVATE_REPO_PATH/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
 if [[ "$EXPECTED_MIGRATION_COUNT" != 0 ]]; then
-  [[ "$EXPECTED_MIGRATION_COUNT" == "$canonical_count" ]]
+  [[ "$EXPECTED_MIGRATION_COUNT" == "$source_migration_count" ]]
 fi
 run_e2e(){
   local url="$1"
@@ -117,7 +117,9 @@ python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
   --commit-sha "$PRIVATE_EXACT_SHA"
 
 CURRENT_STAGE="fresh-manifest"
-python - "$fresh_project/supabase/trainingos-bootstrap-manifest.json" "$canonical_count" <<'PY'
+generated_migration_count="$(find "$fresh_project/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+[[ "$generated_migration_count" =~ ^[1-9][0-9]*$ ]]
+python - "$fresh_project/supabase/trainingos-bootstrap-manifest.json" "$generated_migration_count" <<'PY'
 import json,pathlib,sys
 manifest=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 raise SystemExit(0 if int(manifest.get('migrationCount',-1))==int(sys.argv[2]) else 1)
@@ -172,4 +174,4 @@ if [[ "$suite" != postmerge ]]; then
 fi
 
 CURRENT_STAGE="complete"
-echo "CHALLENGE_DATABASE status=PASS suite=$suite migrations=${#migrations[@]} canonical=$canonical_count fresh=PASS second_pass=PASS upgrade=$upgrade_result e2e=PASS cleanup=PASS"
+echo "CHALLENGE_DATABASE status=PASS suite=$suite changed_migrations=${#migrations[@]} source=$source_migration_count generated=$generated_migration_count fresh=PASS second_pass=PASS upgrade=$upgrade_result e2e=PASS cleanup=PASS"
