@@ -297,6 +297,10 @@ jobs:
           PROFILE_STATUS: ${{ steps.profile.outputs.status }}
           PASSED_STEPS: ${{ steps.profile.outputs.passed_step_count }}
           STEP_COUNT: ${{ steps.profile.outputs.step_count }}
+          PROFILE_FAILED_LABELS: ${{ steps.profile.outputs.failed_labels }}
+          PROFILE_NODE_TESTS: ${{ steps.profile.outputs.node_tests }}
+          PROFILE_NODE_PASSED: ${{ steps.profile.outputs.node_passed }}
+          PROFILE_PYTHON_TESTS: ${{ steps.profile.outputs.python_tests }}
           RELEASE_VERDICT: ${{ steps.main_release_final.outputs.final_verdict }}
           RELEASE_FAILURE_STAGE: ${{ steps.main_release.outputs.failure_stage }}
           RELEASE_MIGRATION_COUNT: ${{ steps.main_release.outputs.migration_count }}
@@ -332,12 +336,15 @@ jobs:
             `- Migrations in declared range: **${process.env.MIGRATION_COUNT || '0'}**`,
             `- Fixed profile result: **${value(process.env.PROFILE_STATUS)}**`,
             `- Profile stages: **${process.env.PASSED_STEPS || '0'}/${process.env.STEP_COUNT || '0'}**`,
+            `- Failed profile labels: **${value(process.env.PROFILE_FAILED_LABELS)}**`,
+            `- Focused Node: **${process.env.PROFILE_NODE_PASSED || '0'}/${process.env.PROFILE_NODE_TESTS || '0'}**`,
+            `- Focused Python: **${process.env.PROFILE_PYTHON_TESTS || '0'}**`,
           ];
           lines.push('', 'Raw private output remains runner-local, sealed, and deleted. No artifact is uploaded and no deployment is performed.');
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
           console.log(release
             ? `TRAININGOS_MAIN_RELEASE verdict=${value(process.env.RELEASE_VERDICT)} main_ref=${value(process.env.MAIN_REF_EQUALITY)} failure_stage=${value(process.env.RELEASE_FAILURE_STAGE)} migrations=${process.env.RELEASE_MIGRATION_COUNT || '0'}`
-            : `TRAININGOS_PUBLIC_EXACT_HEAD profile=${process.env.VALIDATION_PROFILE} scope=${value(process.env.SCOPE_STATUS)} validation=${value(process.env.PROFILE_STATUS)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'}`);
+            : `TRAININGOS_PUBLIC_EXACT_HEAD profile=${process.env.VALIDATION_PROFILE} scope=${value(process.env.SCOPE_STATUS)} validation=${value(process.env.PROFILE_STATUS)} failed=${value(process.env.PROFILE_FAILED_LABELS)} node=${process.env.PROFILE_NODE_PASSED || '0'}/${process.env.PROFILE_NODE_TESTS || '0'} python=${process.env.PROFILE_PYTHON_TESTS || '0'} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'}`);
           NODE
 
       - name: Enforce final exact-head result
