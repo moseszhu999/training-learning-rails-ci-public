@@ -1,7 +1,7 @@
 import { appendFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-export const validationProfiles = Object.freeze([
+export const standardValidationProfiles = Object.freeze([
   'student-learning-execution',
   'scheduling-delivery',
   'agent-recipe',
@@ -9,22 +9,41 @@ export const validationProfiles = Object.freeze([
   'classroom-lark',
   'classroom-agent-queue',
   'challenge-runtime',
+  'challenge-web',
+  'teacher-hub',
+  'docs-launch',
   'generic-owned',
 ]);
 
+export const validationProfiles = Object.freeze([
+  ...standardValidationProfiles,
+  'main-release',
+]);
+
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
-const COUNT_PATTERN = /^(0|[1-9][0-9]{0,3})$/;
+const COUNT_PATTERN = /^(0|[1-9][0-9]{0,5})$/;
 const RANGE_PATTERN = /^([0-9]{14})-([0-9]{14})$/;
-const FOCUSED_PATTERN = /^node=(0|[1-9][0-9]{0,3});python=(0|[1-9][0-9]{0,3})$/;
+const FOCUSED_PATTERN = /^node=(0|[1-9][0-9]{0,5});python=(0|[1-9][0-9]{0,5})$/;
+const BOOLEAN_PATTERN = /^(true|false)$/;
 
 export function validateInputs(input) {
   const failures = [];
   const privateExactSha = input.privateExactSha ?? '';
   const expectedBaseSha = input.expectedBaseSha ?? '';
+  const expectedMainSha = input.expectedMainSha ?? '';
   const validationProfile = input.validationProfile ?? '';
   const expectedChangedFileCount = input.expectedChangedFileCount ?? '';
   const expectedMigrationRange = input.expectedMigrationRange ?? '';
   const expectedFocusedTestCounts = input.expectedFocusedTestCounts ?? '';
+  const expectedMigrationCount = input.expectedMigrationCount ?? '';
+  const runFlags = {
+    runFreshReplay: input.runFreshReplay ?? 'false',
+    runUpgradeReplay: input.runUpgradeReplay ?? 'false',
+    runApplicationContracts: input.runApplicationContracts ?? 'false',
+    runTypecheck: input.runTypecheck ?? 'false',
+    runProductionBuild: input.runProductionBuild ?? 'false',
+    runCriticalE2E: input.runCriticalE2E ?? 'false',
+  };
 
   if (!SHA_PATTERN.test(privateExactSha)) failures.push('privateExactSha');
   if (!SHA_PATTERN.test(expectedBaseSha)) failures.push('expectedBaseSha');
@@ -49,12 +68,35 @@ export function validateInputs(input) {
   const focusedMatch = expectedFocusedTestCounts.match(FOCUSED_PATTERN);
   if (!focusedMatch) failures.push('expectedFocusedTestCounts');
 
+  if (validationProfile === 'main-release') {
+    if (!SHA_PATTERN.test(expectedMainSha)) failures.push('expectedMainSha');
+    if (!COUNT_PATTERN.test(expectedMigrationCount)) failures.push('expectedMigrationCount');
+    for (const [name, value] of Object.entries(runFlags)) {
+      if (!BOOLEAN_PATTERN.test(String(value))) failures.push(name);
+    }
+    if (privateExactSha !== expectedMainSha) failures.push('privateMainEquality');
+    if (expectedBaseSha !== expectedMainSha) failures.push('mainBaseEquality');
+    if (expectedChangedFileCount !== '0') failures.push('mainChangedFileCount');
+    if (expectedMigrationRange !== 'none') failures.push('mainMigrationRange');
+    if (expectedFocusedTestCounts !== 'node=0;python=0') failures.push('mainFocusedCountSentinel');
+  }
+
+  if (validationProfile === 'challenge-runtime') {
+    if (!COUNT_PATTERN.test(expectedMigrationCount) || expectedMigrationCount === '0') failures.push('challengeMigrationCount');
+    if (expectedMigrationRange === 'none') failures.push('challengeMigrationRange');
+  }
+
+  if (validationProfile === 'docs-launch' && expectedMigrationRange !== 'none') {
+    failures.push('docsMigrationRange');
+  }
+
   return {
     ok: failures.length === 0,
     failures,
     normalized: {
       privateExactSha,
       expectedBaseSha,
+      expectedMainSha,
       validationProfile,
       expectedChangedFileCount,
       expectedMigrationRange,
@@ -62,6 +104,8 @@ export function validateInputs(input) {
       migrationEnd,
       expectedNodeCount: focusedMatch?.[1] ?? '',
       expectedPythonCount: focusedMatch?.[2] ?? '',
+      expectedMigrationCount,
+      ...Object.fromEntries(Object.entries(runFlags).map(([key, value]) => [key, String(value)])),
     },
   };
 }
@@ -78,6 +122,14 @@ async function writeOutputs(result) {
     `migration_end=${values.migrationEnd}`,
     `expected_node_count=${values.expectedNodeCount}`,
     `expected_python_count=${values.expectedPythonCount}`,
+    `expected_main_sha=${values.expectedMainSha}`,
+    `expected_migration_count=${values.expectedMigrationCount}`,
+    `run_fresh_replay=${values.runFreshReplay}`,
+    `run_upgrade_replay=${values.runUpgradeReplay}`,
+    `run_application_contracts=${values.runApplicationContracts}`,
+    `run_typecheck=${values.runTypecheck}`,
+    `run_production_build=${values.runProductionBuild}`,
+    `run_critical_e2e=${values.runCriticalE2E}`,
     `failure_count=${result.failures.length}`,
   ];
   await appendFile(outputPath, `${lines.join('\n')}\n`, 'utf8');
@@ -87,10 +139,18 @@ async function main() {
   const result = validateInputs({
     privateExactSha: process.env.PRIVATE_EXACT_SHA,
     expectedBaseSha: process.env.EXPECTED_BASE_SHA,
+    expectedMainSha: process.env.EXPECTED_MAIN_SHA,
     validationProfile: process.env.VALIDATION_PROFILE,
     expectedChangedFileCount: process.env.EXPECTED_CHANGED_FILE_COUNT,
     expectedMigrationRange: process.env.EXPECTED_MIGRATION_RANGE,
     expectedFocusedTestCounts: process.env.EXPECTED_FOCUSED_TEST_COUNTS,
+    expectedMigrationCount: process.env.EXPECTED_MIGRATION_COUNT,
+    runFreshReplay: process.env.RUN_FRESH_REPLAY,
+    runUpgradeReplay: process.env.RUN_UPGRADE_REPLAY,
+    runApplicationContracts: process.env.RUN_APPLICATION_CONTRACTS,
+    runTypecheck: process.env.RUN_TYPECHECK,
+    runProductionBuild: process.env.RUN_PRODUCTION_BUILD,
+    runCriticalE2E: process.env.RUN_CRITICAL_E2E,
   });
   await writeOutputs(result);
   console.log(`INPUT_VALIDATION status=${result.ok ? 'PASS' : 'FAIL'} failures=${result.failures.length}`);

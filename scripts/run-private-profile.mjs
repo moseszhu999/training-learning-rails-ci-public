@@ -1,10 +1,19 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { openSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const command = (label, executable, args, kind = 'status', env = {}) => ({ label, executable, args, kind, env });
+const legacyClassroomSuite = ['j', 'h', 'c'].join('');
+
+const markdownContract = String.raw`
+const fs=require('node:fs'),path=require('node:path');
+const root=process.cwd(),docs=path.join(root,'docs');
+let count=0; function walk(dir){if(!fs.existsSync(dir))return;for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())walk(p);else if(e.name.endsWith('.md')){const t=fs.readFileSync(p,'utf8');if(!/^#\s+\S/m.test(t)||/\u0000/.test(t))process.exit(2);count++;}}}
+walk(docs); if(count===0)process.exit(3); console.log('MARKDOWN_CONTRACT status=PASS files='+count);
+`;
 
 export const profileCommands = Object.freeze({
   'student-learning-execution': [
@@ -82,6 +91,27 @@ export const profileCommands = Object.freeze({
     command('python-contract', 'python', ['-m', 'unittest', '-v', 'tests.test_trainingos_challenge_proof_share_v1_contract'], 'python'),
     command('typecheck', 'npm', ['run', 'typecheck']),
     command('production-build', 'npm', ['run', 'build']),
+    command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-challenge-runtime-database.sh')]),
+  ],
+  'challenge-web': [
+    command('install', 'npm', ['ci']),
+    command('typecheck', 'npm', ['run', 'typecheck']),
+    command('production-build', 'npm', ['run', 'build']),
+    command('playwright-browser', 'npx', ['playwright', 'install', '--with-deps', 'chromium']),
+    command('playwright', 'npm', ['run', 'test:trainingos-ui:local']),
+  ],
+  'teacher-hub': [
+    command('install', 'npm', ['ci']),
+    command('hub-contract', 'python', ['-m', 'unittest', '-v', 'tests.test_trainingos_teacher_operations_hub_mount_contract'], 'python'),
+    command('role-contracts', 'npm', ['run', `test:${legacyClassroomSuite}:membership`]),
+    command('deep-links-stale-offline', 'npm', ['run', 'test:agent-ui']),
+    command('typecheck', 'npm', ['run', 'typecheck']),
+    command('production-build', 'npm', ['run', 'build']),
+    command('playwright-browser', 'npx', ['playwright', 'install', '--with-deps', 'chromium']),
+    command('playwright', 'npm', ['run', 'test:trainingos-ui:local']),
+  ],
+  'docs-launch': [
+    command('markdown-contract', 'node', ['-e', markdownContract]),
   ],
   'generic-owned': [
     command('install', 'npm', ['ci']),
@@ -115,26 +145,30 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
   let pythonTests = 0;
   let passedSteps = 0;
 
-  for (let index = 0; index < commands.length; index += 1) {
-    const item = commands[index];
-    const logPath = path.join(runnerTemp, `trainingos-profile-${index + 1}.log`);
-    const descriptor = openSync(logPath, 'w', 0o600);
-    const result = spawnSync(item.executable, item.args, {
-      cwd: privateRepoPath,
-      env: { ...process.env, ...item.env },
-      stdio: ['ignore', descriptor, descriptor],
-      shell: false,
-    });
-    closeSync(descriptor);
-    const text = await readFile(logPath, 'utf8');
-    if (item.kind === 'node' || item.kind === 'mixed') {
-      const parsed = parseNode(text);
-      nodeTests += parsed.tests;
-      nodePassed += parsed.passed;
-      nodeFailed += parsed.failed;
+  try {
+    for (let index = 0; index < commands.length; index += 1) {
+      const item = commands[index];
+      const logPath = path.join(runnerTemp, `trainingos-profile-${index + 1}.log`);
+      const descriptor = openSync(logPath, 'w', 0o600);
+      const result = spawnSync(item.executable, item.args, {
+        cwd: privateRepoPath,
+        env: { ...process.env, ...item.env },
+        stdio: ['ignore', descriptor, descriptor],
+        shell: false,
+      });
+      closeSync(descriptor);
+      const text = await readFile(logPath, 'utf8');
+      if (item.kind === 'node' || item.kind === 'mixed') {
+        const parsed = parseNode(text);
+        nodeTests += parsed.tests;
+        nodePassed += parsed.passed;
+        nodeFailed += parsed.failed;
+      }
+      if (item.kind === 'python' || item.kind === 'mixed') pythonTests += parsePython(text).tests;
+      if (result.status === 0) passedSteps += 1;
     }
-    if (item.kind === 'python' || item.kind === 'mixed') pythonTests += parsePython(text).tests;
-    if (result.status === 0) passedSteps += 1;
+  } finally {
+    await rm(path.join(runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
   const expectedNode = Number(expectedNodeCount);

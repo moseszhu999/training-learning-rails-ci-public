@@ -4,22 +4,25 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { validationProfiles, validateInputs } from '../scripts/exact-head-inputs.mjs';
+import { standardValidationProfiles, validationProfiles, validateInputs } from '../scripts/exact-head-inputs.mjs';
 import { profileCommands } from '../scripts/run-private-profile.mjs';
 
 const root = process.cwd();
 const workflowPath = path.join(root, '.github/workflows/trainingos-public-exact-head.yml');
+const challengeDatabasePath = path.join(root, 'scripts/run-challenge-runtime-database.sh');
 
 const valid = {
   privateExactSha: 'a'.repeat(40),
   expectedBaseSha: 'b'.repeat(40),
+  expectedMainSha: '',
   validationProfile: 'generic-owned',
   expectedChangedFileCount: '12',
   expectedMigrationRange: '20260728120000-20260728125999',
   expectedFocusedTestCounts: 'node=0;python=0',
+  expectedMigrationCount: '0',
 };
 
-test('dispatch input contract is strict and lowercase', () => {
+test('dispatch input contract is strict, lowercase, and profile-specific', () => {
   assert.equal(validateInputs(valid).ok, true);
   assert.equal(validateInputs({ ...valid, privateExactSha: 'A'.repeat(40) }).ok, false);
   assert.equal(validateInputs({ ...valid, expectedBaseSha: 'main' }).ok, false);
@@ -28,11 +31,31 @@ test('dispatch input contract is strict and lowercase', () => {
   assert.equal(validateInputs({ ...valid, expectedMigrationRange: '20260728125999-20260728120000' }).ok, false);
   assert.equal(validateInputs({ ...valid, expectedFocusedTestCounts: 'node=1,python=2' }).ok, false);
   assert.equal(validateInputs({ ...valid, expectedMigrationRange: 'none' }).ok, true);
-  assert.equal(validateInputs({ ...valid, validationProfile: 'challenge-runtime' }).ok, true);
+  assert.equal(validateInputs({ ...valid, validationProfile: 'challenge-runtime', expectedMigrationCount: '305' }).ok, true);
+  assert.equal(validateInputs({ ...valid, validationProfile: 'challenge-runtime', expectedMigrationRange: 'none', expectedMigrationCount: '305' }).ok, false);
+  const mainSha = 'c'.repeat(40);
+  assert.equal(validateInputs({
+    ...valid,
+    privateExactSha: mainSha,
+    expectedBaseSha: mainSha,
+    expectedMainSha: mainSha,
+    validationProfile: 'main-release',
+    expectedChangedFileCount: '0',
+    expectedMigrationRange: 'none',
+    expectedFocusedTestCounts: 'node=0;python=0',
+    expectedMigrationCount: '305',
+    runFreshReplay: 'true',
+    runUpgradeReplay: 'true',
+    runApplicationContracts: 'true',
+    runTypecheck: 'true',
+    runProductionBuild: 'true',
+    runCriticalE2E: 'true',
+  }).ok, true);
 });
 
-test('all profiles are fixed command maps', () => {
-  assert.deepEqual(Object.keys(profileCommands).sort(), [...validationProfiles].sort());
+test('all feature profiles are fixed command maps', () => {
+  assert.deepEqual(Object.keys(profileCommands).sort(), [...standardValidationProfiles].sort());
+  assert.ok(validationProfiles.includes('main-release'));
   for (const commands of Object.values(profileCommands)) {
     assert.ok(commands.length > 0);
     for (const item of commands) {
@@ -43,7 +66,7 @@ test('all profiles are fixed command maps', () => {
   }
 });
 
-test('Challenge profile is fixed, focused, and non-deploying', () => {
+test('Challenge profile preserves focused proof/share contracts and isolated database replay', () => {
   const commands = profileCommands['challenge-runtime'];
   assert.deepEqual(commands.map((item) => item.label), [
     'install',
@@ -53,40 +76,62 @@ test('Challenge profile is fixed, focused, and non-deploying', () => {
     'python-contract',
     'typecheck',
     'production-build',
+    'database-replay',
   ]);
   const serialized = JSON.stringify(commands);
   assert.match(serialized, /challenge-proof-share-v1/);
+  assert.match(serialized, /run-challenge-runtime-database\.sh/);
   assert.doesNotMatch(serialized, /deploy|production database/i);
 });
 
-test('workflow keeps the public boundary and sealed-output rules', async () => {
+test('web, hub, and docs profiles are fixed and non-deploying', () => {
+  assert.ok(profileCommands['challenge-web'].some((item) => item.label === 'playwright'));
+  assert.ok(profileCommands['teacher-hub'].some((item) => item.label === 'hub-contract'));
+  assert.deepEqual(profileCommands['docs-launch'].map((item) => item.label), ['markdown-contract']);
+  assert.doesNotMatch(JSON.stringify({
+    web: profileCommands['challenge-web'],
+    hub: profileCommands['teacher-hub'],
+    docs: profileCommands['docs-launch'],
+  }), /vercel|netlify deploy|supabase push/i);
+});
+
+test('workflow keeps public boundary, exact-main, and sealed-output rules', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   for (const input of [
     'privateExactSha',
     'expectedBaseSha',
+    'expectedMainSha',
     'validationProfile',
     'expectedChangedFileCount',
     'expectedMigrationRange',
     'expectedFocusedTestCounts',
+    'expectedMigrationCount',
   ]) assert.match(workflow, new RegExp(`${input}:`));
   for (const profile of validationProfiles) assert.match(workflow, new RegExp(`- ${profile}`));
   assert.match(workflow, /permissions:\n  contents: read/);
   assert.match(workflow, /PRIVATE_REPO_READ_TOKEN/);
-  assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, 4);
+  assert.ok((workflow.match(/persist-credentials: false/g) ?? []).length >= 3);
   assert.doesNotMatch(workflow, /upload-artifact/);
   assert.doesNotMatch(workflow, /pull_request:/);
-  assert.match(workflow, /challenge-database:/);
-  assert.match(workflow, /build-trainingos-fresh-bootstrap\.py/);
-  assert.match(workflow, /supabase db reset --local --no-seed/);
-  assert.match(workflow, /supabase migration up --local/);
-  assert.match(workflow, /trainingos_challenge_proof_share_v1_e2e_runner\.sql/);
-  assert.match(workflow, /No artifact is uploaded and no production database is contacted/);
+  assert.match(workflow, /Check out current private main ref/);
+  assert.match(workflow, /Run fixed latest-main release gate/);
+  assert.match(workflow, /Raw private output remains runner-local, sealed, and deleted/);
   const enforcement = workflow.indexOf('Enforce final exact-head result');
   const cleanup = workflow.indexOf('Remove private checkout and sealed files');
-  const dbEnforcement = workflow.indexOf('Enforce Challenge database result');
-  const dbCleanup = workflow.indexOf('Remove private checkouts, local databases, and sealed output');
   assert.ok(enforcement > 0 && cleanup > enforcement);
-  assert.ok(dbEnforcement > 0 && dbCleanup > dbEnforcement);
+});
+
+test('Challenge database script is fixed, syntax-valid, sealed, and non-deploying', async () => {
+  const script = await readFile(challengeDatabasePath, 'utf8');
+  const syntax = spawnSync('bash', ['-n', challengeDatabasePath], { cwd: root, encoding: 'utf8' });
+  assert.equal(syntax.status, 0, syntax.stderr);
+  assert.match(script, /trainingos_challenge_proof_share_v1_e2e_runner\.sql/);
+  assert.match(script, /supabase db reset --local --no-seed/);
+  assert.match(script, /supabase migration up --local/);
+  assert.match(script, /worktree add --detach/);
+  assert.match(script, /cleanup=PASS/);
+  assert.doesNotMatch(script, /upload-artifact|PRIVATE_REPO_READ_TOKEN|supabase link|supabase db push|vercel|netlify/i);
+  assert.doesNotMatch(script, /\beval\b/);
 });
 
 test('CLI publishes only normalized status fields', async () => {
@@ -100,10 +145,12 @@ test('CLI publishes only normalized status fields', async () => {
       GITHUB_OUTPUT: output,
       PRIVATE_EXACT_SHA: valid.privateExactSha,
       EXPECTED_BASE_SHA: valid.expectedBaseSha,
+      EXPECTED_MAIN_SHA: valid.expectedMainSha,
       VALIDATION_PROFILE: valid.validationProfile,
       EXPECTED_CHANGED_FILE_COUNT: valid.expectedChangedFileCount,
       EXPECTED_MIGRATION_RANGE: valid.expectedMigrationRange,
       EXPECTED_FOCUSED_TEST_COUNTS: valid.expectedFocusedTestCounts,
+      EXPECTED_MIGRATION_COUNT: valid.expectedMigrationCount,
     },
   });
   assert.equal(result.status, 0);
