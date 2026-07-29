@@ -37,20 +37,78 @@ challengeWebBuild.args.splice(
   'vite.config.ts',
 );
 
+const databaseDetailAllowlist = new Set([
+  'proof-assertion',
+  'proof-evidence',
+  'proof-residue',
+  'proof-cleanup',
+  'proof-attempt-missing',
+  'proof-completion-required',
+  'proof-internal-source',
+  'proof-ownership',
+  'proof-human-required',
+  'proof-profile-required',
+  'proof-source-missing',
+  'proof-source-stale',
+  'proof-idempotency',
+  'proof-rollback-marker',
+  'canonical-assertion',
+  'invite-assertion',
+  'permission-denied',
+  'role-missing',
+  'not-null',
+  'check-constraint',
+  'foreign-key',
+  'unique-constraint',
+  'ambiguous-column',
+  'undefined-column',
+  'undefined-function',
+  'invalid-uuid',
+  'invalid-json',
+  'transaction-aborted',
+  'concurrency',
+]);
+
+function safeDatabaseDetail(value) {
+  if (databaseDetailAllowlist.has(value)) return value;
+  if (/^sqlstate-[0-9a-z]{5}$/.test(value)) return value;
+  return '';
+}
+
+export function databaseDiagnosticLabel(text) {
+  const value = String(text);
+  const detailed = [...value.matchAll(
+    /CHALLENGE_DATABASE status=FAIL stage=([a-z0-9-]+) detail=([a-z0-9-]+)/g,
+  )];
+  for (const match of detailed) {
+    const base = databaseFailureLabel(`CHALLENGE_DATABASE status=FAIL stage=${match[1]}`);
+    const detail = safeDatabaseDetail(match[2]);
+    if (base !== 'database-replay' && detail) return `${base}-${detail}`;
+  }
+  return databaseFailureLabel(value);
+}
+
 export function refineChallengeDatabaseFailure(result, sealedLogs = []) {
-  if (!result?.failedLabels?.includes('database-replay')) return result;
+  const currentDatabaseLabels = result?.failedLabels?.filter((label) => (
+    label === 'database-replay' || label.startsWith('database-')
+  )) ?? [];
+  if (currentDatabaseLabels.length === 0) return result;
 
   const refinedLabel = sealedLogs
-    .map((text) => databaseFailureLabel(text))
-    .find((label) => label !== 'database-replay');
+    .map((text) => databaseDiagnosticLabel(text))
+    .find((label) => (
+      label !== 'database-replay'
+      && !currentDatabaseLabels.includes(label)
+    ));
   if (!refinedLabel) return result;
 
+  const currentSet = new Set(currentDatabaseLabels);
   const failedLabels = result.failedLabels.map((label) => (
-    label === 'database-replay' ? refinedLabel : label
+    currentSet.has(label) ? refinedLabel : label
   ));
   const statusLabels = result.status.startsWith('FAIL:')
     ? result.status.slice(5).split(',').map((label) => (
-      label === 'database-replay' ? refinedLabel : label
+      currentSet.has(label) ? refinedLabel : label
     ))
     : failedLabels;
 
@@ -77,7 +135,7 @@ export async function runProfile(input) {
   const result = await runStage2Profile(input);
   if (
     input.profile !== 'challenge-runtime'
-    || !result.failedLabels.includes('database-replay')
+    || !result.failedLabels.some((label) => label === 'database-replay' || label.startsWith('database-'))
   ) {
     return result;
   }

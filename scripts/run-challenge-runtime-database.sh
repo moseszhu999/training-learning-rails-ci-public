@@ -63,6 +63,7 @@ cleanup(){
   git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_worktree" >/dev/null 2>&1 || true
   rm -rf "$fresh_project" "$upgrade_project" "$base_worktree"
   rm -f "$RUNNER_TEMP"/trainingos-challenge-*-status.env
+  rm -f "$RUNNER_TEMP"/trainingos-challenge-*-e2e.log
 }
 trap cleanup EXIT
 
@@ -97,11 +98,81 @@ source_migration_count="$(find "$PRIVATE_REPO_PATH/supabase/migrations" -maxdept
 if [[ "$EXPECTED_MIGRATION_COUNT" != 0 ]]; then
   [[ "$EXPECTED_MIGRATION_COUNT" == "$source_migration_count" ]]
 fi
+
+sanitize_e2e_detail(){
+  local sealed_log="$1"
+  python - "$sealed_log" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+known = (
+    ('TRAININGOS_CHALLENGE_PROOF_E2E_ASSERTION_FAILED', 'proof-assertion'),
+    ('TRAININGOS_CHALLENGE_PROOF_E2E_EVIDENCE_MISSING', 'proof-evidence'),
+    ('TRAININGOS_CHALLENGE_PROOF_E2E_RESIDUE', 'proof-residue'),
+    ('TRAININGOS_CHALLENGE_PROOF_CLEANUP_RESIDUE', 'proof-cleanup'),
+    ('TRAININGOS_CHALLENGE_PROOF_CANONICAL_ATTEMPT_NOT_FOUND', 'proof-attempt-missing'),
+    ('TRAININGOS_CHALLENGE_PROOF_CANONICAL_COMPLETION_REQUIRED', 'proof-completion-required'),
+    ('TRAININGOS_CHALLENGE_PROOF_INTERNAL_SOURCE_REQUIRED', 'proof-internal-source'),
+    ('TRAININGOS_CHALLENGE_PROOF_LEARNER_OWNERSHIP_REQUIRED', 'proof-ownership'),
+    ('TRAININGOS_CHALLENGE_PROOF_HUMAN_REQUIRED', 'proof-human-required'),
+    ('TRAININGOS_CHALLENGE_PROOF_PROFILE_REQUIRED', 'proof-profile-required'),
+    ('TRAININGOS_CHALLENGE_PROOF_SOURCE_NOT_FOUND', 'proof-source-missing'),
+    ('TRAININGOS_CHALLENGE_PROOF_SOURCE_STALE', 'proof-source-stale'),
+    ('TRAININGOS_CHALLENGE_PROOF_IDEMPOTENCY_CONFLICT', 'proof-idempotency'),
+    ('TRAININGOS_CHALLENGE_PROOF_EXPECTED_ROLLBACK', 'proof-rollback-marker'),
+    ('TRAININGOS_CHALLENGE_E2E_ASSERTION_FAILED', 'canonical-assertion'),
+    ('TRAININGOS_INVITE_GROWTH_E2E_ASSERTION_FAILED', 'invite-assertion'),
+)
+for marker, label in known:
+    if marker in text:
+        print(label)
+        raise SystemExit(0)
+
+verbose_state = re.search(r'(?m)^(?:psql:[^\n]*:\s*)?ERROR:\s+([0-9A-Z]{5}):', text)
+if verbose_state:
+    print(f"sqlstate-{verbose_state.group(1).lower()}")
+    raise SystemExit(0)
+
+patterns = (
+    (r'permission denied|insufficient privilege', 'permission-denied'),
+    (r'role [^\n]+ does not exist', 'role-missing'),
+    (r'null value in column', 'not-null'),
+    (r'violates check constraint', 'check-constraint'),
+    (r'violates foreign key constraint', 'foreign-key'),
+    (r'duplicate key value violates unique constraint', 'unique-constraint'),
+    (r'column reference [^\n]+ is ambiguous|ambiguous column', 'ambiguous-column'),
+    (r'column [^\n]+ does not exist|record [^\n]+ has no field', 'undefined-column'),
+    (r'function [^\n]+ does not exist', 'undefined-function'),
+    (r'invalid input syntax for type uuid', 'invalid-uuid'),
+    (r'invalid input syntax for type json', 'invalid-json'),
+    (r'current transaction is aborted', 'transaction-aborted'),
+)
+for pattern, label in patterns:
+    if re.search(pattern, text, flags=re.IGNORECASE):
+        print(label)
+        raise SystemExit(0)
+print('unknown')
+PY
+}
+
 run_e2e(){
   local url="$1"
-  psql "$url" -X -v ON_ERROR_STOP=1 -f "$runner_sql"
+  local e2e_log="$RUNNER_TEMP/trainingos-challenge-${CURRENT_STAGE}-e2e.log"
+  : >"$e2e_log"
+  chmod 600 "$e2e_log"
+  if ! psql "$url" -X -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -f "$runner_sql" >"$e2e_log" 2>&1; then
+    local detail
+    detail="$(sanitize_e2e_detail "$e2e_log")"
+    echo "CHALLENGE_DATABASE status=FAIL stage=$CURRENT_STAGE detail=$detail"
+    return 1
+  fi
   if [[ -n "$concurrency_runner" ]]; then
-    DATABASE_URL="$url" RUNNER_TEMP="$RUNNER_TEMP" bash "$concurrency_runner"
+    if ! DATABASE_URL="$url" RUNNER_TEMP="$RUNNER_TEMP" bash "$concurrency_runner" >>"$e2e_log" 2>&1; then
+      echo "CHALLENGE_DATABASE status=FAIL stage=$CURRENT_STAGE detail=concurrency"
+      return 1
+    fi
   fi
 }
 
