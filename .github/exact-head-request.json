@@ -1,0 +1,18 @@
+{
+  "privateExactSha": "f6f97089e721ed6e7f9e1ca36d58b0242753b815",
+  "expectedBaseSha": "745bc0dafdec9d8e0b5e09840b7e62760e9a4706",
+  "expectedMainSha": "",
+  "validationProfile": "teacher-hub",
+  "expectedChangedFileCount": "8",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=5;python=36",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": false,
+  "runTypecheck": false,
+  "runProductionBuild": false,
+  "runCriticalE2E": false,
+  "reportIssueNumber": 108,
+  "requestId": "teacher-hub-pr370-c3"
+}
