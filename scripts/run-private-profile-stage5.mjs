@@ -37,6 +37,26 @@ export const challengeOfferProfileCommands = Object.freeze([
   command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-challenge-offer-database.sh')]),
 ]);
 
+export const youthLearningProfileCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('owned-python-contracts', 'python', [
+    '-m',
+    'unittest',
+    '-v',
+    'tests.test_trainingos_youth_learning_product_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+]);
+
+const YOUTH_LEARNING_PREFIXES = Object.freeze([
+  'apps/training-web/src/youth-mode/',
+  'packages/training-youth-learning/',
+  'docs/product/trainingos-youth-learning-',
+  'docs/testing/trainingos-youth-learning-',
+  'tests/test_trainingos_youth_learning_',
+]);
+
 export function isChallengeOfferFiles(files) {
   const names = [...files];
   const hasOffer = names.some((name) => name.startsWith('packages/training-challenge-offer/'));
@@ -47,6 +67,21 @@ export function isChallengeOfferFiles(files) {
     || name.startsWith('packages/training-invite-growth/')
   ));
   return hasOffer && !hasOtherChallengeOwner;
+}
+
+export function isYouthLearningFiles(files) {
+  const names = [...files];
+  if (!names.length) return false;
+  const hasProductPackage = names.some((name) => (
+    name.startsWith('packages/training-youth-learning/')
+  ));
+  const hasFocusedContract = names.includes(
+    'tests/test_trainingos_youth_learning_product_v1.py',
+  );
+  const allOwned = names.every((name) => (
+    YOUTH_LEARNING_PREFIXES.some((prefix) => name.startsWith(prefix))
+  ));
+  return hasProductPackage && hasFocusedContract && allOwned;
 }
 
 function parseNode(text) {
@@ -148,6 +183,12 @@ export async function runProfile(input) {
     const files = await changedFiles(input);
     if (isChallengeOfferFiles(files)) {
       return runFixedProfile({ ...input, commands: challengeOfferProfileCommands });
+    }
+  }
+  if (input.profile === 'generic-owned') {
+    const files = await changedFiles(input);
+    if (isYouthLearningFiles(files)) {
+      return runFixedProfile({ ...input, commands: youthLearningProfileCommands });
     }
   }
   return runStage4Profile(input);
