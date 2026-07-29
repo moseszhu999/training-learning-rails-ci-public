@@ -117,10 +117,33 @@ python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
   --commit-sha "$PRIVATE_EXACT_SHA"
 
 CURRENT_STAGE="fresh-manifest"
-python - "$fresh_project/supabase/trainingos-bootstrap-manifest.json" "$canonical_count" <<'PY'
-import json,pathlib,sys
-manifest=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
-raise SystemExit(0 if int(manifest.get('migrationCount',-1))==int(sys.argv[2]) else 1)
+staged_count="$(find "$fresh_project/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+python - \
+  "$fresh_project/supabase/trainingos-bootstrap-manifest.json" \
+  "$PRIVATE_EXACT_SHA" \
+  "$canonical_count" \
+  "$staged_count" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+source_sha = sys.argv[2]
+source_count = int(sys.argv[3])
+staged_count = int(sys.argv[4])
+migration_count = int(manifest.get('migrationCount', -1))
+compatibility_count = int(manifest.get('compatibilityMigrationCount', -1))
+migrations = manifest.get('migrations')
+ok = (
+    manifest.get('schemaVersion') == 1
+    and manifest.get('sourceCommitSha') == source_sha
+    and isinstance(migrations, list)
+    and migration_count == len(migrations)
+    and migration_count == staged_count
+    and compatibility_count >= 0
+    and migration_count == source_count + compatibility_count
+)
+raise SystemExit(0 if ok else 1)
 PY
 
 CURRENT_STAGE="fresh-start"
