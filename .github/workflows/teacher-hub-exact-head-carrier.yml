@@ -1,0 +1,209 @@
+name: TrainingOS Teacher Hub exact-head carrier
+
+on:
+  push:
+    branches:
+      - ci/trainingos-teacher-hub-run-cb7072d
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: trainingos-teacher-hub-cb7072dae66e4abd31c599668e0d99e977d68eb5
+  cancel-in-progress: false
+
+env:
+  PRIVATE_EXACT_SHA: cb7072dae66e4abd31c599668e0d99e977d68eb5
+  EXPECTED_BASE_SHA: 5e9edc6b5c7c1d62d9441b3fd2db8d709296fff3
+  VALIDATION_PROFILE: teacher-hub
+  EXPECTED_CHANGED_FILE_COUNT: '7'
+  EXPECTED_MIGRATION_RANGE: none
+  EXPECTED_FOCUSED_TEST_COUNTS: node=5;python=24
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Check out public CI controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate immutable inputs
+        id: inputs
+        shell: bash
+        run: |
+          set +e
+          node scripts/exact-head-inputs.mjs > "$RUNNER_TEMP/trainingos-inputs.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate read-only private credential presence
+        id: credential
+        if: steps.inputs.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          if [[ -n "$PRIVATE_TOKEN" ]]; then
+            echo 'status=PASS' >> "$GITHUB_OUTPUT"
+          else
+            echo 'status=FAIL' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out exact private candidate
+        id: private_checkout
+        if: steps.inputs.outputs.status == 'PASS' && steps.credential.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_EXACT_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify exact head and zero-migration scope
+        id: scope
+        if: steps.private_checkout.outcome == 'success'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          MIGRATION_START: ${{ steps.inputs.outputs.migration_start }}
+          MIGRATION_END: ${{ steps.inputs.outputs.migration_end }}
+        run: |
+          set +e
+          node scripts/verify-private-scope.mjs > "$RUNNER_TEMP/trainingos-scope.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Run fixed teacher-hub profile with sealed output
+        id: profile
+        if: steps.scope.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          EXPECTED_NODE_COUNT: ${{ steps.inputs.outputs.expected_node_count }}
+          EXPECTED_PYTHON_COUNT: ${{ steps.inputs.outputs.expected_python_count }}
+        run: |
+          set +e
+          node scripts/run-private-profile.mjs > "$RUNNER_TEMP/trainingos-profile-controller.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized summary and commit status
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          INPUT_RUNNER_CODE: ${{ steps.inputs.outputs.runner_code }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          SCOPE_RUNNER_CODE: ${{ steps.scope.outputs.runner_code }}
+          ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
+          CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
+          MIGRATION_COUNT: ${{ steps.scope.outputs.migration_count }}
+          PROFILE_STATUS: ${{ steps.profile.outputs.status }}
+          PROFILE_RUNNER_CODE: ${{ steps.profile.outputs.runner_code }}
+          PASSED_STEPS: ${{ steps.profile.outputs.passed_step_count }}
+          STEP_COUNT: ${{ steps.profile.outputs.step_count }}
+          FAILED_LABELS: ${{ steps.profile.outputs.failed_labels }}
+          NODE_PASSED: ${{ steps.profile.outputs.node_passed }}
+          NODE_TESTS: ${{ steps.profile.outputs.node_tests }}
+          PYTHON_TESTS: ${{ steps.profile.outputs.python_tests }}
+          STATUS_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          final_state=failure
+          if [[ "${INPUT_STATUS:-FAIL}" == PASS \
+            && "${INPUT_RUNNER_CODE:-1}" == 0 \
+            && "${CREDENTIAL_STATUS:-FAIL}" == PASS \
+            && "${SCOPE_STATUS:-FAIL}" == PASS \
+            && "${SCOPE_RUNNER_CODE:-1}" == 0 \
+            && "${PROFILE_STATUS:-FAIL}" == PASS \
+            && "${PROFILE_RUNNER_CODE:-1}" == 0 ]]; then
+            final_state=success
+          fi
+
+          {
+            echo '## Teacher Operations Hub exact-head gate'
+            echo ''
+            echo "- Validation profile: **teacher-hub**"
+            echo "- Exact private SHA: \`${ACTUAL_SHA:-$PRIVATE_EXACT_SHA}\`"
+            echo "- Exact merge base: \`${MERGE_BASE:-$EXPECTED_BASE_SHA}\`"
+            echo "- Input validation: **${INPUT_STATUS:-NOT_RUN}**"
+            echo "- Read-only credential present: **${CREDENTIAL_STATUS:-NOT_RUN}**"
+            echo "- Scope verification: **${SCOPE_STATUS:-NOT_RUN}**"
+            echo "- Changed files: **${CHANGED_FILE_COUNT:-0}**"
+            echo "- Migration count: **${MIGRATION_COUNT:-0}**"
+            echo "- Fixed profile: **${PROFILE_STATUS:-NOT_RUN}**"
+            echo "- Profile stages: **${PASSED_STEPS:-0}/${STEP_COUNT:-0}**"
+            echo "- Failed stage labels: **${FAILED_LABELS:-NOT_RUN}**"
+            echo "- Focused Node: **${NODE_PASSED:-0}/${NODE_TESTS:-0}**"
+            echo "- Focused Python: **${PYTHON_TESTS:-0}**"
+            echo '- Database replay: **NOT_RUN — no migration**'
+            echo ''
+            echo 'Raw private output remains runner-local, sealed, and deleted. No artifact is uploaded.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          STATUS_STATE="$final_state" STATUS_DESCRIPTION="scope=${SCOPE_STATUS:-NOT_RUN} profile=${PROFILE_STATUS:-NOT_RUN} node=${NODE_PASSED:-0}/${NODE_TESTS:-0} python=${PYTHON_TESTS:-0} failed=${FAILED_LABELS:-NOT_RUN}" python - <<'PY'
+          import json, os, pathlib
+          description = os.environ['STATUS_DESCRIPTION'][:140]
+          payload = {
+              'state': os.environ['STATUS_STATE'],
+              'context': 'trainingos/teacher-hub-exact-head',
+              'description': description,
+              'target_url': f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+          }
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'trainingos-status.json').write_text(json.dumps(payload), encoding='utf-8')
+          PY
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $STATUS_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            --data-binary "@$RUNNER_TEMP/trainingos-status.json" \
+            > "$RUNNER_TEMP/trainingos-status-response.log" 2>&1
+          echo "TRAININGOS_TEACHER_HUB_EXACT_HEAD state=$final_state scope=${SCOPE_STATUS:-NOT_RUN} profile=${PROFILE_STATUS:-NOT_RUN} files=${CHANGED_FILE_COUNT:-0} migrations=${MIGRATION_COUNT:-0} node=${NODE_PASSED:-0}/${NODE_TESTS:-0} python=${PYTHON_TESTS:-0}"
+
+      - name: Enforce exact-head result
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          INPUT_RUNNER_CODE: ${{ steps.inputs.outputs.runner_code }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          SCOPE_RUNNER_CODE: ${{ steps.scope.outputs.runner_code }}
+          PROFILE_STATUS: ${{ steps.profile.outputs.status }}
+          PROFILE_RUNNER_CODE: ${{ steps.profile.outputs.runner_code }}
+        run: |
+          [[ "${INPUT_STATUS:-FAIL}" == PASS ]]
+          [[ "${INPUT_RUNNER_CODE:-1}" == 0 ]]
+          [[ "${CREDENTIAL_STATUS:-FAIL}" == PASS ]]
+          [[ "${SCOPE_STATUS:-FAIL}" == PASS ]]
+          [[ "${SCOPE_RUNNER_CODE:-1}" == 0 ]]
+          [[ "${PROFILE_STATUS:-FAIL}" == PASS ]]
+          [[ "${PROFILE_RUNNER_CODE:-1}" == 0 ]]
+
+      - name: Remove private checkout and sealed files
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-repo "$RUNNER_TEMP"/trainingos-*.log "$RUNNER_TEMP"/trainingos-status.json
