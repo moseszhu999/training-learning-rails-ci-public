@@ -1,9 +1,9 @@
-export * from './run-private-profile-stage4.mjs';
+export * from './run-private-profile-stage5.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runProfile } from './run-private-profile-stage4.mjs';
+import { runProfile } from './run-private-profile-stage5.mjs';
 import {
   sanitizeBuildSubstage,
   sanitizeTypeScriptDiagnostics,
