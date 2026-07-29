@@ -66,7 +66,7 @@ test('all feature profiles are fixed command maps', () => {
   }
 });
 
-test('Challenge profile locks the canonical Runtime contracts and isolated database replay', () => {
+test('Challenge profile locks canonical contracts and fixed build/database substages', () => {
   const commands = profileCommands['challenge-runtime'];
   assert.deepEqual(commands.map((item) => item.label), [
     'install',
@@ -80,7 +80,11 @@ test('Challenge profile locks the canonical Runtime contracts and isolated datab
     'node-contract',
     'python-contract',
     'typecheck',
-    'production-build',
+    'native-validation',
+    'zero-permission-validation',
+    'learning-workspace-validation',
+    'vscode-bundle',
+    'vite-build',
     'database-replay',
   ]);
   const serialized = JSON.stringify(commands);
@@ -89,6 +93,8 @@ test('Challenge profile locks the canonical Runtime contracts and isolated datab
   assert.match(serialized, /challenge-gateway-mcp-v1\.test\.mjs/);
   assert.match(serialized, /test_trainingos_challenge_runtime_v1_contract/);
   assert.match(serialized, /test_trainingos_challenge_mcp_composition_v1/);
+  assert.match(serialized, /run-trainingos-zero-permission-bridge-validation\.mjs/);
+  assert.match(serialized, /run-trainingos-learning-workspace-bridge-validation\.mjs/);
   assert.match(serialized, /run-challenge-runtime-database\.sh/);
   assert.doesNotMatch(serialized, /challenge-proof-share|deploy|production database/i);
 });
@@ -130,12 +136,23 @@ test('workflow keeps public boundary, exact-main, and sealed-output rules', asyn
   assert.ok(enforcement > 0 && cleanup > enforcement);
 });
 
-test('Challenge database script is canonical, syntax-valid, sealed, and non-deploying', async () => {
+test('Challenge database script is canonical, syntax-valid, staged, sealed, and non-deploying', async () => {
   const script = await readFile(challengeDatabasePath, 'utf8');
   const syntax = spawnSync('bash', ['-n', challengeDatabasePath], { cwd: root, encoding: 'utf8' });
   assert.equal(syntax.status, 0, syntax.stderr);
-  assert.match(script, /set -euo pipefail/);
+  assert.match(script, /set -eEuo pipefail/);
   assert.match(script, /umask 077/);
+  assert.match(script, /CHALLENGE_DATABASE status=FAIL stage=\$CURRENT_STAGE/);
+  for (const stage of [
+    'fresh-bootstrap',
+    'fresh-start',
+    'fresh-second-replay',
+    'fresh-e2e',
+    'upgrade-bootstrap',
+    'upgrade-start',
+    'upgrade-migrate',
+    'upgrade-e2e',
+  ]) assert.match(script, new RegExp(`CURRENT_STAGE="${stage}"`));
   assert.match(script, /trainingos_challenge_runtime_v1_e2e_runner\.sql/);
   assert.match(script, /20260729200000_trainingos_challenge_runtime_v1_schema\.sql/);
   assert.match(script, /20260729205100_trainingos_challenge_runtime_v1_private_acl\.sql/);

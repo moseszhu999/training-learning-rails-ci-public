@@ -8,6 +8,7 @@ const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const command = (label, executable, args, kind = 'status', env = {}) => ({ label, executable, args, kind, env });
 const legacyClassroomSuite = ['j', 'h', 'c'].join('');
 const SAFE_FAILURE_LABEL = /^[a-z0-9][a-z0-9-]{0,79}$/;
+const SAFE_DATABASE_STAGE = /^CHALLENGE_DATABASE status=FAIL stage=([a-z0-9][a-z0-9-]{0,59})$/m;
 
 const markdownContract = String.raw`
 const fs=require('node:fs'),path=require('node:path');
@@ -106,7 +107,11 @@ export const profileCommands = Object.freeze({
       'tests.test_trainingos_challenge_mcp_composition_v1',
     ], 'python'),
     command('typecheck', 'npm', ['run', 'typecheck']),
-    command('production-build', 'npm', ['run', 'build']),
+    command('native-validation', 'node', ['scripts/run-trainingos-native-classroom-validation.mjs']),
+    command('zero-permission-validation', 'node', ['scripts/run-trainingos-zero-permission-bridge-validation.mjs']),
+    command('learning-workspace-validation', 'node', ['scripts/run-trainingos-learning-workspace-bridge-validation.mjs']),
+    command('vscode-bundle', 'node', ['extensions/trainingos-classroom-vscode/esbuild.mjs', '--production']),
+    command('vite-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
     command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-challenge-runtime-database.sh')]),
   ],
   'challenge-web': [
@@ -151,6 +156,12 @@ function parsePython(text) {
   return { tests };
 }
 
+function failureLabel(item, text) {
+  if (item.label !== 'database-replay') return item.label;
+  const match = text.match(SAFE_DATABASE_STAGE);
+  return match ? `database-${match[1]}` : item.label;
+}
+
 export function formatProfileStatus({ ok, failedLabels = [], countsPassed = true } = {}) {
   if (ok) return 'PASS';
   const labels = failedLabels.filter((label) => SAFE_FAILURE_LABEL.test(label));
@@ -191,7 +202,7 @@ export async function runProfile({ profile, privateRepoPath, runnerTemp, expecte
       }
       if (item.kind === 'python' || item.kind === 'mixed') pythonTests += parsePython(text).tests;
       if (result.status === 0) passedSteps += 1;
-      else failedLabels.push(item.label);
+      else failedLabels.push(failureLabel(item, text));
     }
   } finally {
     await rm(path.join(runnerTemp, 'trainingos-scope-contract.env'), { force: true });
