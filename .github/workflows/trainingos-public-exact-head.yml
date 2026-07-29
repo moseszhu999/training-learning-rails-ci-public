@@ -22,6 +22,7 @@ on:
           - classroom-explanation
           - classroom-lark
           - classroom-agent-queue
+          - challenge-runtime
           - generic-owned
       expectedChangedFileCount:
         description: Exact changed-file count from expected base to exact head
@@ -162,6 +163,9 @@ jobs:
           node <<'NODE'
           const fs = require('node:fs');
           const value = (input) => input || 'NOT_RUN';
+          const database = process.env.VALIDATION_PROFILE === 'challenge-runtime'
+            ? 'SEPARATE_CONDITIONAL_JOB'
+            : 'NOT_RUN';
           const lines = [
             '## TrainingOS public exact-head CI',
             '',
@@ -177,12 +181,12 @@ jobs:
             `- Profile stages: **${process.env.PASSED_STEPS || '0'}/${process.env.STEP_COUNT || '0'}**`,
             `- Focused Node tests: **${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'}**`,
             `- Focused Python tests: **${process.env.PYTHON_TESTS || '0'}**`,
-            '- Database replay: **NOT_RUN — separate isolated-database gate**',
+            `- Database replay: **${database}**`,
             '',
             'Private checkout and raw command output remain sealed on the runner and are deleted. No artifact is uploaded.',
           ];
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
-          console.log(`TRAININGOS_PUBLIC_EXACT_HEAD profile=${process.env.VALIDATION_PROFILE} scope=${value(process.env.SCOPE_STATUS)} validation=${value(process.env.PROFILE_STATUS)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'} node=${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'} python=${process.env.PYTHON_TESTS || '0'}`);
+          console.log(`TRAININGOS_PUBLIC_EXACT_HEAD profile=${process.env.VALIDATION_PROFILE} scope=${value(process.env.SCOPE_STATUS)} validation=${value(process.env.PROFILE_STATUS)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'} node=${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'} python=${process.env.PYTHON_TESTS || '0'} database=${database}`);
           NODE
 
       - name: Enforce final exact-head result
@@ -210,3 +214,161 @@ jobs:
         shell: bash
         run: |
           rm -rf private-repo "$RUNNER_TEMP"/trainingos-*.log
+
+  challenge-database:
+    if: inputs.validationProfile == 'challenge-runtime'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Validate exact inputs and read-only credential
+        id: database_inputs
+        shell: bash
+        env:
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
+          EXPECTED_MIGRATION_RANGE: ${{ inputs.expectedMigrationRange }}
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set +e
+          status=PASS
+          [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ ]] || status=FAIL
+          [[ "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || status=FAIL
+          [[ "$EXPECTED_CHANGED_FILE_COUNT" =~ ^(0|[1-9][0-9]{0,3})$ ]] || status=FAIL
+          [[ "$EXPECTED_MIGRATION_RANGE" == '20260729220000-20260729225959' ]] || status=FAIL
+          [[ -n "$PRIVATE_TOKEN" ]] || status=FAIL
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Check out exact private candidate
+        id: candidate_checkout
+        if: steps.database_inputs.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ inputs.privateExactSha }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-candidate
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Check out exact private base
+        id: base_checkout
+        if: steps.candidate_checkout.outcome == 'success'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ inputs.expectedBaseSha }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Set up Supabase CLI
+        if: steps.base_checkout.outcome == 'success'
+        uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Run sealed fresh, second-pass, upgrade, E2E, and cleanup gate
+        id: database_gate
+        if: steps.base_checkout.outcome == 'success'
+        shell: bash
+        env:
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
+        run: |
+          set +e
+          log="$RUNNER_TEMP/trainingos-challenge-database.log"
+          status=PASS
+          {
+            set -euo pipefail
+            [[ "$(git -C private-candidate rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
+            [[ "$(git -C private-candidate merge-base "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")" == "$EXPECTED_BASE_SHA" ]]
+            actual_count="$(git -C private-candidate diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA" | sed '/^$/d' | wc -l | tr -d ' ')"
+            [[ "$actual_count" == "$EXPECTED_CHANGED_FILE_COUNT" ]]
+            mapfile -t migrations < <(git -C private-candidate diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA" | grep '^supabase/migrations/2026072922[0-9][0-9][0-9][0-9]_trainingos_challenge_proof' | sort)
+            [[ "${#migrations[@]}" == 3 ]]
+
+            mkdir fresh-project
+            supabase --workdir fresh-project init --force --yes
+            rm -rf fresh-project/supabase/migrations
+            python private-candidate/scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root private-candidate \
+              --output-dir fresh-project/supabase/migrations \
+              --commit-sha "$PRIVATE_EXACT_SHA"
+            (cd fresh-project && supabase start)
+            (cd fresh-project && supabase db reset --local --no-seed)
+            eval "$(cd fresh-project && supabase status -o env | grep '^DB_URL=')"
+            psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+              -f private-candidate/tests/sql/trainingos_challenge_proof_share_v1_e2e_runner.sql
+            (cd fresh-project && supabase stop --no-backup)
+
+            mkdir upgrade-project
+            supabase --workdir upgrade-project init --force --yes
+            rm -rf upgrade-project/supabase/migrations
+            python private-base/scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root private-base \
+              --output-dir upgrade-project/supabase/migrations \
+              --commit-sha "$EXPECTED_BASE_SHA"
+            (cd upgrade-project && supabase start)
+            cp private-candidate/supabase/migrations/2026072922*_trainingos_challenge_proof*.sql upgrade-project/supabase/migrations/
+            (cd upgrade-project && supabase migration up --local)
+            eval "$(cd upgrade-project && supabase status -o env | grep '^DB_URL=')"
+            psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+              -f private-candidate/tests/sql/trainingos_challenge_proof_share_v1_e2e_runner.sql
+            (cd upgrade-project && supabase stop --no-backup)
+          } > "$log" 2>&1 || status=FAIL
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized Challenge database status
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.database_inputs.outputs.status }}
+          CANDIDATE_CHECKOUT: ${{ steps.candidate_checkout.outcome }}
+          BASE_CHECKOUT: ${{ steps.base_checkout.outcome }}
+          DATABASE_STATUS: ${{ steps.database_gate.outputs.status }}
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+        run: |
+          {
+            echo '## Challenge Runtime isolated database gate'
+            echo ''
+            echo "- Exact private SHA: \`$PRIVATE_EXACT_SHA\`"
+            echo "- Exact base SHA: \`$EXPECTED_BASE_SHA\`"
+            echo "- Input boundary: **${INPUT_STATUS:-NOT_RUN}**"
+            echo "- Candidate checkout: **${CANDIDATE_CHECKOUT:-NOT_RUN}**"
+            echo "- Base checkout: **${BASE_CHECKOUT:-NOT_RUN}**"
+            echo "- Fresh replay + second pass + upgrade replay + SQL E2E + zero residue: **${DATABASE_STATUS:-NOT_RUN}**"
+            echo ''
+            echo 'Raw private output remains runner-local, sealed, and deleted. No artifact is uploaded and no production database is contacted.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "TRAININGOS_CHALLENGE_DATABASE input=${INPUT_STATUS:-NOT_RUN} fresh_upgrade_e2e=${DATABASE_STATUS:-NOT_RUN} sha=$PRIVATE_EXACT_SHA"
+
+      - name: Enforce Challenge database result
+        if: always()
+        shell: bash
+        env:
+          INPUT_STATUS: ${{ steps.database_inputs.outputs.status }}
+          CANDIDATE_CHECKOUT: ${{ steps.candidate_checkout.outcome }}
+          BASE_CHECKOUT: ${{ steps.base_checkout.outcome }}
+          DATABASE_STATUS: ${{ steps.database_gate.outputs.status }}
+        run: |
+          [[ "${INPUT_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${CANDIDATE_CHECKOUT:-failure}" == 'success' ]]
+          [[ "${BASE_CHECKOUT:-failure}" == 'success' ]]
+          [[ "${DATABASE_STATUS:-FAIL}" == 'PASS' ]]
+
+      - name: Remove private checkouts, local databases, and sealed output
+        if: always()
+        shell: bash
+        run: |
+          (cd fresh-project 2>/dev/null && supabase stop --no-backup) || true
+          (cd upgrade-project 2>/dev/null && supabase stop --no-backup) || true
+          rm -rf private-candidate private-base fresh-project upgrade-project "$RUNNER_TEMP"/trainingos-challenge-database.log

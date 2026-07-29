@@ -8,6 +8,7 @@ export const validationProfiles = Object.freeze([
   'classroom-explanation',
   'classroom-lark',
   'classroom-agent-queue',
+  'challenge-runtime',
   'generic-owned',
 ]);
 
