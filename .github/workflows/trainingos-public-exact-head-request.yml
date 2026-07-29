@@ -1,0 +1,199 @@
+name: TrainingOS exact-head request driver
+
+on:
+  push:
+    branches:
+      - 'ci/exact-head-request/**'
+    paths:
+      - .github/exact-head-request.json
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: trainingos-exact-head-request-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-and-report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Check out public request
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate public exact-head request
+        id: request
+        shell: bash
+        run: |
+          set +e
+          node scripts/exact-head-request.mjs > "$RUNNER_TEMP/exact-head-request.log" 2>&1
+          code=$?
+          echo "runner_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Dispatch reusable exact-head controller
+        id: dispatch
+        if: steps.request.outputs.status == 'PASS' && steps.request.outputs.runner_code == '0'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE_EXACT_SHA: ${{ steps.request.outputs.private_exact_sha }}
+          EXPECTED_BASE_SHA: ${{ steps.request.outputs.expected_base_sha }}
+          VALIDATION_PROFILE: ${{ steps.request.outputs.validation_profile }}
+          EXPECTED_CHANGED_FILE_COUNT: ${{ steps.request.outputs.expected_changed_file_count }}
+          EXPECTED_MIGRATION_RANGE: ${{ steps.request.outputs.expected_migration_range }}
+          EXPECTED_FOCUSED_TEST_COUNTS: ${{ steps.request.outputs.expected_focused_test_counts }}
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          gh workflow run trainingos-public-exact-head.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f privateExactSha="$PRIVATE_EXACT_SHA" \
+            -f expectedBaseSha="$EXPECTED_BASE_SHA" \
+            -f validationProfile="$VALIDATION_PROFILE" \
+            -f expectedChangedFileCount="$EXPECTED_CHANGED_FILE_COUNT" \
+            -f expectedMigrationRange="$EXPECTED_MIGRATION_RANGE" \
+            -f expectedFocusedTestCounts="$EXPECTED_FOCUSED_TEST_COUNTS" \
+            > "$RUNNER_TEMP/exact-head-dispatch.log" 2>&1
+          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+
+      - name: Locate dispatched run
+        id: locate
+        if: steps.dispatch.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STARTED_AT: ${{ steps.dispatch.outputs.started_at }}
+        run: |
+          set -euo pipefail
+          run_id=''
+          run_url=''
+          for _ in $(seq 1 30); do
+            record="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow trainingos-public-exact-head.yml \
+              --event workflow_dispatch \
+              --limit 20 \
+              --json databaseId,createdAt,url \
+              --jq ".[] | select(.createdAt >= \"$STARTED_AT\") | [.databaseId,.url] | @tsv" \
+              | head -n 1)"
+            if [[ -n "$record" ]]; then
+              run_id="${record%%$'\t'*}"
+              run_url="${record#*$'\t'}"
+              break
+            fi
+            sleep 2
+          done
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          [[ "$run_url" == https://github.com/* ]]
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+
+      - name: Observe final sanitized run conclusion
+        id: observe
+        if: steps.locate.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.locate.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          status='queued'
+          conclusion=''
+          for _ in $(seq 1 280); do
+            payload="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json status,conclusion,url,jobs)"
+            status="$(jq -r '.status' <<<"$payload")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$payload")"
+            if [[ "$status" == 'completed' ]]; then
+              printf '%s' "$payload" > "$RUNNER_TEMP/exact-head-final.json"
+              break
+            fi
+            sleep 30
+          done
+          [[ "$status" == 'completed' ]]
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+
+      - name: Publish immutable sanitized run binding
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_STATUS: ${{ steps.request.outputs.status }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+          REPORT_ISSUE_NUMBER: ${{ steps.request.outputs.report_issue_number }}
+          PRIVATE_EXACT_SHA: ${{ steps.request.outputs.private_exact_sha }}
+          EXPECTED_BASE_SHA: ${{ steps.request.outputs.expected_base_sha }}
+          VALIDATION_PROFILE: ${{ steps.request.outputs.validation_profile }}
+          RUN_ID: ${{ steps.locate.outputs.run_id }}
+          RUN_URL: ${{ steps.locate.outputs.run_url }}
+          RUN_STATUS: ${{ steps.observe.outputs.status }}
+          RUN_CONCLUSION: ${{ steps.observe.outputs.conclusion }}
+        run: |
+          set -euo pipefail
+          jobs='NOT_RUN'
+          if [[ -f "$RUNNER_TEMP/exact-head-final.json" ]]; then
+            jobs="$(jq -r '[.jobs[] | "\(.name)=\(.conclusion // .status)"] | join(", ")' "$RUNNER_TEMP/exact-head-final.json")"
+          fi
+          report="$RUNNER_TEMP/exact-head-report.md"
+          {
+            echo '## TrainingOS exact-head request result'
+            echo ''
+            echo "- Request ID: \`${REQUEST_ID:-INVALID}\`"
+            echo "- Request validation: **${REQUEST_STATUS:-NOT_RUN}**"
+            echo "- Validation profile: **${VALIDATION_PROFILE:-NOT_RUN}**"
+            echo "- Exact private SHA: \`${PRIVATE_EXACT_SHA:-NOT_RUN}\`"
+            echo "- Exact base SHA: \`${EXPECTED_BASE_SHA:-NOT_RUN}\`"
+            echo "- Public run ID: \`${RUN_ID:-NOT_RUN}\`"
+            echo "- Public run: ${RUN_URL:-NOT_RUN}"
+            echo "- Final status: **${RUN_STATUS:-NOT_RUN}**"
+            echo "- Final conclusion: **${RUN_CONCLUSION:-NOT_RUN}**"
+            echo "- Jobs: ${jobs}"
+            echo ''
+            echo 'Only sanitized status and immutable identifiers are reported. No artifact, private source, migration body, raw command output, or secret is published.'
+          } > "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${REPORT_ISSUE_NUMBER:-}" =~ ^[0-9]+$ ]]; then
+            gh issue comment "$REPORT_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$report" \
+              > "$RUNNER_TEMP/exact-head-comment.log" 2>&1
+          fi
+
+      - name: Enforce request and dispatched run result
+        if: always()
+        shell: bash
+        env:
+          REQUEST_STATUS: ${{ steps.request.outputs.status }}
+          REQUEST_CODE: ${{ steps.request.outputs.runner_code }}
+          DISPATCH_OUTCOME: ${{ steps.dispatch.outcome }}
+          LOCATE_OUTCOME: ${{ steps.locate.outcome }}
+          RUN_STATUS: ${{ steps.observe.outputs.status }}
+          RUN_CONCLUSION: ${{ steps.observe.outputs.conclusion }}
+        run: |
+          [[ "${REQUEST_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${REQUEST_CODE:-1}" == '0' ]]
+          [[ "${DISPATCH_OUTCOME:-failure}" == 'success' ]]
+          [[ "${LOCATE_OUTCOME:-failure}" == 'success' ]]
+          [[ "${RUN_STATUS:-NOT_RUN}" == 'completed' ]]
+          [[ "${RUN_CONCLUSION:-failure}" == 'success' ]]
+
+      - name: Remove sealed request files
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP"/exact-head-request.log \
+            "$RUNNER_TEMP"/exact-head-dispatch.log \
+            "$RUNNER_TEMP"/exact-head-final.json \
+            "$RUNNER_TEMP"/exact-head-report.md \
+            "$RUNNER_TEMP"/exact-head-comment.log
