@@ -1,0 +1,18 @@
+{
+  "requestId": "challenge-evaluation-pr369-5bd4bef6",
+  "reportIssueNumber": 93,
+  "privateExactSha": "5bd4bef6e3f2a1eca0f79a08427d0cbd3841dd56",
+  "expectedBaseSha": "5e9edc6b5c7c1d62d9441b3fd2db8d709296fff3",
+  "expectedMainSha": "",
+  "validationProfile": "challenge-runtime",
+  "expectedChangedFileCount": "7",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=12;python=0",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": "false",
+  "runUpgradeReplay": "false",
+  "runApplicationContracts": "false",
+  "runTypecheck": "false",
+  "runProductionBuild": "false",
+  "runCriticalE2E": "false"
+}
