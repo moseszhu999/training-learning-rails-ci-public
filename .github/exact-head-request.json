@@ -1,0 +1,18 @@
+{
+  "requestId": "challenge-post-merge-diagnostic-bc44272d",
+  "reportIssueNumber": 139,
+  "privateExactSha": "bc44272db9028657bb5a7a964f7eed3d59fe55ec",
+  "expectedBaseSha": "9cf32739fdfb358febc6ce1d056c7eb1e33ca5fe",
+  "expectedMainSha": "",
+  "validationProfile": "challenge-runtime",
+  "expectedChangedFileCount": "2",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=0;python=14",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": "false",
+  "runUpgradeReplay": "false",
+  "runApplicationContracts": "false",
+  "runTypecheck": "false",
+  "runProductionBuild": "false",
+  "runCriticalE2E": "false"
+}
