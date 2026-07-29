@@ -47,6 +47,17 @@ test('SQLSTATE diagnostics expose only a five-character safe code', () => {
     databaseDiagnosticLabel('CHALLENGE_DATABASE status=FAIL stage=fresh-e2e detail=sqlstate-23502\n'),
     'database-fresh-e2e-sqlstate-23502',
   );
+  assert.equal(
+    databaseDiagnosticLabel('CHALLENGE_DATABASE status=FAIL stage=upgrade-migrations detail=sqlstate-42p13\n'),
+    'database-upgrade-migrations-sqlstate-42p13',
+  );
+});
+
+test('upgrade migration diagnostics allow only a coarse relation category', () => {
+  assert.equal(
+    databaseDiagnosticLabel('CHALLENGE_DATABASE status=FAIL stage=upgrade-migrations detail=undefined-relation\n'),
+    'database-upgrade-migrations-undefined-relation',
+  );
 });
 
 test('unknown database detail remains the allowlisted stage', () => {
@@ -87,11 +98,15 @@ test('non-database failures are unchanged', () => {
   assert.equal(refineChallengeDatabaseFailure(original, []), original);
 });
 
-test('database runner seals and deletes raw E2E output', () => {
+test('database runner seals and deletes raw E2E and migration output', () => {
   const script = readFileSync(new URL('../scripts/run-challenge-runtime-database.sh', import.meta.url), 'utf8');
   assert.match(script, /chmod 600 "\$e2e_log"/);
   assert.match(script, />"\$e2e_log" 2>&1/);
   assert.match(script, /rm -f "\$RUNNER_TEMP"\/trainingos-challenge-\*-e2e\.log/);
-  assert.doesNotMatch(script, /cat "?\$e2e_log/);
+  assert.match(script, /chmod 600 "\$upgrade_migration_log"/);
+  assert.match(script, /migration up --local >"\$upgrade_migration_log" 2>&1/);
+  assert.match(script, /rm -f "\$RUNNER_TEMP"\/trainingos-challenge-\*-migration\.log/);
+  assert.doesNotMatch(script, /cat "?\$(?:e2e_log|upgrade_migration_log)/);
   assert.match(script, /detail=\$detail/);
+  assert.match(script, /SQLSTATE/);
 });
