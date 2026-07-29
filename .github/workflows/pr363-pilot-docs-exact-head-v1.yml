@@ -1,0 +1,153 @@
+name: PR363 13-Learner Pilot docs exact-head
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/pr363-pilot-docs-exact-head-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr363-pilot-docs-exact-head-v1
+  cancel-in-progress: false
+
+env:
+  PRIVATE_EXACT_SHA: aef018e51048dd83b8430631d88088c93c08e4d1
+  EXPECTED_BASE_SHA: 5e98a987264176921c747cdaa76749ef6e2deb86
+  EXPECTED_CHANGED_FILE_COUNT: '8'
+
+jobs:
+  final-docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out public carrier
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate immutable inputs and credential
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_CHANGED_FILE_COUNT" == '8' ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private head read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_EXACT_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify exact head, merge base, scope, and document contract
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > "$RUNNER_TEMP/pr363-docs-check.log" 2>&1
+          import pathlib
+          import re
+          import subprocess
+
+          repo = pathlib.Path('.')
+          private_sha = 'aef018e51048dd83b8430631d88088c93c08e4d1'
+          base_sha = '5e98a987264176921c747cdaa76749ef6e2deb86'
+          expected = sorted([
+              'docs/pilot/trainingos-13-learner-account-role-template-v1.md',
+              'docs/pilot/trainingos-13-learner-onboarding-v1.md',
+              'docs/pilot/trainingos-13-learner-pilot-readiness-v1.md',
+              'docs/pilot/trainingos-daily-operations-sop-v1.md',
+              'docs/pilot/trainingos-pilot-go-no-go-v1.md',
+              'docs/pilot/trainingos-pilot-incident-fallback-v1.md',
+              'docs/pilot/trainingos-pilot-measurement-plan-v1.md',
+              'docs/verification/trainingos-13-learner-pilot-readiness-verification-v1.md',
+          ])
+
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+
+          assert git('rev-parse', 'HEAD') == private_sha
+          assert git('merge-base', base_sha, private_sha) == base_sha
+          actual = sorted(filter(None, git('diff', '--name-only', base_sha, private_sha).splitlines()))
+          assert actual == expected, (actual, expected)
+          assert len(actual) == 8
+          assert all(p.startswith(('docs/pilot/', 'docs/verification/')) for p in actual)
+          assert not any('/migrations/' in p or p.startswith(('api/', 'apps/', 'packages/', 'lib/', 'extensions/')) for p in actual)
+          subprocess.check_call(['git', 'diff', '--check', base_sha, private_sha])
+
+          texts = {p: (repo / p).read_text(encoding='utf-8') for p in expected}
+          combined = '\n'.join(texts.values())
+          readiness = texts['docs/pilot/trainingos-13-learner-pilot-readiness-v1.md']
+          accounts = texts['docs/pilot/trainingos-13-learner-account-role-template-v1.md']
+          metrics = texts['docs/pilot/trainingos-pilot-measurement-plan-v1.md']
+          incidents = texts['docs/pilot/trainingos-pilot-incident-fallback-v1.md']
+          go_no_go = texts['docs/pilot/trainingos-pilot-go-no-go-v1.md']
+          verification = texts['docs/verification/trainingos-13-learner-pilot-readiness-verification-v1.md']
+
+          status_tokens = set(re.findall(r'`(READY_WITH_MANUAL_FALLBACK|NOT_REQUIRED_FOR_PILOT|BLOCKED|READY)`', readiness))
+          assert status_tokens <= {'READY', 'READY_WITH_MANUAL_FALLBACK', 'BLOCKED', 'NOT_REQUIRED_FOR_PILOT'}
+          assert {'READY', 'READY_WITH_MANUAL_FALLBACK', 'BLOCKED'} <= status_tokens
+
+          learners = set(re.findall(r'`learner-(\d{2})`', accounts))
+          assert learners == {f'{i:02d}' for i in range(1, 14)}
+          for group in ('Group A', 'Group B', 'Group C'):
+              assert group in accounts
+
+          metric_rows = [line for line in metrics.splitlines() if line.startswith('| ') and not line.startswith('|---')]
+          assert len(metric_rows) >= 17
+          assert 'Teacher Today page use rate' in metrics
+          assert 'Student IDE operation completion rate' in metrics
+          assert 'Agent suggestion acceptance rate' in metrics
+
+          for phrase in (
+              'OAuth', 'VSIX', 'MCP', 'Zoom', 'Lark', 'duplicate submission',
+              'schedule change', 'rollback', 'learner absent',
+          ):
+              assert phrase.lower() in incidents.lower()
+
+          assert 'Attendance' in readiness and '`BLOCKED`' in readiness
+          assert 'Teacher Operations Hub' in combined
+          assert 'CONDITIONAL_GO' in go_no_go
+          assert 'NO_GO' in go_no_go
+          assert 'pilotActivated=false' in verification
+          assert 'runtimeChanged=false' in verification
+          assert 'migrationChanged=false' in verification
+          assert private_sha not in combined or 'privateExactSha: final lowercase 40-character branch head' in verification
+          assert 'PILOT_EXECUTED=true' not in combined
+          assert 'pilotActivated=true' not in combined
+
+          forbidden = re.compile(r'(-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]{20,}|sk-proj-[A-Za-z0-9_-]{20,})')
+          assert not forbidden.search(combined)
+          print('PR363_DOCS_EXACT_HEAD PASS files=8 migrations=0 runtime=0 learners=13 metrics>=16')
+          PY
+
+      - name: Publish sanitized evidence
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## PR363 13-Learner Pilot docs exact-head'
+            echo ''
+            echo "- private exact head: \`$PRIVATE_EXACT_SHA\`"
+            echo "- exact merge base: \`$EXPECTED_BASE_SHA\`"
+            echo '- changed files: **8**'
+            echo '- migrations: **0**'
+            echo '- runtime/UI/Gateway changes: **0**'
+            echo '- document contract: **PASS if this job is green**'
+            echo '- raw private output: **SEALED_AND_DELETED**'
+            echo '- Pilot execution: **NOT_RUN**'
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -rf private-repo
+          rm -f "$RUNNER_TEMP/pr363-docs-check.log"
