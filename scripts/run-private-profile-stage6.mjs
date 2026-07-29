@@ -50,6 +50,11 @@ export function isEducationEcosystemFiles(files) {
     && names.some((name) => name.startsWith('tests/training-education-ecosystem/'));
 }
 
+export function shouldUseEducationEcosystemProfile(profile, files) {
+  return (profile === 'education-ecosystem' || profile === 'generic-owned')
+    && isEducationEcosystemFiles(files);
+}
+
 function parseNode(text) {
   return {
     tests: [...text.matchAll(/^# tests\s+(\d+)\s*$/gm)].reduce((sum, match) => sum + Number(match[1]), 0),
@@ -172,6 +177,13 @@ async function readOwnedProfileLog(runnerTemp) {
 export async function runProfile(input) {
   if (input.profile === 'education-ecosystem') {
     return runEducationEcosystemProfile(input);
+  }
+
+  if (input.profile === 'generic-owned') {
+    const files = await changedFiles(input);
+    if (shouldUseEducationEcosystemProfile(input.profile, files)) {
+      return runEducationEcosystemProfile(input);
+    }
   }
 
   const result = await runStage5Profile(input);
