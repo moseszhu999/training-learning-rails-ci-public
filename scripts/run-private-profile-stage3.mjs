@@ -1,4 +1,8 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import {
+  databaseFailureLabel,
   formatProfileStatus,
   profileCommands,
   runProfile as runStage2Profile,
@@ -33,8 +37,53 @@ challengeWebBuild.args.splice(
   'vite.config.ts',
 );
 
+export function refineChallengeDatabaseFailure(result, sealedLogs = []) {
+  if (!result?.failedLabels?.includes('database-replay')) return result;
+
+  const refinedLabel = sealedLogs
+    .map((text) => databaseFailureLabel(text))
+    .find((label) => label !== 'database-replay');
+  if (!refinedLabel) return result;
+
+  const failedLabels = result.failedLabels.map((label) => (
+    label === 'database-replay' ? refinedLabel : label
+  ));
+  const statusLabels = result.status.startsWith('FAIL:')
+    ? result.status.slice(5).split(',').map((label) => (
+      label === 'database-replay' ? refinedLabel : label
+    ))
+    : failedLabels;
+
+  return {
+    ...result,
+    status: `FAIL:${[...new Set(statusLabels)].join(',')}`,
+    failedLabels: Object.freeze([...new Set(failedLabels)]),
+  };
+}
+
+async function readSealedProfileLogs(runnerTemp, stepCount) {
+  const logs = [];
+  for (let index = 1; index <= stepCount; index += 1) {
+    try {
+      logs.push(await readFile(path.join(runnerTemp, `trainingos-profile-${index}.log`), 'utf8'));
+    } catch {
+      logs.push('');
+    }
+  }
+  return logs;
+}
+
 export async function runProfile(input) {
-  return runStage2Profile(input);
+  const result = await runStage2Profile(input);
+  if (
+    input.profile !== 'challenge-runtime'
+    || !result.failedLabels.includes('database-replay')
+  ) {
+    return result;
+  }
+
+  const sealedLogs = await readSealedProfileLogs(input.runnerTemp, result.stepCount);
+  return refineChallengeDatabaseFailure(result, sealedLogs);
 }
 
 export { formatProfileStatus, profileCommands };
