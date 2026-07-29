@@ -1,0 +1,18 @@
+{
+  "requestId": "main-release-6e5d4510",
+  "reportIssueNumber": 89,
+  "privateExactSha": "6e5d4510a17f7aedf1f17366d8895b0651423798",
+  "expectedBaseSha": "6e5d4510a17f7aedf1f17366d8895b0651423798",
+  "expectedMainSha": "6e5d4510a17f7aedf1f17366d8895b0651423798",
+  "validationProfile": "main-release",
+  "expectedChangedFileCount": "0",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=0;python=0",
+  "expectedMigrationCount": "327",
+  "runFreshReplay": true,
+  "runUpgradeReplay": true,
+  "runApplicationContracts": true,
+  "runTypecheck": true,
+  "runProductionBuild": true,
+  "runCriticalE2E": true
+}
