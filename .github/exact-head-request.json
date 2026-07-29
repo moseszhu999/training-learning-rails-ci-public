@@ -1,0 +1,18 @@
+{
+  "requestId": "youth-learning-pr387-9d9ea9cf-v4",
+  "reportIssueNumber": 194,
+  "privateExactSha": "9d9ea9cf47ba7c7783fb2d820e8d9f000401c570",
+  "expectedBaseSha": "12400b18e4e0c1122ff274a76abbe6e31ed2a971",
+  "expectedMainSha": "",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": "17",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=0;python=17",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": false,
+  "runTypecheck": false,
+  "runProductionBuild": false,
+  "runCriticalE2E": false
+}
