@@ -69,6 +69,7 @@ const EDUCATION_DATABASE_REASON_ALLOWLIST = new Set([
   'target-owner',
   'target-account',
   'public-display',
+  'rights-revocation',
   'rights-feature',
   'rights-routine',
   'rights-external',
