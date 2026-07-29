@@ -1,0 +1,9 @@
+Attendance PR364 immutable public validation carrier.
+
+privateExactSha=2c1bd8d85ec3e3e9dc9a7ea5e353afe0a406c866
+expectedBaseSha=836d16dd3404f5f211dacb14fbaedcd514776b18
+expectedChangedFileCount=10
+expectedMigrationRange=20260729170000-20260729175999
+privateCheckout=READ_ONLY
+artifactUpload=DISABLED
+productionDeployment=NOT_INVOKED
