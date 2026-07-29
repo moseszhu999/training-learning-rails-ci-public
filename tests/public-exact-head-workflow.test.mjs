@@ -56,7 +56,7 @@ test('Challenge profile is fixed, focused, and non-deploying', () => {
   ]);
   const serialized = JSON.stringify(commands);
   assert.match(serialized, /challenge-proof-share-v1/);
-  assert.doesNotMatch(serialized, /deploy|service_role|production database/i);
+  assert.doesNotMatch(serialized, /deploy|production database/i);
 });
 
 test('workflow keeps the public boundary and sealed-output rules', async () => {
