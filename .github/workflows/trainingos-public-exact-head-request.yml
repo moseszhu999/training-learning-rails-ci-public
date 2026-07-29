@@ -1,9 +1,9 @@
 name: TrainingOS exact-head request driver
 
 on:
-  push:
+  pull_request:
     branches:
-      - 'ci/exact-head-request/**'
+      - main
     paths:
       - .github/exact-head-request.json
 
@@ -13,11 +13,12 @@ permissions:
   issues: write
 
 concurrency:
-  group: trainingos-exact-head-request-${{ github.ref_name }}
+  group: trainingos-exact-head-request-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
   dispatch-and-report:
+    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'ci/exact-head-request/')
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
