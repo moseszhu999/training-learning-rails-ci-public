@@ -64,6 +64,7 @@ cleanup(){
   rm -rf "$fresh_project" "$upgrade_project" "$base_worktree"
   rm -f "$RUNNER_TEMP"/trainingos-challenge-*-status.env
   rm -f "$RUNNER_TEMP"/trainingos-challenge-*-e2e.log
+  rm -f "$RUNNER_TEMP"/trainingos-challenge-*-migration.log
 }
 trap cleanup EXIT
 
@@ -107,7 +108,7 @@ if [[ "$EXPECTED_MIGRATION_COUNT" != 0 ]]; then
   [[ "$EXPECTED_MIGRATION_COUNT" == "$source_migration_count" ]]
 fi
 
-sanitize_e2e_detail(){
+sanitize_database_detail(){
   local sealed_log="$1"
   python - "$sealed_log" <<'PY'
 import pathlib
@@ -138,10 +139,16 @@ for marker, label in known:
         print(label)
         raise SystemExit(0)
 
-verbose_state = re.search(r'(?m)^(?:psql:[^\n]*:\s*)?ERROR:\s+([0-9A-Z]{5}):', text)
-if verbose_state:
-    print(f"sqlstate-{verbose_state.group(1).lower()}")
-    raise SystemExit(0)
+state_patterns = (
+    r'(?m)^(?:psql:[^\n]*:\s*)?ERROR:\s+([0-9A-Z]{5}):',
+    r'(?i)SQLSTATE(?:\s*[:=]|\s+)\s*([0-9A-Z]{5})',
+    r'(?i)\(SQLSTATE\s+([0-9A-Z]{5})\)',
+)
+for pattern in state_patterns:
+    match = re.search(pattern, text)
+    if match:
+        print(f"sqlstate-{match.group(1).lower()}")
+        raise SystemExit(0)
 
 patterns = (
     (r'permission denied|insufficient privilege', 'permission-denied'),
@@ -152,6 +159,7 @@ patterns = (
     (r'duplicate key value violates unique constraint', 'unique-constraint'),
     (r'column reference [^\n]+ is ambiguous|ambiguous column', 'ambiguous-column'),
     (r'column [^\n]+ does not exist|record [^\n]+ has no field', 'undefined-column'),
+    (r'relation [^\n]+ does not exist|undefined table', 'undefined-relation'),
     (r'function [^\n]+ does not exist', 'undefined-function'),
     (r'invalid input syntax for type uuid', 'invalid-uuid'),
     (r'invalid input syntax for type json', 'invalid-json'),
@@ -172,7 +180,7 @@ run_e2e(){
   chmod 600 "$e2e_log"
   if ! psql "$url" -X -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -f "$runner_sql" >"$e2e_log" 2>&1; then
     local detail
-    detail="$(sanitize_e2e_detail "$e2e_log")"
+    detail="$(sanitize_database_detail "$e2e_log")"
     echo "CHALLENGE_DATABASE status=FAIL stage=$CURRENT_STAGE detail=$detail"
     return 1
   fi
@@ -239,7 +247,14 @@ if [[ "$suite" != postmerge ]]; then
   for migration in "${migrations[@]}"; do
     cp "$PRIVATE_REPO_PATH/$migration" "$upgrade_project/supabase/migrations/"
   done
-  supabase --workdir "$upgrade_project" migration up --local
+  upgrade_migration_log="$RUNNER_TEMP/trainingos-challenge-upgrade-migrations-migration.log"
+  : >"$upgrade_migration_log"
+  chmod 600 "$upgrade_migration_log"
+  if ! supabase --workdir "$upgrade_project" migration up --local >"$upgrade_migration_log" 2>&1; then
+    detail="$(sanitize_database_detail "$upgrade_migration_log")"
+    echo "CHALLENGE_DATABASE status=FAIL stage=$CURRENT_STAGE detail=$detail"
+    false
+  fi
   CURRENT_STAGE="upgrade-status"
   upgrade_status="$RUNNER_TEMP/trainingos-challenge-upgrade-status.env"
   supabase --workdir "$upgrade_project" status -o env >"$upgrade_status"
