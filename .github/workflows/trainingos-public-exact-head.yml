@@ -23,6 +23,7 @@ on:
           - classroom-lark
           - classroom-agent-queue
           - challenge-runtime
+          - teacher-hub
           - generic-owned
       expectedChangedFileCount:
         description: Exact changed-file count from expected base to exact head
