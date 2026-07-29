@@ -1,0 +1,18 @@
+{
+  "requestId": "education-ecosystem-pr386-28b604e0-v3",
+  "reportIssueNumber": 165,
+  "privateExactSha": "28b604e0decf87015a651ac4861569617f41adfb",
+  "expectedBaseSha": "0a72f6bcdec5211a2b13621cf8c33d13ceb6c1d2",
+  "expectedMainSha": "",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": "8",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=0;python=0",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": false,
+  "runTypecheck": false,
+  "runProductionBuild": false,
+  "runCriticalE2E": false
+}
