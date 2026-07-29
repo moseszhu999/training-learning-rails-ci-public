@@ -72,7 +72,7 @@ test('challenge-runtime scope permits only the three bounded fix paths through e
   assert.equal(allowlist.some((rule) => rule.test('tests/test_trainingos_unrelated_contract.py')), false);
 });
 
-test('database controller supports no-migration post-merge replay safely', async () => {
+test('database controller compares manifest with generated migrations and keeps replay safe', async () => {
   const script = await readFile(databasePath, 'utf8');
   const syntax = spawnSync('bash', ['-n', databasePath], { cwd: root, encoding: 'utf8' });
   assert.equal(syntax.status, 0, syntax.stderr);
@@ -82,10 +82,11 @@ test('database controller supports no-migration post-merge replay safely', async
     'tests/test_trainingos_student_exercise_execution_contract.py',
     'trainingos_challenge_runtime_v1_e2e_runner.sql',
     'CURRENT_STAGE="fresh-bootstrap"',
+    'CURRENT_STAGE="fresh-manifest"',
+    'generated_migration_count=',
     'CURRENT_STAGE="fresh-reset-one"',
     'CURRENT_STAGE="fresh-reset-two"',
     'CURRENT_STAGE="fresh-e2e"',
-    'trainingos-bootstrap-manifest.json',
     'second_pass=PASS',
     'upgrade_result=NOT_APPLICABLE',
     'cleanup=PASS',
