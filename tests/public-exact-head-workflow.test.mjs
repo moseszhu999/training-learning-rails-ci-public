@@ -104,7 +104,7 @@ test('web, hub, and docs profiles are fixed and non-deploying', () => {
   }), /vercel|netlify deploy|supabase push/i);
 });
 
-test('workflow keeps public boundary, exact-main, and sealed-output rules', async () => {
+test('workflow keeps public boundary, exact-main, sealed-output, and fixed diagnostics rules', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   for (const input of [
     'privateExactSha',
@@ -124,6 +124,11 @@ test('workflow keeps public boundary, exact-main, and sealed-output rules', asyn
   assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /Check out current private main ref/);
   assert.match(workflow, /Run fixed latest-main release gate/);
+  assert.match(workflow, /PROFILE_FAILED_LABELS/);
+  assert.match(workflow, /steps\.profile\.outputs\.failed_labels/);
+  assert.match(workflow, /Failed profile labels/);
+  assert.match(workflow, /Focused Node/);
+  assert.match(workflow, /Focused Python/);
   assert.match(workflow, /Raw private output remains runner-local, sealed, and deleted/);
   const enforcement = workflow.indexOf('Enforce final exact-head result');
   const cleanup = workflow.indexOf('Remove private checkout and sealed files');
