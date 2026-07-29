@@ -93,7 +93,11 @@ export const profileCommands = Object.freeze({
       'tests.test_trainingos_teacher_operations_hub_adapter_contract',
     ], 'python'),
     command('typecheck', 'npm', ['run', 'typecheck']),
-    command('production-build', 'npm', ['run', 'build']),
+    command('native-validation', 'node', ['scripts/run-trainingos-native-classroom-validation.mjs']),
+    command('zero-permission-validation', 'node', ['scripts/run-trainingos-zero-permission-bridge-validation.mjs']),
+    command('learning-workspace-validation', 'node', ['scripts/run-trainingos-learning-workspace-bridge-validation.mjs']),
+    command('vscode-bundle', 'node', ['extensions/trainingos-classroom-vscode/esbuild.mjs', '--production']),
+    command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
   ],
   'generic-owned': [
     command('install', 'npm', ['ci']),
