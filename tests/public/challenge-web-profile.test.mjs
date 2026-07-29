@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { profileCommands } from '../scripts/run-private-profile.mjs';
-import { profileAllowlist } from '../scripts/verify-private-scope.mjs';
+import { profileCommands } from '../../scripts/run-private-profile.mjs';
+import { profileAllowlist } from '../../scripts/verify-private-scope.mjs';
 
 const expectedOwnedFiles = [
   'apps/training-web/src/RootApp.tsx',
@@ -38,7 +38,7 @@ test('challenge-web profile runs the dedicated contract and browser suites', () 
   assert.doesNotMatch(serialized, /test:trainingos-ui:local/);
 });
 
-test('challenge-web allowlist covers the shared Web entry and dedicated test configuration only', () => {
+test('challenge-web allowlist covers its exact shared Web ownership and excludes runtime', () => {
   const rules = profileAllowlist['challenge-web'];
   for (const file of expectedOwnedFiles) {
     assert.ok(rules.some((rule) => rule.test(file)), `expected challenge-web allowlist to include ${file}`);
