@@ -62,6 +62,7 @@ const databaseDetailAllowlist = new Set([
   'unique-constraint',
   'ambiguous-column',
   'undefined-column',
+  'undefined-relation',
   'undefined-function',
   'invalid-uuid',
   'invalid-json',
