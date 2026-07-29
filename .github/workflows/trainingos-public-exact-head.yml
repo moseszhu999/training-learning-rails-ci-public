@@ -8,8 +8,13 @@ on:
         required: true
         type: string
       expectedBaseSha:
-        description: Lowercase 40-character expected merge base SHA
+        description: Exact feature merge base; for main-release use the same exact main SHA
         required: true
+        type: string
+      expectedMainSha:
+        description: Required for main-release and must equal privateExactSha
+        required: false
+        default: ''
         type: string
       validationProfile:
         description: Fixed public-safe validation command profile
@@ -23,19 +28,58 @@ on:
           - classroom-lark
           - classroom-agent-queue
           - challenge-runtime
+          - challenge-web
+          - teacher-hub
+          - docs-launch
           - generic-owned
+          - main-release
       expectedChangedFileCount:
-        description: Exact changed-file count from expected base to exact head
+        description: Exact changed-file count; main-release requires 0
         required: true
         type: string
       expectedMigrationRange:
-        description: none or inclusive 14-digit-start-14-digit-end
+        description: none or inclusive 14-digit-start-14-digit-end; main-release requires none
         required: true
         type: string
       expectedFocusedTestCounts:
-        description: Exact format node=N;python=N
+        description: Exact format node=N;python=N; use zero sentinel when the fixed profile reports stages rather than TAP counts
         required: true
         type: string
+      expectedMigrationCount:
+        description: Complete canonical migration count for challenge-runtime or main-release
+        required: false
+        default: '0'
+        type: string
+      runFreshReplay:
+        description: Run canonical full-history empty database replay
+        required: false
+        default: false
+        type: boolean
+      runUpgradeReplay:
+        description: Run previous-main to exact-main existing-project upgrade replay
+        required: false
+        default: false
+        type: boolean
+      runApplicationContracts:
+        description: Run fixed focused and application contract suites
+        required: false
+        default: false
+        type: boolean
+      runTypecheck:
+        description: Run TypeScript typecheck
+        required: false
+        default: false
+        type: boolean
+      runProductionBuild:
+        description: Run production build without deployment
+        required: false
+        default: false
+        type: boolean
+      runCriticalE2E:
+        description: Run critical role, permission, teacher and student E2E contracts
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -47,7 +91,7 @@ concurrency:
 jobs:
   exact-head:
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    timeout-minutes: 210
     steps:
       - name: Check out public CI controller
         uses: actions/checkout@v4
@@ -65,16 +109,46 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Supabase CLI for database profiles
+        if: inputs.validationProfile == 'main-release' || inputs.validationProfile == 'challenge-runtime'
+        uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Public controller contracts and shell validation
+        id: public_contracts
+        shell: bash
+        run: |
+          set +e
+          {
+            npm test
+            bash -n scripts/run-main-release-database.sh
+            shellcheck scripts/run-main-release-database.sh
+          } > "$RUNNER_TEMP/trainingos-public-contracts.log" 2>&1
+          code=$?
+          [[ "$code" == 0 ]] && echo 'status=PASS' >> "$GITHUB_OUTPUT" || echo 'status=FAIL' >> "$GITHUB_OUTPUT"
+          echo "runner_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
       - name: Validate dispatch inputs
         id: inputs
         shell: bash
         env:
           PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
           EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expectedMainSha }}
           VALIDATION_PROFILE: ${{ inputs.validationProfile }}
           EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
           EXPECTED_MIGRATION_RANGE: ${{ inputs.expectedMigrationRange }}
           EXPECTED_FOCUSED_TEST_COUNTS: ${{ inputs.expectedFocusedTestCounts }}
+          EXPECTED_MIGRATION_COUNT: ${{ inputs.expectedMigrationCount }}
+          RUN_FRESH_REPLAY: ${{ inputs.runFreshReplay }}
+          RUN_UPGRADE_REPLAY: ${{ inputs.runUpgradeReplay }}
+          RUN_APPLICATION_CONTRACTS: ${{ inputs.runApplicationContracts }}
+          RUN_TYPECHECK: ${{ inputs.runTypecheck }}
+          RUN_PRODUCTION_BUILD: ${{ inputs.runProductionBuild }}
+          RUN_CRITICAL_E2E: ${{ inputs.runCriticalE2E }}
         run: |
           set +e
           node scripts/exact-head-inputs.mjs > "$RUNNER_TEMP/trainingos-inputs.log" 2>&1
@@ -83,7 +157,7 @@ jobs:
 
       - name: Validate read-only private credential presence
         id: credential
-        if: steps.inputs.outputs.status == 'PASS'
+        if: steps.inputs.outputs.status == 'PASS' && steps.public_contracts.outputs.status == 'PASS'
         shell: bash
         env:
           PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
@@ -107,14 +181,30 @@ jobs:
           fetch-depth: 0
           clean: true
 
-      - name: Verify exact head, merge base, file count, and migration range
+      - name: Check out current private main ref
+        id: private_main_checkout
+        if: steps.private_checkout.outcome == 'success' && inputs.validationProfile == 'main-release'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-main
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Verify exact head, base, main ref, file count, migration range, and profile allowlist
         id: scope
-        if: steps.private_checkout.outcome == 'success'
+        if: steps.private_checkout.outcome == 'success' && (inputs.validationProfile != 'main-release' || steps.private_main_checkout.outcome == 'success')
         shell: bash
         env:
           PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          PRIVATE_MAIN_REPO_PATH: ${{ github.workspace }}/private-main
           PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
           EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expectedMainSha }}
+          VALIDATION_PROFILE: ${{ inputs.validationProfile }}
           EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
           MIGRATION_START: ${{ steps.inputs.outputs.migration_start }}
           MIGRATION_END: ${{ steps.inputs.outputs.migration_end }}
@@ -124,13 +214,15 @@ jobs:
           echo "runner_code=$?" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Run selected fixed profile with sealed output
+      - name: Run selected fixed feature profile with sealed output
         id: profile
-        if: steps.scope.outputs.status == 'PASS'
+        if: steps.scope.outputs.status == 'PASS' && inputs.validationProfile != 'main-release'
         shell: bash
         env:
           VALIDATION_PROFILE: ${{ inputs.validationProfile }}
           PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_MIGRATION_COUNT: ${{ inputs.expectedMigrationCount }}
           EXPECTED_NODE_COUNT: ${{ steps.inputs.outputs.expected_node_count }}
           EXPECTED_PYTHON_COUNT: ${{ steps.inputs.outputs.expected_python_count }}
         run: |
@@ -139,6 +231,51 @@ jobs:
           echo "runner_code=$?" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Run fixed latest-main release gate with sealed output
+        id: main_release
+        if: steps.scope.outputs.status == 'PASS' && inputs.validationProfile == 'main-release'
+        shell: bash
+        env:
+          PRIVATE_REPO_PATH: ${{ github.workspace }}/private-repo
+          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
+          EXPECTED_MIGRATION_COUNT: ${{ inputs.expectedMigrationCount }}
+          RUN_FRESH_REPLAY: ${{ inputs.runFreshReplay }}
+          RUN_UPGRADE_REPLAY: ${{ inputs.runUpgradeReplay }}
+          RUN_APPLICATION_CONTRACTS: ${{ inputs.runApplicationContracts }}
+          RUN_TYPECHECK: ${{ inputs.runTypecheck }}
+          RUN_PRODUCTION_BUILD: ${{ inputs.runProductionBuild }}
+          RUN_CRITICAL_E2E: ${{ inputs.runCriticalE2E }}
+        run: |
+          set +e
+          node scripts/run-main-release-gate.mjs > "$RUNNER_TEMP/trainingos-main-release-controller.log" 2>&1
+          echo "runner_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Finalize sanitized main-release verdict
+        id: main_release_final
+        if: always() && inputs.validationProfile == 'main-release'
+        shell: bash
+        env:
+          PUBLIC_CONTRACTS_STATUS: ${{ steps.public_contracts.outputs.status }}
+          INPUT_STATUS: ${{ steps.inputs.outputs.status }}
+          CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
+          SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          RUNNER_VERDICT: ${{ steps.main_release.outputs.final_verdict }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFile } from 'node:fs/promises';
+          import { finalizeControllerVerdict } from './scripts/main-release-verdict.mjs';
+          const verdict = finalizeControllerVerdict({
+            publicContracts: process.env.PUBLIC_CONTRACTS_STATUS || 'NOT_RUN',
+            inputValidation: process.env.INPUT_STATUS || 'NOT_RUN',
+            credential: process.env.CREDENTIAL_STATUS || 'NOT_RUN',
+            scope: process.env.SCOPE_STATUS || 'NOT_RUN',
+            runnerVerdict: process.env.RUNNER_VERDICT || 'NOT_RUN',
+          });
+          await appendFile(process.env.GITHUB_OUTPUT, `final_verdict=${verdict}\n`, 'utf8');
+          console.log(`MAIN_RELEASE_FINAL verdict=${verdict}`);
+          NODE
+
       - name: Publish sanitized exact-head status
         if: always()
         shell: bash
@@ -146,53 +283,70 @@ jobs:
           VALIDATION_PROFILE: ${{ inputs.validationProfile }}
           PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
           EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expectedMainSha }}
+          PUBLIC_CONTRACTS_STATUS: ${{ steps.public_contracts.outputs.status }}
           INPUT_STATUS: ${{ steps.inputs.outputs.status }}
           CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
           SCOPE_STATUS: ${{ steps.scope.outputs.status }}
+          MAIN_REF_EQUALITY: ${{ steps.scope.outputs.main_ref_equality }}
           ACTUAL_SHA: ${{ steps.scope.outputs.actual_sha }}
+          ACTUAL_MAIN_SHA: ${{ steps.scope.outputs.actual_main_sha }}
           MERGE_BASE: ${{ steps.scope.outputs.merge_base }}
           CHANGED_FILE_COUNT: ${{ steps.scope.outputs.changed_file_count }}
           MIGRATION_COUNT: ${{ steps.scope.outputs.migration_count }}
           PROFILE_STATUS: ${{ steps.profile.outputs.status }}
           PASSED_STEPS: ${{ steps.profile.outputs.passed_step_count }}
           STEP_COUNT: ${{ steps.profile.outputs.step_count }}
-          NODE_PASSED: ${{ steps.profile.outputs.node_passed }}
-          NODE_TESTS: ${{ steps.profile.outputs.node_tests }}
-          PYTHON_TESTS: ${{ steps.profile.outputs.python_tests }}
+          RELEASE_VERDICT: ${{ steps.main_release_final.outputs.final_verdict }}
+          RELEASE_FAILURE_STAGE: ${{ steps.main_release.outputs.failure_stage }}
+          RELEASE_MIGRATION_COUNT: ${{ steps.main_release.outputs.migration_count }}
+          RELEASE_MIGRATION_FINGERPRINT: ${{ steps.main_release.outputs.migration_fingerprint }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
           const value = (input) => input || 'NOT_RUN';
-          const database = process.env.VALIDATION_PROFILE === 'challenge-runtime'
-            ? 'SEPARATE_CONDITIONAL_JOB'
-            : 'NOT_RUN';
-          const lines = [
+          const release = process.env.VALIDATION_PROFILE === 'main-release';
+          const lines = release ? [
+            '## TrainingOS latest-main release gate',
+            '',
+            `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_EXACT_SHA}\``,
+            `- Exact private main ref: \`${process.env.ACTUAL_MAIN_SHA || process.env.EXPECTED_MAIN_SHA}\``,
+            `- Exact main ref equality: **${value(process.env.MAIN_REF_EQUALITY)}**`,
+            `- Public controller contracts: **${value(process.env.PUBLIC_CONTRACTS_STATUS)}**`,
+            `- Input validation: **${value(process.env.INPUT_STATUS)}**`,
+            `- Scope verification: **${value(process.env.SCOPE_STATUS)}**`,
+            `- Canonical migration count: **${process.env.RELEASE_MIGRATION_COUNT || '0'}**`,
+            `- Migration fingerprint: \`${value(process.env.RELEASE_MIGRATION_FINGERPRINT)}\``,
+            `- Failure stage: **${value(process.env.RELEASE_FAILURE_STAGE)}**`,
+            `- Final verdict: **${value(process.env.RELEASE_VERDICT)}**`,
+          ] : [
             '## TrainingOS public exact-head CI',
             '',
             `- Validation profile: **${process.env.VALIDATION_PROFILE}**`,
             `- Exact private SHA: \`${process.env.ACTUAL_SHA || process.env.PRIVATE_EXACT_SHA}\``,
             `- Exact merge base: \`${process.env.MERGE_BASE || process.env.EXPECTED_BASE_SHA}\``,
+            `- Public controller contracts: **${value(process.env.PUBLIC_CONTRACTS_STATUS)}**`,
             `- Input validation: **${value(process.env.INPUT_STATUS)}**`,
-            `- Read-only credential present: **${value(process.env.CREDENTIAL_STATUS)}**`,
             `- Scope verification: **${value(process.env.SCOPE_STATUS)}**`,
             `- Changed files: **${process.env.CHANGED_FILE_COUNT || '0'}**`,
             `- Migrations in declared range: **${process.env.MIGRATION_COUNT || '0'}**`,
             `- Fixed profile result: **${value(process.env.PROFILE_STATUS)}**`,
             `- Profile stages: **${process.env.PASSED_STEPS || '0'}/${process.env.STEP_COUNT || '0'}**`,
-            `- Focused Node tests: **${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'}**`,
-            `- Focused Python tests: **${process.env.PYTHON_TESTS || '0'}**`,
-            `- Database replay: **${database}**`,
-            '',
-            'Private checkout and raw command output remain sealed on the runner and are deleted. No artifact is uploaded.',
           ];
+          lines.push('', 'Raw private output remains runner-local, sealed, and deleted. No artifact is uploaded and no deployment is performed.');
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
-          console.log(`TRAININGOS_PUBLIC_EXACT_HEAD profile=${process.env.VALIDATION_PROFILE} scope=${value(process.env.SCOPE_STATUS)} validation=${value(process.env.PROFILE_STATUS)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'} node=${process.env.NODE_PASSED || '0'}/${process.env.NODE_TESTS || '0'} python=${process.env.PYTHON_TESTS || '0'} database=${database}`);
+          console.log(release
+            ? `TRAININGOS_MAIN_RELEASE verdict=${value(process.env.RELEASE_VERDICT)} main_ref=${value(process.env.MAIN_REF_EQUALITY)} failure_stage=${value(process.env.RELEASE_FAILURE_STAGE)} migrations=${process.env.RELEASE_MIGRATION_COUNT || '0'}`
+            : `TRAININGOS_PUBLIC_EXACT_HEAD profile=${process.env.VALIDATION_PROFILE} scope=${value(process.env.SCOPE_STATUS)} validation=${value(process.env.PROFILE_STATUS)} files=${process.env.CHANGED_FILE_COUNT || '0'} migrations=${process.env.MIGRATION_COUNT || '0'}`);
           NODE
 
       - name: Enforce final exact-head result
         if: always()
         shell: bash
         env:
+          VALIDATION_PROFILE: ${{ inputs.validationProfile }}
+          PUBLIC_CONTRACTS_STATUS: ${{ steps.public_contracts.outputs.status }}
+          PUBLIC_CONTRACTS_RUNNER_CODE: ${{ steps.public_contracts.outputs.runner_code }}
           INPUT_STATUS: ${{ steps.inputs.outputs.status }}
           INPUT_RUNNER_CODE: ${{ steps.inputs.outputs.runner_code }}
           CREDENTIAL_STATUS: ${{ steps.credential.outputs.status }}
@@ -200,175 +354,29 @@ jobs:
           SCOPE_RUNNER_CODE: ${{ steps.scope.outputs.runner_code }}
           PROFILE_STATUS: ${{ steps.profile.outputs.status }}
           PROFILE_RUNNER_CODE: ${{ steps.profile.outputs.runner_code }}
+          RELEASE_VERDICT: ${{ steps.main_release_final.outputs.final_verdict }}
+          RELEASE_RUNNER_CODE: ${{ steps.main_release.outputs.runner_code }}
         run: |
+          set -euo pipefail
+          [[ "${PUBLIC_CONTRACTS_STATUS:-FAIL}" == 'PASS' ]]
+          [[ "${PUBLIC_CONTRACTS_RUNNER_CODE:-1}" == '0' ]]
           [[ "${INPUT_STATUS:-FAIL}" == 'PASS' ]]
           [[ "${INPUT_RUNNER_CODE:-1}" == '0' ]]
           [[ "${CREDENTIAL_STATUS:-FAIL}" == 'PASS' ]]
           [[ "${SCOPE_STATUS:-FAIL}" == 'PASS' ]]
           [[ "${SCOPE_RUNNER_CODE:-1}" == '0' ]]
-          [[ "${PROFILE_STATUS:-FAIL}" == 'PASS' ]]
-          [[ "${PROFILE_RUNNER_CODE:-1}" == '0' ]]
+          if [[ "$VALIDATION_PROFILE" == 'main-release' ]]; then
+            [[ "${RELEASE_VERDICT:-NOT_RUN}" == 'PASS' ]]
+            [[ "${RELEASE_RUNNER_CODE:-1}" == '0' ]]
+          else
+            [[ "${PROFILE_STATUS:-FAIL}" == 'PASS' ]]
+            [[ "${PROFILE_RUNNER_CODE:-1}" == '0' ]]
+          fi
 
       - name: Remove private checkout and sealed files
         if: always()
         shell: bash
         run: |
-          rm -rf private-repo "$RUNNER_TEMP"/trainingos-*.log
-
-  challenge-database:
-    if: inputs.validationProfile == 'challenge-runtime'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    steps:
-      - name: Validate exact inputs and read-only credential
-        id: database_inputs
-        shell: bash
-        env:
-          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
-          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
-          EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
-          EXPECTED_MIGRATION_RANGE: ${{ inputs.expectedMigrationRange }}
-          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-        run: |
-          set +e
-          status=PASS
-          [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ ]] || status=FAIL
-          [[ "$EXPECTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || status=FAIL
-          [[ "$EXPECTED_CHANGED_FILE_COUNT" =~ ^(0|[1-9][0-9]{0,3})$ ]] || status=FAIL
-          [[ "$EXPECTED_MIGRATION_RANGE" == '20260729220000-20260729225959' ]] || status=FAIL
-          [[ -n "$PRIVATE_TOKEN" ]] || status=FAIL
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Check out exact private candidate
-        id: candidate_checkout
-        if: steps.database_inputs.outputs.status == 'PASS'
-        uses: actions/checkout@v4
-        with:
-          repository: moseszhu999/training-learning-rails
-          ref: ${{ inputs.privateExactSha }}
-          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-          path: private-candidate
-          persist-credentials: false
-          fetch-depth: 0
-          clean: true
-
-      - name: Check out exact private base
-        id: base_checkout
-        if: steps.candidate_checkout.outcome == 'success'
-        uses: actions/checkout@v4
-        with:
-          repository: moseszhu999/training-learning-rails
-          ref: ${{ inputs.expectedBaseSha }}
-          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
-          path: private-base
-          persist-credentials: false
-          fetch-depth: 1
-          clean: true
-
-      - name: Set up Supabase CLI
-        if: steps.base_checkout.outcome == 'success'
-        uses: supabase/setup-cli@v2
-        with:
-          version: latest
-          github-token: ${{ github.token }}
-
-      - name: Run sealed fresh, second-pass, upgrade, E2E, and cleanup gate
-        id: database_gate
-        if: steps.base_checkout.outcome == 'success'
-        shell: bash
-        env:
-          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
-          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
-          EXPECTED_CHANGED_FILE_COUNT: ${{ inputs.expectedChangedFileCount }}
-        run: |
-          set +e
-          log="$RUNNER_TEMP/trainingos-challenge-database.log"
-          status=PASS
-          {
-            set -euo pipefail
-            [[ "$(git -C private-candidate rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
-            [[ "$(git -C private-candidate merge-base "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA")" == "$EXPECTED_BASE_SHA" ]]
-            actual_count="$(git -C private-candidate diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA" | sed '/^$/d' | wc -l | tr -d ' ')"
-            [[ "$actual_count" == "$EXPECTED_CHANGED_FILE_COUNT" ]]
-            mapfile -t migrations < <(git -C private-candidate diff --name-only "$EXPECTED_BASE_SHA" "$PRIVATE_EXACT_SHA" | grep '^supabase/migrations/2026072922[0-9][0-9][0-9][0-9]_trainingos_challenge_proof' | sort)
-            [[ "${#migrations[@]}" == 3 ]]
-
-            mkdir fresh-project
-            supabase --workdir fresh-project init --force --yes
-            rm -rf fresh-project/supabase/migrations
-            python private-candidate/scripts/build-trainingos-fresh-bootstrap.py \
-              --repo-root private-candidate \
-              --output-dir fresh-project/supabase/migrations \
-              --commit-sha "$PRIVATE_EXACT_SHA"
-            (cd fresh-project && supabase start)
-            (cd fresh-project && supabase db reset --local --no-seed)
-            eval "$(cd fresh-project && supabase status -o env | grep '^DB_URL=')"
-            psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
-              -f private-candidate/tests/sql/trainingos_challenge_proof_share_v1_e2e_runner.sql
-            (cd fresh-project && supabase stop --no-backup)
-
-            mkdir upgrade-project
-            supabase --workdir upgrade-project init --force --yes
-            rm -rf upgrade-project/supabase/migrations
-            python private-base/scripts/build-trainingos-fresh-bootstrap.py \
-              --repo-root private-base \
-              --output-dir upgrade-project/supabase/migrations \
-              --commit-sha "$EXPECTED_BASE_SHA"
-            (cd upgrade-project && supabase start)
-            cp private-candidate/supabase/migrations/2026072922*_trainingos_challenge_proof*.sql upgrade-project/supabase/migrations/
-            (cd upgrade-project && supabase migration up --local)
-            eval "$(cd upgrade-project && supabase status -o env | grep '^DB_URL=')"
-            psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
-              -f private-candidate/tests/sql/trainingos_challenge_proof_share_v1_e2e_runner.sql
-            (cd upgrade-project && supabase stop --no-backup)
-          } > "$log" 2>&1 || status=FAIL
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Publish sanitized Challenge database status
-        if: always()
-        shell: bash
-        env:
-          INPUT_STATUS: ${{ steps.database_inputs.outputs.status }}
-          CANDIDATE_CHECKOUT: ${{ steps.candidate_checkout.outcome }}
-          BASE_CHECKOUT: ${{ steps.base_checkout.outcome }}
-          DATABASE_STATUS: ${{ steps.database_gate.outputs.status }}
-          PRIVATE_EXACT_SHA: ${{ inputs.privateExactSha }}
-          EXPECTED_BASE_SHA: ${{ inputs.expectedBaseSha }}
-        run: |
-          {
-            echo '## Challenge Runtime isolated database gate'
-            echo ''
-            echo "- Exact private SHA: \`$PRIVATE_EXACT_SHA\`"
-            echo "- Exact base SHA: \`$EXPECTED_BASE_SHA\`"
-            echo "- Input boundary: **${INPUT_STATUS:-NOT_RUN}**"
-            echo "- Candidate checkout: **${CANDIDATE_CHECKOUT:-NOT_RUN}**"
-            echo "- Base checkout: **${BASE_CHECKOUT:-NOT_RUN}**"
-            echo "- Fresh replay + second pass + upgrade replay + SQL E2E + zero residue: **${DATABASE_STATUS:-NOT_RUN}**"
-            echo ''
-            echo 'Raw private output remains runner-local, sealed, and deleted. No artifact is uploaded and no production database is contacted.'
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "TRAININGOS_CHALLENGE_DATABASE input=${INPUT_STATUS:-NOT_RUN} fresh_upgrade_e2e=${DATABASE_STATUS:-NOT_RUN} sha=$PRIVATE_EXACT_SHA"
-
-      - name: Enforce Challenge database result
-        if: always()
-        shell: bash
-        env:
-          INPUT_STATUS: ${{ steps.database_inputs.outputs.status }}
-          CANDIDATE_CHECKOUT: ${{ steps.candidate_checkout.outcome }}
-          BASE_CHECKOUT: ${{ steps.base_checkout.outcome }}
-          DATABASE_STATUS: ${{ steps.database_gate.outputs.status }}
-        run: |
-          [[ "${INPUT_STATUS:-FAIL}" == 'PASS' ]]
-          [[ "${CANDIDATE_CHECKOUT:-failure}" == 'success' ]]
-          [[ "${BASE_CHECKOUT:-failure}" == 'success' ]]
-          [[ "${DATABASE_STATUS:-FAIL}" == 'PASS' ]]
-
-      - name: Remove private checkouts, local databases, and sealed output
-        if: always()
-        shell: bash
-        run: |
-          (cd fresh-project 2>/dev/null && supabase stop --no-backup) || true
-          (cd upgrade-project 2>/dev/null && supabase stop --no-backup) || true
-          rm -rf private-candidate private-base fresh-project upgrade-project "$RUNNER_TEMP"/trainingos-challenge-database.log
+          rm -rf private-repo private-main \
+            "$RUNNER_TEMP"/trainingos-main-release-* \
+            "$RUNNER_TEMP"/trainingos-*.log
