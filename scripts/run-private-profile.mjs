@@ -14,6 +14,11 @@ const command = (label, executable, args, kind = 'status', env = {}) => ({
 });
 const legacyClassroomSuite = ['j', 'h', 'c'].join('');
 const SAFE_FAILURE_LABEL = /^[a-z0-9][a-z0-9-]{0,79}$/;
+const SAFE_DATABASE_STAGE = /^CHALLENGE_DATABASE status=FAIL stage=([a-z0-9][a-z0-9-]{0,59})$/m;
+const POST_MERGE_CHALLENGE_FILES = Object.freeze([
+  'tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql',
+  'tests/test_trainingos_assessment_resume_execution_contract.py',
+]);
 
 const markdownContract = String.raw`
 const fs=require('node:fs'),path=require('node:path');
@@ -192,7 +197,30 @@ function parsePython(text) {
   };
 }
 
+function sameFiles(actual, expected) {
+  const actualSorted = [...actual].sort();
+  const expectedSorted = [...expected].sort();
+  return actualSorted.length === expectedSorted.length
+    && actualSorted.every((name, index) => name === expectedSorted[index]);
+}
+
 function fixedChallengeCommands(files) {
+  if (sameFiles(files, POST_MERGE_CHALLENGE_FILES)) {
+    return [
+      command('install', 'npm', ['ci']),
+      command('assessment-composition-contract', 'python', [
+        '-m',
+        'unittest',
+        '-v',
+        'tests.test_trainingos_assessment_resume_execution_contract',
+      ], 'python'),
+      command('learning-workspace-validation', 'node', ['scripts/run-trainingos-learning-workspace-bridge-validation.mjs']),
+      command('typecheck', 'npm', ['run', 'typecheck']),
+      command('production-build', 'npm', ['run', 'build']),
+      command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-challenge-runtime-database.sh')]),
+    ];
+  }
+
   const flags = {
     canonical: files.some((name) => name.startsWith('packages/training-challenge/src/')),
     evaluation: files.some((name) => name.startsWith('packages/training-challenge-evaluation/')),
@@ -240,6 +268,12 @@ function fixedChallengeCommands(files) {
     ...tail,
     command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-challenge-runtime-database.sh')]),
   ];
+}
+
+function failureLabel(item, text) {
+  if (item.label !== 'database-replay') return item.label;
+  const match = text.match(SAFE_DATABASE_STAGE);
+  return match ? `database-${match[1]}` : item.label;
 }
 
 export function formatProfileStatus({ ok, failedLabels = [], countsPassed = true } = {}) {
@@ -307,7 +341,7 @@ export async function runProfile({
         pythonTests += parsePython(text).tests;
       }
       if (result.status === 0) passedSteps += 1;
-      else failedLabels.push(item.label);
+      else failedLabels.push(failureLabel(item, text));
     }
   } finally {
     await rm(path.join(runnerTemp, 'trainingos-scope-contract.env'), { force: true });
