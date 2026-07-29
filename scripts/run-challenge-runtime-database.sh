@@ -73,8 +73,16 @@ CURRENT_STAGE="runner-contract"
 actual_count="$(sed '/^$/d' <<<"$changed_files" | wc -l | tr -d ' ')"
 [[ "$actual_count" == "$expected_changed_file_count" ]]
 [[ -f "$runner_sql" ]]
-grep -Eiq '^[[:space:]]*rollback;' "$runner_sql"
 [[ -z "$concurrency_runner" || -f "$concurrency_runner" ]]
+if [[ "$suite" == invite ]]; then
+  invite_e2e="$PRIVATE_REPO_PATH/tests/sql/trainingos_invite_growth_runtime_v1_e2e.sql"
+  [[ -f "$invite_e2e" ]]
+  grep -Fq '\ir trainingos_invite_growth_runtime_v1_e2e.sql' "$runner_sql"
+  grep -Fq 'TRAININGOS_INVITE_GROWTH_FIXTURE_ROLLBACK' "$invite_e2e"
+  grep -Fq 'TRAININGOS_INVITE_GROWTH_ZERO_RESIDUE_FAILED' "$invite_e2e"
+else
+  grep -Eiq '^[[:space:]]*rollback;' "$runner_sql"
+fi
 if [[ "$suite" == postmerge ]]; then
   grep -Fq '\ir trainingos_challenge_runtime_v1_e2e.sql' "$runner_sql"
 fi
