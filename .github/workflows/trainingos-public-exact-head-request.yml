@@ -148,6 +148,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          CARRIER_PR_NUMBER: ${{ github.event.pull_request.number }}
           REQUEST_STATUS: ${{ steps.request.outputs.status }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
           REPORT_ISSUE_NUMBER: ${{ steps.request.outputs.report_issue_number }}
@@ -186,9 +187,12 @@ jobs:
             echo 'Only sanitized status and immutable identifiers are reported. No artifact, private source, migration body, raw command output, or secret is published.'
           } > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
-          if [[ "${REPORT_ISSUE_NUMBER:-}" =~ ^[0-9]+$ ]]; then
+          [[ "${CARRIER_PR_NUMBER:-}" =~ ^[0-9]+$ ]]
+          gh issue comment "$CARRIER_PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$report" \
+            > "$RUNNER_TEMP/exact-head-carrier-comment.log" 2>&1
+          if [[ "${REPORT_ISSUE_NUMBER:-}" =~ ^[0-9]+$ && "$REPORT_ISSUE_NUMBER" != "$CARRIER_PR_NUMBER" ]]; then
             gh issue comment "$REPORT_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$report" \
-              > "$RUNNER_TEMP/exact-head-comment.log" 2>&1
+              > "$RUNNER_TEMP/exact-head-report-comment.log" 2>&1 || true
           fi
 
       - name: Enforce request and dispatched run result
@@ -217,4 +221,5 @@ jobs:
             "$RUNNER_TEMP"/exact-head-dispatch.log \
             "$RUNNER_TEMP"/exact-head-final.json \
             "$RUNNER_TEMP"/exact-head-report.md \
-            "$RUNNER_TEMP"/exact-head-comment.log
+            "$RUNNER_TEMP"/exact-head-carrier-comment.log \
+            "$RUNNER_TEMP"/exact-head-report-comment.log
