@@ -109,6 +109,15 @@ classify_e2e(){
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_TARGET_OWNER' "$log"; then echo target-owner
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_TARGET_ACCOUNT' "$log"; then echo target-account
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_PUBLIC_DISPLAY' "$log"; then echo public-display
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_FEATURE' "$log"; then echo rights-feature
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_ROUTINE' "$log"; then echo rights-routine
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_EXTERNAL' "$log"; then echo rights-external
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_SCHEMA' "$log"; then echo rights-schema
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_CHECK_OPTION' "$log"; then echo rights-check-option
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_RESOURCE' "$log"; then echo rights-resource
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_OPERATOR' "$log"; then echo rights-operator
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_SYSTEM' "$log"; then echo rights-system
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_OTHER' "$log"; then echo rights-other
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS' "$log"; then echo rights
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_USAGE' "$log"; then echo usage
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_REVIEW' "$log"; then echo review

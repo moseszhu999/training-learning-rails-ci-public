@@ -75,6 +75,9 @@ test('Education Partner Supply database gate is exact-head, replayed, transactio
     'npx --yes supabase@latest',
     'FAILURE_REASON',
     'assertion-self-review',
+    'rights-routine',
+    'rights-feature',
+    'rights-system',
     'trainingos-education-partner-supply-${phase}-e2e.log',
   ]) assert.ok(script.includes(marker), marker);
   assert.equal((script.match(/db reset --local --no-seed/g) || []).length, 2);
@@ -91,6 +94,12 @@ test('sanitized E2E reason is allowlisted and unknown reason is not propagated',
       'CHALLENGE_DATABASE status=FAIL stage=fresh-e2e reason=assertion-self-review',
     ),
     'database-fresh-e2e-assertion-self-review',
+  );
+  assert.equal(
+    educationDatabaseFailureLabel(
+      'CHALLENGE_DATABASE status=FAIL stage=fresh-e2e reason=rights-routine',
+    ),
+    'database-fresh-e2e-rights-routine',
   );
   assert.equal(
     educationDatabaseFailureLabel(
