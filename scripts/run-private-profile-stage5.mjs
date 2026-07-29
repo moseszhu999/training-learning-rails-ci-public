@@ -88,7 +88,7 @@ const YOUTH_GUARDIAN_EXACT_FILES = new Set([
   'tests/test_trainingos_youth_guardian_safety_v1_contract.py',
 ]);
 
-const YOUTH_GUARDIAN_MIGRATION = /^supabase\/migrations\/2026073009[0-5][0-9]{2}_trainingos_youth_guardian_safety_v1_[a-z0-9_]+\.sql$/;
+const YOUTH_GUARDIAN_MIGRATION = /^supabase\/migrations\/2026073009[0-5][0-9][0-5][0-9]_trainingos_youth_guardian_safety_v1_[a-z0-9_]+\.sql$/;
 
 export function isChallengeOfferFiles(files) {
   const names = [...files];

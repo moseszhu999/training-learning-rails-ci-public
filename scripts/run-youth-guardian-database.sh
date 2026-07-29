@@ -11,6 +11,8 @@ for name in "${required[@]}"; do
   [[ -n "${!name:-}" ]] || { echo 'CHALLENGE_DATABASE status=FAIL stage=scope-file'; exit 2; }
 done
 
+supabase_cli(){ npx --yes supabase@latest "$@"; }
+
 scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
 [[ -f "$scope_file" ]]
 read_scope(){ awk -F= -v wanted="$1" '$1 == wanted { print substr($0,index($0,"=")+1); exit }' "$scope_file"; }
@@ -53,8 +55,8 @@ fresh_project="$RUNNER_TEMP/trainingos-youth-guardian-fresh"
 upgrade_project="$RUNNER_TEMP/trainingos-youth-guardian-upgrade"
 base_worktree="$RUNNER_TEMP/trainingos-youth-guardian-base"
 cleanup(){
-  supabase --workdir "$fresh_project" stop --no-backup >/dev/null 2>&1 || true
-  supabase --workdir "$upgrade_project" stop --no-backup >/dev/null 2>&1 || true
+  supabase_cli --workdir "$fresh_project" stop --no-backup >/dev/null 2>&1 || true
+  supabase_cli --workdir "$upgrade_project" stop --no-backup >/dev/null 2>&1 || true
   git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_worktree" >/dev/null 2>&1 || true
   rm -rf "$fresh_project" "$upgrade_project" "$base_worktree"
   rm -f "$RUNNER_TEMP"/trainingos-youth-guardian-*-status.env
@@ -73,7 +75,7 @@ grep -Eiq '^[[:space:]]*rollback;' "$runner_sql"
 
 CURRENT_STAGE="migration-contract"
 mapfile -t migrations < <(
-  grep -E '^supabase/migrations/2026073009[0-5][0-9]{2}_trainingos_youth_guardian_safety_v1_[a-z0-9_]+\.sql$' <<<"$changed_files" | sort || true
+  grep -E '^supabase/migrations/2026073009[0-5][0-9][0-5][0-9]_trainingos_youth_guardian_safety_v1_[a-z0-9_]+\.sql$' <<<"$changed_files" | sort || true
 )
 [[ "${#migrations[@]}" == "${#expected_migrations[@]}" ]]
 [[ "$(printf '%s\n' "${migrations[@]}")" == "$(printf '%s\n' "${expected_migrations[@]}")" ]]
@@ -93,7 +95,7 @@ run_e2e(){
 
 CURRENT_STAGE="fresh-init"
 rm -rf "$fresh_project"
-supabase --workdir "$fresh_project" init --force --yes
+supabase_cli --workdir "$fresh_project" init --force --yes
 rm -rf "$fresh_project/supabase/migrations"
 
 CURRENT_STAGE="fresh-bootstrap"
@@ -112,26 +114,26 @@ raise SystemExit(0 if int(manifest.get('migrationCount',-1))==int(sys.argv[2]) e
 PY
 
 CURRENT_STAGE="fresh-start"
-supabase --workdir "$fresh_project" start
+supabase_cli --workdir "$fresh_project" start
 CURRENT_STAGE="fresh-reset-one"
-supabase --workdir "$fresh_project" db reset --local --no-seed
+supabase_cli --workdir "$fresh_project" db reset --local --no-seed
 CURRENT_STAGE="fresh-reset-two"
-supabase --workdir "$fresh_project" db reset --local --no-seed
+supabase_cli --workdir "$fresh_project" db reset --local --no-seed
 CURRENT_STAGE="fresh-status"
 fresh_status="$RUNNER_TEMP/trainingos-youth-guardian-fresh-status.env"
-supabase --workdir "$fresh_project" status -o env >"$fresh_status"
+supabase_cli --workdir "$fresh_project" status -o env >"$fresh_status"
 fresh_db_url="$(grep '^DB_URL=' "$fresh_status" | sed 's/^DB_URL=//' | tr -d '"')"
 [[ -n "$fresh_db_url" ]]
 CURRENT_STAGE="fresh-e2e"
 run_e2e "$fresh_db_url"
 CURRENT_STAGE="fresh-stop"
-supabase --workdir "$fresh_project" stop --no-backup
+supabase_cli --workdir "$fresh_project" stop --no-backup
 
 CURRENT_STAGE="upgrade-worktree"
 rm -rf "$upgrade_project" "$base_worktree"
 git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_worktree" "$expected_base_sha"
 CURRENT_STAGE="upgrade-init"
-supabase --workdir "$upgrade_project" init --force --yes
+supabase_cli --workdir "$upgrade_project" init --force --yes
 rm -rf "$upgrade_project/supabase/migrations"
 CURRENT_STAGE="upgrade-bootstrap"
 python "$base_worktree/scripts/build-trainingos-fresh-bootstrap.py" \
@@ -139,21 +141,21 @@ python "$base_worktree/scripts/build-trainingos-fresh-bootstrap.py" \
   --output-dir "$upgrade_project/supabase/migrations" \
   --commit-sha "$expected_base_sha"
 CURRENT_STAGE="upgrade-start"
-supabase --workdir "$upgrade_project" start
+supabase_cli --workdir "$upgrade_project" start
 CURRENT_STAGE="upgrade-migrations"
 for migration in "${migrations[@]}"; do
   cp "$PRIVATE_REPO_PATH/$migration" "$upgrade_project/supabase/migrations/"
 done
-supabase --workdir "$upgrade_project" migration up --local
+supabase_cli --workdir "$upgrade_project" migration up --local
 CURRENT_STAGE="upgrade-status"
 upgrade_status="$RUNNER_TEMP/trainingos-youth-guardian-upgrade-status.env"
-supabase --workdir "$upgrade_project" status -o env >"$upgrade_status"
+supabase_cli --workdir "$upgrade_project" status -o env >"$upgrade_status"
 upgrade_db_url="$(grep '^DB_URL=' "$upgrade_status" | sed 's/^DB_URL=//' | tr -d '"')"
 [[ -n "$upgrade_db_url" ]]
 CURRENT_STAGE="upgrade-e2e"
 run_e2e "$upgrade_db_url"
 CURRENT_STAGE="upgrade-stop"
-supabase --workdir "$upgrade_project" stop --no-backup
+supabase_cli --workdir "$upgrade_project" stop --no-backup
 
 CURRENT_STAGE="complete"
 echo "CHALLENGE_DATABASE status=PASS suite=youth-guardian changed_migrations=${#migrations[@]} source=$source_migration_count generated=$generated_migration_count fresh=PASS second_pass=PASS upgrade=PASS e2e=PASS cleanup=PASS"

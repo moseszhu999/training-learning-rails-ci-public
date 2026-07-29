@@ -30,6 +30,8 @@ test('Youth Guardian suite selects only the exact bounded private scope', () => 
   assert.equal(isYouthGuardianFiles([...ownedFiles, 'apps/training-web/src/RootApp.tsx']), false);
   assert.equal(isYouthGuardianFiles([...ownedFiles, 'packages/training-challenge-proof/src/index.mjs']), false);
   assert.equal(isYouthGuardianFiles(ownedFiles.map((name) => name.replace('20260730090000', '20260730100000'))), false);
+  assert.equal(isYouthGuardianFiles(ownedFiles.map((name) => name.replace('20260730090000', '2026073009000'))), false);
+  assert.equal(isYouthGuardianFiles(ownedFiles.map((name) => name.replace('20260730090000', '20260730096000'))), false);
 });
 
 test('Youth Guardian command map is fixed, reviewable, and complete', () => {
@@ -67,8 +69,10 @@ test('Youth Guardian database gate is exact-head, replayed, transactional, and n
     'trainingos_youth_guardian_safety_v1_revocation_permission.sql',
     'migration up --local',
     'cleanup=PASS',
+    'npx --yes supabase@latest',
   ]) assert.ok(script.includes(marker), marker);
   assert.equal((script.match(/db reset --local --no-seed/g) || []).length, 2);
+  assert.match(script, /2026073009\[0-5\]\[0-9\]\[0-5\]\[0-9\]/);
   assert.match(script, /merge-base/);
   assert.match(script, /PRIVATE_EXACT_SHA/);
   assert.doesNotMatch(script, /upload-artifact|supabase link|supabase db push|vercel|netlify|production database|\beval\b/i);
