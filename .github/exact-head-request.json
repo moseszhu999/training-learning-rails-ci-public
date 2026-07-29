@@ -1,0 +1,18 @@
+{
+  "requestId": "challenge-fix-pr376-owned",
+  "reportIssueNumber": 376,
+  "privateExactSha": "f31b6132c27f7e948d22e3d927e49e22ce409ba4",
+  "expectedBaseSha": "745bc0dafdec9d8e0b5e09840b7e62760e9a4706",
+  "expectedMainSha": "",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": "2",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=0;python=0",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": "false",
+  "runUpgradeReplay": "false",
+  "runApplicationContracts": "false",
+  "runTypecheck": "false",
+  "runProductionBuild": "false",
+  "runCriticalE2E": "false"
+}
