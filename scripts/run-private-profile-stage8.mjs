@@ -52,6 +52,49 @@ const EDUCATION_PARTNER_SUPPLY_EXACT_FILES = new Set([
 
 const EDUCATION_PARTNER_SUPPLY_MIGRATION = /^supabase\/migrations\/2026073010[0-5][0-9][0-5][0-9]_trainingos_education_partner_supply_[a-z0-9_]+_v1\.sql$/;
 
+const EDUCATION_DATABASE_REASON_ALLOWLIST = new Set([
+  'assertion-agent-review',
+  'assertion-self-review',
+  'assertion-public-display',
+  'assertion-revoked-use',
+  'assertion-raw-table',
+  'assertion-history',
+  'assertion-validation',
+  'assertion',
+  'commercial-plan',
+  'account-binding',
+  'partner-operator',
+  'self-review',
+  'material-approval',
+  'target-owner',
+  'target-account',
+  'public-display',
+  'rights',
+  'usage',
+  'review',
+  'source',
+  'agreement',
+  'partner',
+  'assessment-fixture',
+  'not-null',
+  'foreign-key',
+  'duplicate',
+  'undefined-column',
+  'undefined-relation',
+  'sql-syntax',
+  'unclassified',
+]);
+
+export function educationDatabaseFailureLabel(text) {
+  const base = databaseFailureLabel(text);
+  const reason = String(text).match(
+    /CHALLENGE_DATABASE status=FAIL stage=[a-z0-9-]+ reason=([a-z0-9-]+)/,
+  )?.[1] ?? '';
+  return EDUCATION_DATABASE_REASON_ALLOWLIST.has(reason)
+    ? `${base}-${reason}`
+    : base;
+}
+
 export function isEducationPartnerSupplyFiles(files) {
   const names = [...files];
   if (!names.length) return false;
@@ -134,8 +177,9 @@ async function runFixedProfile({
       }
       if (item.kind === 'python') pythonTests += parsePython(text).tests;
       if (result.status === 0) passedSteps += 1;
-      else if (item.label === 'database-replay') failedLabels.push(databaseFailureLabel(text));
-      else failedLabels.push(item.label);
+      else if (item.label === 'database-replay') {
+        failedLabels.push(educationDatabaseFailureLabel(text));
+      } else failedLabels.push(item.label);
     }
   } finally {
     await rm(path.join(runnerTemp, 'trainingos-scope-contract.env'), { force: true });

@@ -3,12 +3,13 @@ set -Eeuo pipefail
 umask 077
 
 CURRENT_STAGE="scope-file"
-on_error(){ echo "CHALLENGE_DATABASE status=FAIL stage=$CURRENT_STAGE"; }
+FAILURE_REASON="unclassified"
+on_error(){ echo "CHALLENGE_DATABASE status=FAIL stage=$CURRENT_STAGE reason=$FAILURE_REASON"; }
 trap on_error ERR
 
 required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT RUNNER_TEMP)
 for name in "${required[@]}"; do
-  [[ -n "${!name:-}" ]] || { echo 'CHALLENGE_DATABASE status=FAIL stage=scope-file'; exit 2; }
+  [[ -n "${!name:-}" ]] || { echo 'CHALLENGE_DATABASE status=FAIL stage=scope-file reason=unclassified'; exit 2; }
 done
 
 supabase_cli(){ npx --yes supabase@latest "$@"; }
@@ -61,6 +62,7 @@ cleanup(){
   git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_worktree" >/dev/null 2>&1 || true
   rm -rf "$fresh_project" "$upgrade_project" "$base_worktree"
   rm -f "$RUNNER_TEMP"/trainingos-education-partner-supply-*-status.env
+  rm -f "$RUNNER_TEMP"/trainingos-education-partner-supply-*-e2e.log
 }
 trap cleanup EXIT
 
@@ -89,9 +91,52 @@ if [[ "$EXPECTED_MIGRATION_COUNT" != 0 ]]; then
   [[ "$EXPECTED_MIGRATION_COUNT" == "$source_migration_count" ]]
 fi
 
+classify_e2e(){
+  local log="$1"
+  if grep -Eq '"agentReviewDenied"[[:space:]]*:[[:space:]]*false' "$log"; then echo assertion-agent-review
+  elif grep -Eq '"selfReviewDenied"[[:space:]]*:[[:space:]]*false' "$log"; then echo assertion-self-review
+  elif grep -Eq '"publicDisplayDenied"[[:space:]]*:[[:space:]]*false' "$log"; then echo assertion-public-display
+  elif grep -Eq '"revokedUseDenied"[[:space:]]*:[[:space:]]*false' "$log"; then echo assertion-revoked-use
+  elif grep -Eq '"rawTableDenied"[[:space:]]*:[[:space:]]*false' "$log"; then echo assertion-raw-table
+  elif grep -Eq '"historicalUsagePreserved"[[:space:]]*:[[:space:]]*false' "$log"; then echo assertion-history
+  elif grep -Eq '"validation"[[:space:]]*:[[:space:]]*(null|false)' "$log"; then echo assertion-validation
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_E2E_FAILED' "$log"; then echo assertion
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_E2E_CLASS_PLAN_REQUIRED' "$log"; then echo commercial-plan
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_ACCOUNT_BINDING_REQUIRED' "$log"; then echo account-binding
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_PARTNER_OPERATOR_REQUIRED' "$log"; then echo partner-operator
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_SELF_REVIEW_FORBIDDEN' "$log"; then echo self-review
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_MATERIAL_APPROVAL_REQUIRED' "$log"; then echo material-approval
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_TARGET_OWNER' "$log"; then echo target-owner
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_TARGET_ACCOUNT' "$log"; then echo target-account
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_PUBLIC_DISPLAY' "$log"; then echo public-display
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS' "$log"; then echo rights
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_USAGE' "$log"; then echo usage
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_REVIEW' "$log"; then echo review
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_SOURCE' "$log"; then echo source
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_AGREEMENT' "$log"; then echo agreement
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_PARTNER' "$log"; then echo partner
+  elif grep -Eqi 'trainingos_assessment|assessment_definitions' "$log"; then echo assessment-fixture
+  elif grep -Fqi 'violates not-null constraint' "$log"; then echo not-null
+  elif grep -Fqi 'violates foreign key constraint' "$log"; then echo foreign-key
+  elif grep -Fqi 'duplicate key value' "$log"; then echo duplicate
+  elif grep -Eqi 'column .+ does not exist' "$log"; then echo undefined-column
+  elif grep -Eqi 'relation .+ does not exist' "$log"; then echo undefined-relation
+  elif grep -Fqi 'syntax error' "$log"; then echo sql-syntax
+  else echo unclassified
+  fi
+}
+
 run_e2e(){
   local url="$1"
-  psql "$url" -X -v ON_ERROR_STOP=1 -f "$runner_sql"
+  local phase="$2"
+  local log="$RUNNER_TEMP/trainingos-education-partner-supply-${phase}-e2e.log"
+  if psql "$url" -X -v ON_ERROR_STOP=1 -f "$runner_sql" >"$log" 2>&1; then
+    rm -f "$log"
+    return 0
+  fi
+  FAILURE_REASON="$(classify_e2e "$log")"
+  rm -f "$log"
+  return 1
 }
 
 CURRENT_STAGE="fresh-init"
@@ -126,7 +171,7 @@ supabase_cli --workdir "$fresh_project" status -o env >"$fresh_status"
 fresh_db_url="$(grep '^DB_URL=' "$fresh_status" | sed 's/^DB_URL=//' | tr -d '"')"
 [[ -n "$fresh_db_url" ]]
 CURRENT_STAGE="fresh-e2e"
-run_e2e "$fresh_db_url"
+run_e2e "$fresh_db_url" fresh
 CURRENT_STAGE="fresh-stop"
 supabase_cli --workdir "$fresh_project" stop --no-backup
 
@@ -154,7 +199,7 @@ supabase_cli --workdir "$upgrade_project" status -o env >"$upgrade_status"
 upgrade_db_url="$(grep '^DB_URL=' "$upgrade_status" | sed 's/^DB_URL=//' | tr -d '"')"
 [[ -n "$upgrade_db_url" ]]
 CURRENT_STAGE="upgrade-e2e"
-run_e2e "$upgrade_db_url"
+run_e2e "$upgrade_db_url" upgrade
 CURRENT_STAGE="upgrade-stop"
 supabase_cli --workdir "$upgrade_project" stop --no-backup
 

@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import {
+  educationDatabaseFailureLabel,
   educationPartnerSupplyProfileCommands,
   isEducationPartnerSupplyFiles,
 } from '../scripts/run-private-profile-stage8.mjs';
@@ -72,12 +73,37 @@ test('Education Partner Supply database gate is exact-head, replayed, transactio
     'migration up --local',
     'cleanup=PASS',
     'npx --yes supabase@latest',
+    'FAILURE_REASON',
+    'assertion-self-review',
+    'trainingos-education-partner-supply-${phase}-e2e.log',
   ]) assert.ok(script.includes(marker), marker);
   assert.equal((script.match(/db reset --local --no-seed/g) || []).length, 2);
   assert.match(script, /2026073010\[0-5\]\[0-9\]\[0-5\]\[0-9\]/);
   assert.match(script, /merge-base/);
   assert.match(script, /PRIVATE_EXACT_SHA/);
   assert.doesNotMatch(script, /upload-artifact|supabase link|supabase db push|vercel|netlify|production database|\beval\b/i);
+  assert.doesNotMatch(script, /\bcat\b.*e2e|\btee\b.*e2e/i);
+});
+
+test('sanitized E2E reason is allowlisted and unknown reason is not propagated', () => {
+  assert.equal(
+    educationDatabaseFailureLabel(
+      'CHALLENGE_DATABASE status=FAIL stage=fresh-e2e reason=assertion-self-review',
+    ),
+    'database-fresh-e2e-assertion-self-review',
+  );
+  assert.equal(
+    educationDatabaseFailureLabel(
+      'CHALLENGE_DATABASE status=FAIL stage=fresh-e2e reason=arbitrary-private-text',
+    ),
+    'database-fresh-e2e',
+  );
+  assert.equal(
+    educationDatabaseFailureLabel(
+      'CHALLENGE_DATABASE status=FAIL stage=upgrade-e2e reason=unclassified',
+    ),
+    'database-upgrade-e2e-unclassified',
+  );
 });
 
 test('entrypoint delegates through stage8 and selected suite stays sanitized', async () => {
