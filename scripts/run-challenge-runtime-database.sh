@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eEuo pipefail
 umask 077
+
+CURRENT_STAGE="bootstrap"
+on_error() {
+  echo "CHALLENGE_DATABASE status=FAIL stage=$CURRENT_STAGE"
+}
+trap on_error ERR
 
 required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT RUNNER_TEMP)
 for name in "${required[@]}"; do
-  [[ -n "${!name:-}" ]] || { echo 'CHALLENGE_DATABASE status=FAIL reason=missing-input'; exit 2; }
+  [[ -n "${!name:-}" ]] || { echo 'CHALLENGE_DATABASE status=FAIL stage=missing-input'; exit 2; }
 done
 
 scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
-[[ -f "$scope_file" ]] || { echo 'CHALLENGE_DATABASE status=FAIL reason=missing-scope'; exit 2; }
+[[ -f "$scope_file" ]] || { echo 'CHALLENGE_DATABASE status=FAIL stage=missing-scope'; exit 2; }
 
 read_scope() {
   local key="$1"
@@ -21,6 +27,7 @@ migration_start="$(read_scope migration_start)"
 migration_end="$(read_scope migration_end)"
 profile="$(read_scope validation_profile)"
 
+CURRENT_STAGE="input-contract"
 [[ "$profile" == challenge-runtime ]]
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
@@ -43,6 +50,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+CURRENT_STAGE="scope-contract"
 [[ "$(git -C "$PRIVATE_REPO_PATH" rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
 [[ "$(git -C "$PRIVATE_REPO_PATH" merge-base "$expected_base_sha" "$PRIVATE_EXACT_SHA")" == "$expected_base_sha" ]]
 actual_count="$(git -C "$PRIVATE_REPO_PATH" diff --name-only "$expected_base_sha" "$PRIVATE_EXACT_SHA" | sed '/^$/d' | wc -l | tr -d ' ')"
@@ -65,6 +73,7 @@ mapfile -t migrations < <(
     grep -E '^supabase/migrations/[0-9]{14}_trainingos_challenge_runtime_v1_[^/]+\.sql$' |
     sort
 )
+CURRENT_STAGE="migration-contract"
 [[ "${#migrations[@]}" == "${#expected_migrations[@]}" ]]
 [[ "$(printf '%s\n' "${migrations[@]}")" == "$(printf '%s\n' "${expected_migrations[@]}")" ]]
 for migration in "${migrations[@]}"; do
@@ -72,45 +81,58 @@ for migration in "${migrations[@]}"; do
   [[ "$stamp" -ge "$migration_start" && "$stamp" -le "$migration_end" ]]
 done
 
+CURRENT_STAGE="fresh-init"
 rm -rf "$fresh_project"
 supabase --workdir "$fresh_project" init --force --yes
 rm -rf "$fresh_project/supabase/migrations"
+CURRENT_STAGE="fresh-bootstrap"
 python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
   --repo-root "$PRIVATE_REPO_PATH" \
   --output-dir "$fresh_project/supabase/migrations" \
   --commit-sha "$PRIVATE_EXACT_SHA"
+CURRENT_STAGE="fresh-manifest"
 python - "$fresh_project/supabase/trainingos-bootstrap-manifest.json" "$EXPECTED_MIGRATION_COUNT" <<'PY'
 import json, pathlib, sys
 manifest=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 raise SystemExit(0 if int(manifest.get('migrationCount', -1)) == int(sys.argv[2]) else 1)
 PY
+CURRENT_STAGE="fresh-start"
 supabase --workdir "$fresh_project" start
+CURRENT_STAGE="fresh-second-replay"
 supabase --workdir "$fresh_project" db reset --local --no-seed
 fresh_status="$RUNNER_TEMP/trainingos-challenge-fresh-status.env"
 supabase --workdir "$fresh_project" status -o env >"$fresh_status"
 fresh_db_url="$(grep '^DB_URL=' "$fresh_status" | sed 's/^DB_URL=//' | tr -d '"')"
 [[ -n "$fresh_db_url" ]]
+CURRENT_STAGE="fresh-e2e"
 psql "$fresh_db_url" -X -v ON_ERROR_STOP=1 -f "$runner_sql"
 supabase --workdir "$fresh_project" stop --no-backup
 
+CURRENT_STAGE="upgrade-worktree"
 rm -rf "$upgrade_project" "$base_worktree"
 git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_worktree" "$expected_base_sha"
+CURRENT_STAGE="upgrade-init"
 supabase --workdir "$upgrade_project" init --force --yes
 rm -rf "$upgrade_project/supabase/migrations"
+CURRENT_STAGE="upgrade-bootstrap"
 python "$base_worktree/scripts/build-trainingos-fresh-bootstrap.py" \
   --repo-root "$base_worktree" \
   --output-dir "$upgrade_project/supabase/migrations" \
   --commit-sha "$expected_base_sha"
+CURRENT_STAGE="upgrade-start"
 supabase --workdir "$upgrade_project" start
 for migration in "${migrations[@]}"; do
   cp "$PRIVATE_REPO_PATH/$migration" "$upgrade_project/supabase/migrations/"
 done
+CURRENT_STAGE="upgrade-migrate"
 supabase --workdir "$upgrade_project" migration up --local
 upgrade_status="$RUNNER_TEMP/trainingos-challenge-upgrade-status.env"
 supabase --workdir "$upgrade_project" status -o env >"$upgrade_status"
 upgrade_db_url="$(grep '^DB_URL=' "$upgrade_status" | sed 's/^DB_URL=//' | tr -d '"')"
 [[ -n "$upgrade_db_url" ]]
+CURRENT_STAGE="upgrade-e2e"
 psql "$upgrade_db_url" -X -v ON_ERROR_STOP=1 -f "$runner_sql"
 supabase --workdir "$upgrade_project" stop --no-backup
 
+CURRENT_STAGE="complete"
 echo "CHALLENGE_DATABASE status=PASS migrations=${#migrations[@]} fresh=PASS second_pass=PASS upgrade=PASS e2e=PASS cleanup=PASS"
