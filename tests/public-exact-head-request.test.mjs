@@ -36,7 +36,7 @@ test('request parser accepts complete fixed canonical metadata only', () => {
   assert.equal(validateRequest({ ...request, expectedMigrationRange: 'none' }).ok, false);
 });
 
-test('request driver uses a reviewed same-repository carrier and forwards the complete controller contract', async () => {
+test('request driver uses a reviewed carrier, forwards the complete contract, and reports to that carrier', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /branches:\s*\n\s*- main/);
@@ -56,6 +56,10 @@ test('request driver uses a reviewed same-repository carrier and forwards the co
   assert.match(workflow, /runTypecheck="\$RUN_TYPECHECK"/);
   assert.match(workflow, /runProductionBuild="\$RUN_PRODUCTION_BUILD"/);
   assert.match(workflow, /runCriticalE2E="\$RUN_CRITICAL_E2E"/);
+  assert.match(workflow, /CARRIER_PR_NUMBER: \$\{\{ github\.event\.pull_request\.number \}\}/);
+  assert.match(workflow, /gh issue comment "\$CARRIER_PR_NUMBER"/);
+  assert.match(workflow, /REPORT_ISSUE_NUMBER.*CARRIER_PR_NUMBER/s);
+  assert.match(workflow, /exact-head-report-comment\.log.*\|\| true/s);
   assert.doesNotMatch(workflow, /repository:\s+moseszhu999\/training-learning-rails\b/);
   assert.doesNotMatch(workflow, /upload-artifact/);
   assert.match(workflow, /Only sanitized status and immutable identifiers are reported/);
