@@ -16,6 +16,23 @@ if (!teacherHubPython.args.includes(formalActionContract)) {
   teacherHubPython.args.push(formalActionContract);
 }
 
+const challengeWebCommands = profileCommands['challenge-web'];
+const challengeWebBuild = challengeWebCommands.find((item) => item.label === 'production-build');
+
+if (!challengeWebBuild) {
+  throw new Error('challenge-web production-build command is required');
+}
+
+challengeWebBuild.executable = 'npx';
+challengeWebBuild.args.splice(
+  0,
+  challengeWebBuild.args.length,
+  'vite',
+  'build',
+  '--config',
+  'vite.config.ts',
+);
+
 export async function runProfile(input) {
   return runStage2Profile(input);
 }
