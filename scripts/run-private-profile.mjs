@@ -111,10 +111,11 @@ export const profileCommands = Object.freeze({
   ],
   'challenge-web': [
     command('install', 'npm', ['ci']),
+    command('python-contract', 'npm', ['run', 'test:challenge-web:contract'], 'python'),
     command('typecheck', 'npm', ['run', 'typecheck']),
     command('production-build', 'npm', ['run', 'build']),
     command('playwright-browser', 'npx', ['playwright', 'install', '--with-deps', 'chromium']),
-    command('playwright', 'npm', ['run', 'test:trainingos-ui:local']),
+    command('playwright', 'npm', ['run', 'test:challenge-web']),
   ],
   'teacher-hub': [
     command('install', 'npm', ['ci']),

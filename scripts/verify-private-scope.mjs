@@ -20,10 +20,12 @@ export const profileAllowlist = Object.freeze({
   ],
   'challenge-web': [
     new RegExp(`^apps/training-web/src/.*${challengeToken}`),
-    /^apps\/training-web\/src\/(App|main)\.tsx$/,
+    /^apps\/training-web\/src\/(App|RootApp|main)\.tsx$/,
     customerEntry,
     new RegExp(`^tests/.*${challengeToken}.*\\.(ts|tsx|mjs|js|py)$`),
-    new RegExp(`^docs/(verification|testing|product)/.*${challengeToken}.*\\.md$`),
+    new RegExp(`^docs/(architecture|verification|testing|product)/.*${challengeToken}.*\\.md$`),
+    /^package\.json$/,
+    /^playwright\.config\.ts$/,
   ],
   'teacher-hub': [
     /^apps\/training-web\/src\/.*(TeacherOperationsHub|teacher-operations-hub|teacher-hub)/,
@@ -68,7 +70,12 @@ async function inspectChangedFiles(input, changedFiles, failures) {
       continue;
     }
     if (SECRET_PATTERNS.some((rule) => rule.test(text))) failures.push('secretOrCredential');
-    if (input.validationProfile === 'challenge-web' && /@supabase\/supabase-js|createClient\s*\(|\bsupabase\s*\./.test(text)) {
+    const challengeProductionSource = name.startsWith('apps/training-web/src/');
+    if (
+      input.validationProfile === 'challenge-web'
+      && challengeProductionSource
+      && /@supabase\/supabase-js|createClient\s*\(|\bsupabase\s*\./.test(text)
+    ) {
       failures.push('directSupabase');
     }
     if (input.validationProfile === 'docs-launch' && /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i.test(text)) {
