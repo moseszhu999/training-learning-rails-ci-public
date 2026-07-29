@@ -15,10 +15,7 @@ export const standardValidationProfiles = Object.freeze([
   'generic-owned',
 ]);
 
-export const validationProfiles = Object.freeze([
-  ...standardValidationProfiles,
-  'main-release',
-]);
+export const validationProfiles = Object.freeze([...standardValidationProfiles, 'main-release']);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const COUNT_PATTERN = /^(0|[1-9][0-9]{0,5})$/;
@@ -35,7 +32,7 @@ export function validateInputs(input) {
   const expectedChangedFileCount = input.expectedChangedFileCount ?? '';
   const expectedMigrationRange = input.expectedMigrationRange ?? '';
   const expectedFocusedTestCounts = input.expectedFocusedTestCounts ?? '';
-  const expectedMigrationCount = input.expectedMigrationCount ?? '';
+  const expectedMigrationCount = input.expectedMigrationCount ?? '0';
   const runFlags = {
     runFreshReplay: input.runFreshReplay ?? 'false',
     runUpgradeReplay: input.runUpgradeReplay ?? 'false',
@@ -49,6 +46,7 @@ export function validateInputs(input) {
   if (!SHA_PATTERN.test(expectedBaseSha)) failures.push('expectedBaseSha');
   if (!validationProfiles.includes(validationProfile)) failures.push('validationProfile');
   if (!COUNT_PATTERN.test(expectedChangedFileCount)) failures.push('expectedChangedFileCount');
+  if (!COUNT_PATTERN.test(String(expectedMigrationCount))) failures.push('expectedMigrationCount');
 
   let migrationStart = '';
   let migrationEnd = '';
@@ -57,12 +55,8 @@ export function validateInputs(input) {
     migrationEnd = 'none';
   } else {
     const match = expectedMigrationRange.match(RANGE_PATTERN);
-    if (!match || match[1] > match[2]) {
-      failures.push('expectedMigrationRange');
-    } else {
-      migrationStart = match[1];
-      migrationEnd = match[2];
-    }
+    if (!match || match[1] > match[2]) failures.push('expectedMigrationRange');
+    else [migrationStart, migrationEnd] = [match[1], match[2]];
   }
 
   const focusedMatch = expectedFocusedTestCounts.match(FOCUSED_PATTERN);
@@ -70,7 +64,7 @@ export function validateInputs(input) {
 
   if (validationProfile === 'main-release') {
     if (!SHA_PATTERN.test(expectedMainSha)) failures.push('expectedMainSha');
-    if (!COUNT_PATTERN.test(expectedMigrationCount)) failures.push('expectedMigrationCount');
+    if (expectedMigrationCount === '0') failures.push('mainMigrationCount');
     for (const [name, value] of Object.entries(runFlags)) {
       if (!BOOLEAN_PATTERN.test(String(value))) failures.push(name);
     }
@@ -81,14 +75,7 @@ export function validateInputs(input) {
     if (expectedFocusedTestCounts !== 'node=0;python=0') failures.push('mainFocusedCountSentinel');
   }
 
-  if (validationProfile === 'challenge-runtime') {
-    if (!COUNT_PATTERN.test(expectedMigrationCount) || expectedMigrationCount === '0') failures.push('challengeMigrationCount');
-    if (expectedMigrationRange === 'none') failures.push('challengeMigrationRange');
-  }
-
-  if (validationProfile === 'docs-launch' && expectedMigrationRange !== 'none') {
-    failures.push('docsMigrationRange');
-  }
+  if (validationProfile === 'docs-launch' && expectedMigrationRange !== 'none') failures.push('docsMigrationRange');
 
   return {
     ok: failures.length === 0,
@@ -104,7 +91,7 @@ export function validateInputs(input) {
       migrationEnd,
       expectedNodeCount: focusedMatch?.[1] ?? '',
       expectedPythonCount: focusedMatch?.[2] ?? '',
-      expectedMigrationCount,
+      expectedMigrationCount: String(expectedMigrationCount),
       ...Object.fromEntries(Object.entries(runFlags).map(([key, value]) => [key, String(value)])),
     },
   };
@@ -114,7 +101,7 @@ async function writeOutputs(result) {
   const outputPath = process.env.GITHUB_OUTPUT;
   if (!outputPath) throw new Error('GITHUB_OUTPUT is required');
   const values = result.normalized;
-  const lines = [
+  await appendFile(outputPath, [
     `status=${result.ok ? 'PASS' : 'FAIL'}`,
     `profile=${values.validationProfile}`,
     `expected_changed_file_count=${values.expectedChangedFileCount}`,
@@ -131,8 +118,7 @@ async function writeOutputs(result) {
     `run_production_build=${values.runProductionBuild}`,
     `run_critical_e2e=${values.runCriticalE2E}`,
     `failure_count=${result.failures.length}`,
-  ];
-  await appendFile(outputPath, `${lines.join('\n')}\n`, 'utf8');
+  ].join('\n') + '\n', 'utf8');
 }
 
 async function main() {
