@@ -19,7 +19,7 @@ export const profileAllowlist = Object.freeze({
     new RegExp(`^docs/(architecture|verification|testing|product)/.*${challengeToken}.*\\.md$`),
   ],
   'challenge-web': [
-    new RegExp(`^apps/training-web/src/.*${challengeToken}`),
+    new RegExp(`^apps/training-web/src/.*${challengeToken}`, 'i'),
     /^apps\/training-web\/src\/(App|RootApp|main)\.tsx$/,
     customerEntry,
     new RegExp(`^tests/.*${challengeToken}.*\\.(ts|tsx|mjs|js|py)$`),
