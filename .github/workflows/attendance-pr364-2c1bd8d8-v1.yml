@@ -1,0 +1,335 @@
+name: Attendance PR364 exact-head final 2c1bd8d8
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/attendance-pr364-2c1bd8d8-v1.yml
+      - carriers/attendance-pr364-2c1bd8d8-v1.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: attendance-pr364-2c1bd8d8-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  PRIVATE_SHA: 2c1bd8d85ec3e3e9dc9a7ea5e353afe0a406c866
+  BASE_SHA: 836d16dd3404f5f211dacb14fbaedcd514776b18
+  EXPECTED_CHANGED_FILE_COUNT: '10'
+  EXPECTED_MIGRATION_RANGE: 20260729170000-20260729175999
+  EXPECTED_NODE_COUNT: '8'
+  EXPECTED_PYTHON_COUNT: '16'
+
+jobs:
+  exact-head-attendance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Validate immutable inputs
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ -n "$PRIVATE_TOKEN" ]]
+          [[ "$EXPECTED_MIGRATION_RANGE" == "20260729170000-20260729175999" ]]
+
+      - name: Check out exact private candidate read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-candidate
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Check out exact canonical baseline read-only
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.BASE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-candidate/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+          github-token: ${{ github.token }}
+
+      - name: Gate A — exact ancestry scope and migration ownership
+        continue-on-error: true
+        run: |
+          set +e
+          {
+            set -euo pipefail
+            actual_sha="$(git -C private-candidate rev-parse HEAD)"
+            actual_base="$(git -C private-base rev-parse HEAD)"
+            merge_base="$(git -C private-candidate merge-base "$BASE_SHA" "$PRIVATE_SHA")"
+            ahead="$(git -C private-candidate rev-list --count "$BASE_SHA..$PRIVATE_SHA")"
+            behind="$(git -C private-candidate rev-list --count "$PRIVATE_SHA..$BASE_SHA")"
+            actual_files="$(git -C private-candidate diff --name-only "$BASE_SHA" "$PRIVATE_SHA" | sort)"
+            expected_files=$'docs/architecture/trainingos-attendance-runtime-v1.md\ndocs/verification/trainingos-attendance-runtime-v1.md\nlib/trainingos-agent-gateway/attendance-runtime.mjs\npackages/training-attendance/src/index.mjs\nprototypes/trainingos-agent-mvp-v1/test/attendance-runtime-v1.test.mjs\nsupabase/migrations/20260729170000_trainingos_attendance_runtime_v1_schema.sql\nsupabase/migrations/20260729171000_trainingos_attendance_runtime_v1_rpc_acl.sql\ntests/sql/trainingos_attendance_runtime_v1_e2e.sql\ntests/sql/trainingos_attendance_runtime_v1_e2e_runner.sql\ntests/test_trainingos_attendance_runtime_v1_contract.py'
+            [[ "$actual_sha" == "$PRIVATE_SHA" ]]
+            [[ "$actual_base" == "$BASE_SHA" ]]
+            [[ "$merge_base" == "$BASE_SHA" ]]
+            [[ "$behind" == "0" ]]
+            [[ "$actual_files" == "$expected_files" ]]
+            changed_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
+            [[ "$changed_count" == "$EXPECTED_CHANGED_FILE_COUNT" ]]
+            branch_migrations="$(git -C private-candidate diff --name-only "$BASE_SHA" "$PRIVATE_SHA" -- supabase/migrations | sort)"
+            expected_migrations=$'supabase/migrations/20260729170000_trainingos_attendance_runtime_v1_schema.sql\nsupabase/migrations/20260729171000_trainingos_attendance_runtime_v1_rpc_acl.sql'
+            [[ "$branch_migrations" == "$expected_migrations" ]]
+            [[ -z "$(find private-base/supabase/migrations -maxdepth 1 -type f -name '2026072917*.sql' -print -quit)" ]]
+            printf 'PASS\n' > "$RUNNER_TEMP/attendance-scope.status"
+            {
+              echo "actualSha=$actual_sha"
+              echo "mergeBase=$merge_base"
+              echo "ahead=$ahead"
+              echo "behind=$behind"
+              echo "changedFileCount=$changed_count"
+              echo "migrationFiles=2"
+            } > "$RUNNER_TEMP/attendance-scope.summary"
+          } > "$RUNNER_TEMP/attendance-scope.log" 2>&1
+          code=$?
+          if [[ "$code" != 0 ]]; then
+            printf 'FAIL\n' > "$RUNNER_TEMP/attendance-scope.status"
+          fi
+          exit "$code"
+
+      - name: Gate B — focused contracts typecheck and production build
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/attendance-scope.status" 2>/dev/null)" != PASS ]]; then
+            printf 'NOT_RUN\n' > "$RUNNER_TEMP/attendance-app.status"
+            exit 1
+          fi
+          {
+            set -euo pipefail
+            cd private-candidate
+            npm ci
+            node --check packages/training-attendance/src/index.mjs
+            node --check lib/trainingos-agent-gateway/attendance-runtime.mjs
+            node --test prototypes/trainingos-agent-mvp-v1/test/attendance-runtime-v1.test.mjs \
+              > "$RUNNER_TEMP/attendance-node.log" 2>&1
+            python -m unittest -v tests.test_trainingos_attendance_runtime_v1_contract \
+              > "$RUNNER_TEMP/attendance-python.log" 2>&1
+            python - "$RUNNER_TEMP/attendance-node.log" "$EXPECTED_NODE_COUNT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          expected = int(sys.argv[2])
+          tests = re.search(r'# tests\s+(\d+)', text)
+          passed = re.search(r'# pass\s+(\d+)', text)
+          failed = re.search(r'# fail\s+(\d+)', text)
+          count = int(tests.group(1)) if tests else 0
+          passed_count = int(passed.group(1)) if passed else 0
+          failed_count = int(failed.group(1)) if failed else -1
+          if count != expected or passed_count != expected or failed_count != 0:
+              raise SystemExit(f'node_contract_count_invalid:{passed_count}/{count}')
+          PY
+            python - "$RUNNER_TEMP/attendance-python.log" "$EXPECTED_PYTHON_COUNT" <<'PY'
+          import pathlib, re, sys
+          text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+          expected = int(sys.argv[2])
+          match = re.search(r'Ran\s+(\d+)\s+tests?', text)
+          count = int(match.group(1)) if match else 0
+          if count != expected or re.search(r'(?:^|\n)OK(?:\s|\n|$)', text) is None:
+              raise SystemExit(f'python_contract_count_invalid:{count}')
+          PY
+            npm run typecheck > "$RUNNER_TEMP/attendance-typecheck.log" 2>&1
+            npm run build > "$RUNNER_TEMP/attendance-build.log" 2>&1
+            printf 'PASS\n' > "$RUNNER_TEMP/attendance-app.status"
+            printf 'syntax=PASS\nfocusedNode=PASS 8/8\nfocusedPython=PASS 16/16\ntypecheck=PASS\nproductionBuild=PASS\n' \
+              > "$RUNNER_TEMP/attendance-app.summary"
+          } > "$RUNNER_TEMP/attendance-app-driver.log" 2>&1
+          code=$?
+          if [[ "$code" != 0 ]]; then
+            printf 'FAIL\n' > "$RUNNER_TEMP/attendance-app.status"
+          fi
+          exit "$code"
+
+      - name: Gate C — canonical full-history fresh replay pass 1 pass 2 and repeat
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/attendance-scope.status" 2>/dev/null)" != PASS ]]; then
+            printf 'NOT_RUN\n' > "$RUNNER_TEMP/attendance-fresh.status"
+            exit 1
+          fi
+          {
+            set -euo pipefail
+            workdir="$RUNNER_TEMP/attendance-candidate-full-history"
+            rm -rf "$workdir"
+            cd private-candidate
+            TRAININGOS_SOURCE_SHA="$PRIVATE_SHA" \
+            TRAININGOS_BOOTSTRAP_WORKDIR="$workdir" \
+            TRAININGOS_KEEP_BOOTSTRAP_WORKDIR=1 \
+              bash scripts/run-trainingos-fresh-database-replay.sh \
+              > "$RUNNER_TEMP/attendance-fresh-replay.log" 2>&1
+            python - "$workdir/trainingos-replay-status/result.json" \
+              "$workdir/supabase/trainingos-bootstrap-manifest.json" \
+              "$workdir/trainingos-replay-status/deterministicReplayRepeat.status" <<'PY'
+          import json, pathlib, sys
+          result = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+          manifest = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding='utf-8'))
+          repeat = pathlib.Path(sys.argv[3]).read_text(encoding='utf-8').strip()
+          stages = result.get('stages') or {}
+          required = ('bootstrapBuild', 'fullHistoryPass1', 'cleanup', 'fullHistoryPass2')
+          if result.get('status') != 'PASS' or result.get('replayClass') != 'A':
+              raise SystemExit('attendance_full_history_result_invalid')
+          if any(stages.get(name) != 'PASS' for name in required) or repeat != 'PASS':
+              raise SystemExit('attendance_full_history_stage_invalid')
+          pathlib.Path(sys.argv[1]).with_name('attendance-public-summary.txt').write_text(
+              '\n'.join([
+                  'fullHistoryFreshReplay=PASS',
+                  f"bootstrapBuild={stages['bootstrapBuild']}",
+                  f"fullHistoryPass1={stages['fullHistoryPass1']}",
+                  f"cleanup={stages['cleanup']}",
+                  f"fullHistoryPass2={stages['fullHistoryPass2']}",
+                  f'deterministicRepeat={repeat}',
+                  f"canonicalMigrationCount={manifest['migrationCount']}",
+              ]) + '\n',
+              encoding='utf-8',
+          )
+          PY
+            cp "$workdir/trainingos-replay-status/attendance-public-summary.txt" \
+              "$RUNNER_TEMP/attendance-fresh.summary"
+            printf 'PASS\n' > "$RUNNER_TEMP/attendance-fresh.status"
+          } > "$RUNNER_TEMP/attendance-fresh-driver.log" 2>&1
+          code=$?
+          if [[ "$code" != 0 ]]; then
+            printf 'FAIL\n' > "$RUNNER_TEMP/attendance-fresh.status"
+          fi
+          exit "$code"
+
+      - name: Gate D — existing-project upgrade isolated PostgreSQL E2E and zero residue
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          if [[ "$(cat "$RUNNER_TEMP/attendance-scope.status" 2>/dev/null)" != PASS ]]; then
+            printf 'NOT_RUN\n' > "$RUNNER_TEMP/attendance-db.status"
+            exit 1
+          fi
+          {
+            set -euo pipefail
+            baseline="$RUNNER_TEMP/attendance-existing-project"
+            rm -rf "$baseline"
+            mkdir -p "$baseline"
+            supabase --workdir "$baseline" init --force --yes
+            rm -rf "$baseline/supabase/migrations"
+            python private-base/scripts/build-trainingos-fresh-bootstrap.py \
+              --repo-root private-base \
+              --output-dir "$baseline/supabase/migrations" \
+              --commit-sha "$BASE_SHA"
+            supabase --workdir "$baseline" start
+            eval "$(supabase --workdir "$baseline" status -o env | grep '^DB_URL=')"
+            psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+              -f private-candidate/supabase/migrations/20260729170000_trainingos_attendance_runtime_v1_schema.sql \
+              > "$RUNNER_TEMP/attendance-upgrade-schema.log" 2>&1
+            psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+              -f private-candidate/supabase/migrations/20260729171000_trainingos_attendance_runtime_v1_rpc_acl.sql \
+              > "$RUNNER_TEMP/attendance-upgrade-rpc.log" 2>&1
+            psql "$DB_URL" -X -v ON_ERROR_STOP=1 \
+              -f private-candidate/tests/sql/trainingos_attendance_runtime_v1_e2e_runner.sql \
+              > "$RUNNER_TEMP/attendance-e2e.log" 2>&1
+            grep -q 'TRAININGOS_ATTENDANCE_E2E PASS zero_residue=PASS' "$RUNNER_TEMP/attendance-e2e.log"
+            rls_count="$(psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 -c "select count(*) from pg_class where oid in ('public.trainingos_attendance_rosters'::regclass,'public.trainingos_attendance_roster_members'::regclass,'public.trainingos_attendance_records'::regclass,'public.trainingos_attendance_revisions'::regclass,'public.trainingos_attendance_audit_events'::regclass) and relrowsecurity and relforcerowsecurity")"
+            [[ "$rls_count" == 5 ]]
+            direct_update="$(psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 -c "select has_table_privilege('authenticated','public.trainingos_attendance_records','update')")"
+            [[ "$direct_update" == f ]]
+            learner_rpc="$(psql "$DB_URL" -X -At -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.get_my_trainingos_attendance_v1(uuid)','execute')")"
+            [[ "$learner_rpc" == t ]]
+            printf 'PASS\n' > "$RUNNER_TEMP/attendance-db.status"
+            {
+              echo 'existingProjectUpgrade=PASS'
+              echo 'migrationSyntax=PASS'
+              echo 'isolatedPostgreSqlE2E=PASS'
+              echo 'rlsAcl=PASS'
+              echo 'teacherOnlyAndAgentBoundary=PASS'
+              echo 'cancelledRescheduledMakeup=PASS'
+              echo 'membershipHistoricalBinding=PASS'
+              echo 'staleVersionAndIdempotency=PASS'
+              echo 'appendOnlyCorrection=PASS'
+              echo 'aggregatePrivacyAndSuppression=PASS'
+              echo 'zeroResidue=PASS'
+              echo "postgresVersion=$(psql "$DB_URL" -X -Atc 'show server_version')"
+              echo "supabaseCliVersion=$(supabase --version)"
+            } > "$RUNNER_TEMP/attendance-db.summary"
+          } > "$RUNNER_TEMP/attendance-db-driver.log" 2>&1
+          code=$?
+          if [[ "$code" != 0 ]]; then
+            printf 'FAIL\n' > "$RUNNER_TEMP/attendance-db.status"
+          fi
+          exit "$code"
+
+      - name: Publish sanitized exact-head evidence
+        if: always()
+        run: |
+          {
+            echo '## Attendance PR364 exact-head public validation'
+            echo
+            echo "- Private exact SHA: \`$PRIVATE_SHA\`"
+            echo "- Expected base SHA: \`$BASE_SHA\`"
+            echo "- Migration range: \`$EXPECTED_MIGRATION_RANGE\`"
+            echo "- Scope: **$(cat "$RUNNER_TEMP/attendance-scope.status" 2>/dev/null || echo NOT_RUN)**"
+            echo "- App gates: **$(cat "$RUNNER_TEMP/attendance-app.status" 2>/dev/null || echo NOT_RUN)**"
+            echo "- Full-history replay: **$(cat "$RUNNER_TEMP/attendance-fresh.status" 2>/dev/null || echo NOT_RUN)**"
+            echo "- Existing-project DB E2E: **$(cat "$RUNNER_TEMP/attendance-db.status" 2>/dev/null || echo NOT_RUN)**"
+            echo
+            cat "$RUNNER_TEMP/attendance-scope.summary" 2>/dev/null || true
+            cat "$RUNNER_TEMP/attendance-app.summary" 2>/dev/null || true
+            cat "$RUNNER_TEMP/attendance-fresh.summary" 2>/dev/null || true
+            cat "$RUNNER_TEMP/attendance-db.summary" 2>/dev/null || true
+            echo 'artifactUpload=DISABLED'
+            echo 'privateCheckout=READ_ONLY'
+            echo 'rawOutput=RUNNER_LOCAL_SEALED_AND_DELETED'
+            echo 'productionDeployment=NOT_INVOKED'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce all Attendance gates
+        if: always()
+        run: |
+          set -euo pipefail
+          [[ "$(cat "$RUNNER_TEMP/attendance-scope.status" 2>/dev/null)" == PASS ]]
+          [[ "$(cat "$RUNNER_TEMP/attendance-app.status" 2>/dev/null)" == PASS ]]
+          [[ "$(cat "$RUNNER_TEMP/attendance-fresh.status" 2>/dev/null)" == PASS ]]
+          [[ "$(cat "$RUNNER_TEMP/attendance-db.status" 2>/dev/null)" == PASS ]]
+          echo "ATTENDANCE_FINAL scope=PASS app=PASS fresh=PASS db=PASS sha=$PRIVATE_SHA"
+
+      - name: Cleanup private checkouts databases and sealed logs
+        if: always()
+        run: |
+          set +e
+          for workdir in \
+            "$RUNNER_TEMP/attendance-candidate-full-history" \
+            "$RUNNER_TEMP/attendance-existing-project"; do
+            if [[ -d "$workdir" ]]; then
+              supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
+            fi
+          done
+          rm -rf private-candidate private-base \
+            "$RUNNER_TEMP"/attendance-* \
+            "$RUNNER_TEMP/attendance-candidate-full-history" \
+            "$RUNNER_TEMP/attendance-existing-project"
