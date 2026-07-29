@@ -1,0 +1,18 @@
+{
+  "requestId": "education-partner-supply-pr395-6dca3cd5-v5",
+  "privateExactSha": "6dca3cd5d444add1bc70eeadb136ccbdd5a17c29",
+  "expectedBaseSha": "6e5d4510a17f7aedf1f17366d8895b0651423798",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": 14,
+  "expectedMigrationRange": "20260730100000-20260730105959",
+  "expectedFocusedTestCounts": "node=9;python=25",
+  "expectedMigrationCount": 0,
+  "runFreshReplay": true,
+  "runUpgradeReplay": true,
+  "runApplicationContracts": true,
+  "runTypecheck": true,
+  "runProductionBuild": true,
+  "runCriticalE2E": true,
+  "reportIssueNumber": 222,
+  "publicControllerMain": "17687d7af4ae7795b451cc143251a52d18fd39ef"
+}
