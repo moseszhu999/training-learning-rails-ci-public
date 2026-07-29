@@ -109,6 +109,7 @@ classify_e2e(){
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_TARGET_OWNER' "$log"; then echo target-owner
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_TARGET_ACCOUNT' "$log"; then echo target-account
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_PUBLIC_DISPLAY' "$log"; then echo public-display
+  elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_REVOCATION_STAGE_FAILED' "$log"; then echo rights-revocation
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_FEATURE' "$log"; then echo rights-feature
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_ROUTINE' "$log"; then echo rights-routine
   elif grep -Fq 'TRAININGOS_EDUCATION_SUPPLY_RIGHTS_CLASS_EXTERNAL' "$log"; then echo rights-external

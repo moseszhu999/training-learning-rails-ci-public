@@ -75,6 +75,7 @@ test('Education Partner Supply database gate is exact-head, replayed, transactio
     'npx --yes supabase@latest',
     'FAILURE_REASON',
     'assertion-self-review',
+    'rights-revocation',
     'rights-routine',
     'rights-feature',
     'rights-system',
@@ -94,6 +95,12 @@ test('sanitized E2E reason is allowlisted and unknown reason is not propagated',
       'CHALLENGE_DATABASE status=FAIL stage=fresh-e2e reason=assertion-self-review',
     ),
     'database-fresh-e2e-assertion-self-review',
+  );
+  assert.equal(
+    educationDatabaseFailureLabel(
+      'CHALLENGE_DATABASE status=FAIL stage=fresh-e2e reason=rights-revocation',
+    ),
+    'database-fresh-e2e-rights-revocation',
   );
   assert.equal(
     educationDatabaseFailureLabel(
