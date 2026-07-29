@@ -28,6 +28,34 @@ if (unrelatedLearningWorkspaceIndex >= 0) {
   teacherHubCommands.splice(unrelatedLearningWorkspaceIndex, 1);
 }
 
+const challengePostMergeFiles = Object.freeze([
+  'tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql',
+  'tests/test_trainingos_assessment_resume_execution_contract.py',
+]);
+
+export function isChallengePostMergeFiles(files) {
+  const normalized = [...files].sort();
+  return normalized.length === challengePostMergeFiles.length
+    && normalized.every((name, index) => name === challengePostMergeFiles[index]);
+}
+
+export const challengePostMergeProfileCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('python-composition', 'python', [
+    '-m',
+    'unittest',
+    '-v',
+    'tests.test_trainingos_assessment_resume_execution_contract',
+  ], 'python'),
+  command('native-validation', 'node', ['scripts/run-trainingos-native-classroom-validation.mjs']),
+  command('zero-permission-validation', 'node', ['scripts/run-trainingos-zero-permission-bridge-validation.mjs']),
+  command('learning-workspace-validation', 'node', ['scripts/run-trainingos-learning-workspace-bridge-validation.mjs']),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('vscode-bundle', 'node', ['extensions/trainingos-classroom-vscode/esbuild.mjs', '--production']),
+  command('vite-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('database-replay', 'bash', [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts/run-challenge-runtime-database.sh')]),
+]);
+
 export const challengeEvaluationProfileCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('syntax-evaluation', 'node', ['--check', 'packages/training-challenge-evaluation/index.mjs']),
@@ -57,6 +85,12 @@ function parseNode(text) {
   };
 }
 
+function parsePython(text) {
+  return {
+    tests: [...text.matchAll(/Ran\s+(\d+)\s+tests?/g)].reduce((sum, match) => sum + Number(match[1]), 0),
+  };
+}
+
 async function challengeFiles({ privateRepoPath, runnerTemp }) {
   const scopeText = await readFile(path.join(runnerTemp, 'trainingos-scope-contract.env'), 'utf8');
   const scope = Object.fromEntries(scopeText.trim().split('\n').map((line) => {
@@ -75,7 +109,8 @@ async function challengeFiles({ privateRepoPath, runnerTemp }) {
   return result.stdout.trim() ? result.stdout.trim().split('\n') : [];
 }
 
-async function runChallengeEvaluationProfile({
+async function runFixedProfile({
+  commands,
   privateRepoPath,
   runnerTemp,
   expectedNodeCount,
@@ -85,11 +120,12 @@ async function runChallengeEvaluationProfile({
   let nodeTests = 0;
   let nodePassed = 0;
   let nodeFailed = 0;
+  let pythonTests = 0;
   let passedSteps = 0;
   const failedLabels = [];
 
   try {
-    for (const [index, item] of challengeEvaluationProfileCommands.entries()) {
+    for (const [index, item] of commands.entries()) {
       const logPath = path.join(runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const result = spawnSync(item.executable, item.args, {
@@ -106,6 +142,7 @@ async function runChallengeEvaluationProfile({
         nodePassed += parsed.passed;
         nodeFailed += parsed.failed;
       }
+      if (item.kind === 'python') pythonTests += parsePython(text).tests;
       if (result.status === 0) passedSteps += 1;
       else failedLabels.push(item.label);
     }
@@ -118,25 +155,30 @@ async function runChallengeEvaluationProfile({
   const countsPassed = nodeTests === expectedNode
     && nodePassed === expectedNode
     && nodeFailed === 0
-    && expectedPython === 0;
-  const ok = passedSteps === challengeEvaluationProfileCommands.length && countsPassed;
+    && pythonTests === expectedPython;
+  const ok = passedSteps === commands.length && countsPassed;
   return {
     ok,
     status: formatProfileStatus({ ok, failedLabels, countsPassed }),
     failedLabels: Object.freeze([...failedLabels]),
-    stepCount: challengeEvaluationProfileCommands.length,
+    stepCount: commands.length,
     passedStepCount: passedSteps,
     nodeTests,
     nodePassed,
     nodeFailed,
-    pythonTests: 0,
+    pythonTests,
   };
 }
 
 export async function runProfile(input) {
   if (input.profile === 'challenge-runtime') {
     const files = await challengeFiles(input);
-    if (isChallengeEvaluationFiles(files)) return runChallengeEvaluationProfile(input);
+    if (isChallengePostMergeFiles(files)) {
+      return runFixedProfile({ ...input, commands: challengePostMergeProfileCommands });
+    }
+    if (isChallengeEvaluationFiles(files)) {
+      return runFixedProfile({ ...input, commands: challengeEvaluationProfileCommands });
+    }
   }
   return runBaseProfile(input);
 }

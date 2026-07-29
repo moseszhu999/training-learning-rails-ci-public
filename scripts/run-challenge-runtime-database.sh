@@ -1,43 +1,147 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+
 required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT RUNNER_TEMP)
-for name in "${required[@]}"; do [[ -n "${!name:-}" ]] || { echo 'CHALLENGE_DATABASE status=FAIL reason=missing-input'; exit 2; }; done
+for name in "${required[@]}"; do
+  [[ -n "${!name:-}" ]] || { echo 'CHALLENGE_DATABASE status=FAIL reason=missing-input'; exit 2; }
+done
+
 scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
 [[ -f "$scope_file" ]] || { echo 'CHALLENGE_DATABASE status=FAIL reason=missing-scope'; exit 2; }
 read_scope(){ awk -F= -v wanted="$1" '$1 == wanted { print substr($0,index($0,"=")+1); exit }' "$scope_file"; }
-expected_base_sha="$(read_scope expected_base_sha)"; expected_changed_file_count="$(read_scope expected_changed_file_count)"; migration_start="$(read_scope migration_start)"; migration_end="$(read_scope migration_end)"
+
+expected_base_sha="$(read_scope expected_base_sha)"
+expected_changed_file_count="$(read_scope expected_changed_file_count)"
+migration_start="$(read_scope migration_start)"
+migration_end="$(read_scope migration_end)"
 [[ "$(read_scope validation_profile)" == challenge-runtime ]]
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ && "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
-[[ "$migration_start" =~ ^[0-9]{14}$ && "$migration_end" =~ ^[0-9]{14}$ ]]
-changed_files="$(git -C "$PRIVATE_REPO_PATH" diff --name-only "$expected_base_sha" "$PRIVATE_EXACT_SHA")"
-suite=''; runner_sql=''; concurrency_runner=''
-if grep -q '^packages/training-challenge/src/' <<<"$changed_files"; then suite=canonical; runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql"
-elif grep -q '^packages/training-challenge-proof/' <<<"$changed_files"; then suite=proof; runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_proof_share_v1_e2e_runner.sql"
-elif grep -q '^packages/training-invite-growth/' <<<"$changed_files"; then suite=invite; runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_invite_growth_runtime_v1_e2e_runner.sql"; concurrency_runner="$PRIVATE_REPO_PATH/scripts/run-trainingos-invite-growth-concurrency-e2e.sh"
-else echo 'CHALLENGE_DATABASE status=FAIL reason=unsupported-suite'; exit 2; fi
-fresh_project="$RUNNER_TEMP/trainingos-challenge-fresh"; upgrade_project="$RUNNER_TEMP/trainingos-challenge-upgrade"; base_worktree="$RUNNER_TEMP/trainingos-challenge-base"
-cleanup(){ supabase --workdir "$fresh_project" stop --no-backup >/dev/null 2>&1||true; supabase --workdir "$upgrade_project" stop --no-backup >/dev/null 2>&1||true; git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_worktree" >/dev/null 2>&1||true; rm -rf "$fresh_project" "$upgrade_project" "$base_worktree"; }
+[[ "$expected_changed_file_count" =~ ^(0|[1-9][0-9]{0,5})$ ]]
+[[ "$EXPECTED_MIGRATION_COUNT" =~ ^(0|[1-9][0-9]{0,5})$ ]]
+if [[ "$migration_start" != none || "$migration_end" != none ]]; then
+  [[ "$migration_start" =~ ^[0-9]{14}$ && "$migration_end" =~ ^[0-9]{14}$ ]]
+fi
+
+changed_files="$(git -C "$PRIVATE_REPO_PATH" diff --name-only "$expected_base_sha" "$PRIVATE_EXACT_SHA" | sort)"
+postmerge_expected="$(printf '%s\n' \
+  tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql \
+  tests/test_trainingos_assessment_resume_execution_contract.py | sort)"
+suite=''
+runner_sql=''
+concurrency_runner=''
+if [[ "$changed_files" == "$postmerge_expected" ]]; then
+  suite=postmerge
+  runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql"
+elif grep -q '^packages/training-challenge/src/' <<<"$changed_files"; then
+  suite=canonical
+  runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_runtime_v1_e2e_runner.sql"
+elif grep -q '^packages/training-challenge-proof/' <<<"$changed_files"; then
+  suite=proof
+  runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_proof_share_v1_e2e_runner.sql"
+elif grep -q '^packages/training-invite-growth/' <<<"$changed_files"; then
+  suite=invite
+  runner_sql="$PRIVATE_REPO_PATH/tests/sql/trainingos_invite_growth_runtime_v1_e2e_runner.sql"
+  concurrency_runner="$PRIVATE_REPO_PATH/scripts/run-trainingos-invite-growth-concurrency-e2e.sh"
+else
+  echo 'CHALLENGE_DATABASE status=FAIL reason=unsupported-suite'
+  exit 2
+fi
+
+fresh_project="$RUNNER_TEMP/trainingos-challenge-fresh"
+upgrade_project="$RUNNER_TEMP/trainingos-challenge-upgrade"
+base_worktree="$RUNNER_TEMP/trainingos-challenge-base"
+cleanup(){
+  supabase --workdir "$fresh_project" stop --no-backup >/dev/null 2>&1 || true
+  supabase --workdir "$upgrade_project" stop --no-backup >/dev/null 2>&1 || true
+  git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_worktree" >/dev/null 2>&1 || true
+  rm -rf "$fresh_project" "$upgrade_project" "$base_worktree"
+  rm -f "$RUNNER_TEMP"/trainingos-challenge-*-status.env
+}
 trap cleanup EXIT
+
 [[ "$(git -C "$PRIVATE_REPO_PATH" rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
 [[ "$(git -C "$PRIVATE_REPO_PATH" merge-base "$expected_base_sha" "$PRIVATE_EXACT_SHA")" == "$expected_base_sha" ]]
-actual_count="$(sed '/^$/d' <<<"$changed_files"|wc -l|tr -d ' ')"; [[ "$actual_count" == "$expected_changed_file_count" ]]
-[[ -f "$runner_sql" ]]; grep -Eiq '^[[:space:]]*rollback;' "$runner_sql"; [[ -z "$concurrency_runner" || -f "$concurrency_runner" ]]
-mapfile -t migrations < <(grep -E '^supabase/migrations/[0-9]{14}_[^/]*(challenge|invite|growth|attribution|proof|sharing)[^/]*\.sql$' <<<"$changed_files"|sort)
-[[ "${#migrations[@]}" -gt 0 ]]
-for migration in "${migrations[@]}"; do stamp="$(basename "$migration"|cut -c1-14)"; [[ "$stamp" -ge "$migration_start" && "$stamp" -le "$migration_end" ]]; done
-canonical_count="$(find "$PRIVATE_REPO_PATH/supabase/migrations" -maxdepth 1 -type f -name '*.sql'|wc -l|tr -d ' ')"; [[ "$EXPECTED_MIGRATION_COUNT" == "$canonical_count" ]]
-run_e2e(){ local url="$1"; psql "$url" -X -v ON_ERROR_STOP=1 -f "$runner_sql"; if [[ -n "$concurrency_runner" ]]; then DATABASE_URL="$url" RUNNER_TEMP="$RUNNER_TEMP" bash "$concurrency_runner"; fi; }
-rm -rf "$fresh_project"; supabase --workdir "$fresh_project" init --force --yes; rm -rf "$fresh_project/supabase/migrations"
-python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" --repo-root "$PRIVATE_REPO_PATH" --output-dir "$fresh_project/supabase/migrations" --commit-sha "$PRIVATE_EXACT_SHA"
-python - "$fresh_project/supabase/trainingos-bootstrap-manifest.json" "$EXPECTED_MIGRATION_COUNT" <<'PY'
+actual_count="$(sed '/^$/d' <<<"$changed_files" | wc -l | tr -d ' ')"
+[[ "$actual_count" == "$expected_changed_file_count" ]]
+[[ -f "$runner_sql" ]]
+grep -Eiq '^[[:space:]]*rollback;' "$runner_sql"
+[[ -z "$concurrency_runner" || -f "$concurrency_runner" ]]
+if [[ "$suite" == postmerge ]]; then
+  grep -Fq '\ir trainingos_challenge_runtime_v1_e2e.sql' "$runner_sql"
+fi
+
+mapfile -t migrations < <(
+  grep -E '^supabase/migrations/[0-9]{14}_[^/]*(challenge|invite|growth|attribution|proof|sharing)[^/]*\.sql$' <<<"$changed_files" | sort || true
+)
+if [[ "$suite" == postmerge ]]; then
+  [[ "${#migrations[@]}" == 0 ]]
+  [[ "$migration_start" == none && "$migration_end" == none ]]
+else
+  [[ "${#migrations[@]}" -gt 0 ]]
+  [[ "$migration_start" =~ ^[0-9]{14}$ && "$migration_end" =~ ^[0-9]{14}$ ]]
+  for migration in "${migrations[@]}"; do
+    stamp="$(basename "$migration" | cut -c1-14)"
+    [[ "$stamp" -ge "$migration_start" && "$stamp" -le "$migration_end" ]]
+  done
+fi
+
+canonical_count="$(find "$PRIVATE_REPO_PATH/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+if [[ "$EXPECTED_MIGRATION_COUNT" != 0 ]]; then
+  [[ "$EXPECTED_MIGRATION_COUNT" == "$canonical_count" ]]
+fi
+run_e2e(){
+  local url="$1"
+  psql "$url" -X -v ON_ERROR_STOP=1 -f "$runner_sql"
+  if [[ -n "$concurrency_runner" ]]; then
+    DATABASE_URL="$url" RUNNER_TEMP="$RUNNER_TEMP" bash "$concurrency_runner"
+  fi
+}
+
+rm -rf "$fresh_project"
+supabase --workdir "$fresh_project" init --force --yes
+rm -rf "$fresh_project/supabase/migrations"
+python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
+  --repo-root "$PRIVATE_REPO_PATH" \
+  --output-dir "$fresh_project/supabase/migrations" \
+  --commit-sha "$PRIVATE_EXACT_SHA"
+python - "$fresh_project/supabase/trainingos-bootstrap-manifest.json" "$canonical_count" <<'PY'
 import json,pathlib,sys
-m=json.loads(pathlib.Path(sys.argv[1]).read_text()); raise SystemExit(0 if int(m.get('migrationCount',-1))==int(sys.argv[2]) else 1)
+manifest=json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+raise SystemExit(0 if int(manifest.get('migrationCount',-1))==int(sys.argv[2]) else 1)
 PY
-supabase --workdir "$fresh_project" start; supabase --workdir "$fresh_project" db reset --local --no-seed; supabase --workdir "$fresh_project" db reset --local --no-seed
-fresh_status="$RUNNER_TEMP/trainingos-challenge-fresh-status.env"; supabase --workdir "$fresh_project" status -o env >"$fresh_status"; fresh_db_url="$(grep '^DB_URL=' "$fresh_status"|sed 's/^DB_URL=//'|tr -d '"')"; run_e2e "$fresh_db_url"; supabase --workdir "$fresh_project" stop --no-backup
-rm -rf "$upgrade_project" "$base_worktree"; git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_worktree" "$expected_base_sha"; supabase --workdir "$upgrade_project" init --force --yes; rm -rf "$upgrade_project/supabase/migrations"
-python "$base_worktree/scripts/build-trainingos-fresh-bootstrap.py" --repo-root "$base_worktree" --output-dir "$upgrade_project/supabase/migrations" --commit-sha "$expected_base_sha"
-supabase --workdir "$upgrade_project" start; for migration in "${migrations[@]}"; do cp "$PRIVATE_REPO_PATH/$migration" "$upgrade_project/supabase/migrations/"; done; supabase --workdir "$upgrade_project" migration up --local
-upgrade_status="$RUNNER_TEMP/trainingos-challenge-upgrade-status.env"; supabase --workdir "$upgrade_project" status -o env >"$upgrade_status"; upgrade_db_url="$(grep '^DB_URL=' "$upgrade_status"|sed 's/^DB_URL=//'|tr -d '"')"; run_e2e "$upgrade_db_url"; supabase --workdir "$upgrade_project" stop --no-backup
-echo "CHALLENGE_DATABASE status=PASS suite=$suite migrations=${#migrations[@]} canonical=$canonical_count fresh=PASS second_pass=PASS upgrade=PASS e2e=PASS cleanup=PASS"
+supabase --workdir "$fresh_project" start
+supabase --workdir "$fresh_project" db reset --local --no-seed
+supabase --workdir "$fresh_project" db reset --local --no-seed
+fresh_status="$RUNNER_TEMP/trainingos-challenge-fresh-status.env"
+supabase --workdir "$fresh_project" status -o env >"$fresh_status"
+fresh_db_url="$(grep '^DB_URL=' "$fresh_status" | sed 's/^DB_URL=//' | tr -d '"')"
+[[ -n "$fresh_db_url" ]]
+run_e2e "$fresh_db_url"
+supabase --workdir "$fresh_project" stop --no-backup
+
+upgrade_result=NOT_APPLICABLE
+if [[ "$suite" != postmerge ]]; then
+  rm -rf "$upgrade_project" "$base_worktree"
+  git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_worktree" "$expected_base_sha"
+  supabase --workdir "$upgrade_project" init --force --yes
+  rm -rf "$upgrade_project/supabase/migrations"
+  python "$base_worktree/scripts/build-trainingos-fresh-bootstrap.py" \
+    --repo-root "$base_worktree" \
+    --output-dir "$upgrade_project/supabase/migrations" \
+    --commit-sha "$expected_base_sha"
+  supabase --workdir "$upgrade_project" start
+  for migration in "${migrations[@]}"; do
+    cp "$PRIVATE_REPO_PATH/$migration" "$upgrade_project/supabase/migrations/"
+  done
+  supabase --workdir "$upgrade_project" migration up --local
+  upgrade_status="$RUNNER_TEMP/trainingos-challenge-upgrade-status.env"
+  supabase --workdir "$upgrade_project" status -o env >"$upgrade_status"
+  upgrade_db_url="$(grep '^DB_URL=' "$upgrade_status" | sed 's/^DB_URL=//' | tr -d '"')"
+  [[ -n "$upgrade_db_url" ]]
+  run_e2e "$upgrade_db_url"
+  supabase --workdir "$upgrade_project" stop --no-backup
+  upgrade_result=PASS
+fi
+
+echo "CHALLENGE_DATABASE status=PASS suite=$suite migrations=${#migrations[@]} canonical=$canonical_count fresh=PASS second_pass=PASS upgrade=$upgrade_result e2e=PASS cleanup=PASS"
