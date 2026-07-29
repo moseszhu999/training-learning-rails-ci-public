@@ -36,9 +36,14 @@ test('request parser accepts complete fixed canonical metadata only', () => {
   assert.equal(validateRequest({ ...request, expectedMigrationRange: 'none' }).ok, false);
 });
 
-test('request driver forwards the complete reusable-controller contract and never checks out private code', async () => {
+test('request driver uses a reviewed same-repository carrier and forwards the complete controller contract', async () => {
   const workflow = await readFile(workflowPath, 'utf8');
-  assert.match(workflow, /ci\/exact-head-request\/\*\*/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /branches:\s*\n\s*- main/);
+  assert.match(workflow, /\.github\/exact-head-request\.json/);
+  assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(workflow, /startsWith\(github\.head_ref, 'ci\/exact-head-request\/'\)/);
+  assert.doesNotMatch(workflow, /\n\s*push:/);
   assert.match(workflow, /gh workflow run trainingos-public-exact-head\.yml/);
   assert.match(workflow, /--ref main/);
   assert.match(workflow, /actions: write/);
