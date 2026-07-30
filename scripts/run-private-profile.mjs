@@ -1,10 +1,10 @@
-export * from './run-private-profile-stage8.mjs';
+export * from './run-private-profile-stage9.mjs';
 export * from './youth-guardian-release-gate.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runProfile as runBaseProfile } from './run-private-profile-stage8.mjs';
+import { runProfile as runBaseProfile } from './run-private-profile-stage9.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
