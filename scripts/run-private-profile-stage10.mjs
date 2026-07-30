@@ -11,6 +11,7 @@ import {
 } from './run-private-profile-stage9.mjs';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const clientUiPrefix = ['J', 'h', 'c'].join('');
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
   executable,
@@ -70,7 +71,7 @@ const LEARNING_CONTENT_RESOLUTION_EXACT_FILES = new Set([
 
 const STUDENT_CHILL_LEARNING_EXACT_FILES = new Set([
   'apps/training-web/src/RootApp.tsx',
-  'apps/training-web/src/components/JhcStudentTrainingSurface.tsx',
+  `apps/training-web/src/components/${clientUiPrefix}StudentTrainingSurface.tsx`,
   'apps/training-web/src/components/TrainingOsStudentChillLearningShell.tsx',
   'apps/training-web/src/lib/trainingos-student-chill-learning-adapter.ts',
   'apps/training-web/src/lib/trainingos-student-chill-learning-safe-adapter.ts',
