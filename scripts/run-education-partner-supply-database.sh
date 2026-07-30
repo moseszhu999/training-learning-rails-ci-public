@@ -202,7 +202,7 @@ CURRENT_STAGE="upgrade-migrations"
 for migration in "${migrations[@]}"; do
   cp "$PRIVATE_REPO_PATH/$migration" "$upgrade_project/supabase/migrations/"
 done
-supabase_cli --workdir "$upgrade_project" migration up --local
+supabase_cli --workdir "$upgrade_project" migration up --local --include-all
 CURRENT_STAGE="upgrade-status"
 upgrade_status="$RUNNER_TEMP/trainingos-education-partner-supply-upgrade-status.env"
 supabase_cli --workdir "$upgrade_project" status -o env >"$upgrade_status"
