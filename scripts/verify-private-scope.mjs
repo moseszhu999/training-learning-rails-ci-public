@@ -8,7 +8,9 @@ const customerEntry = new RegExp(`^apps/training-web/src/components/${['J', 'h',
 const privilegedKeyPattern = new RegExp(`${['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_')}\\s*[:=]\\s*[^\\s\u0060]+`);
 const agentNativeToken = '(agent-native|golden-path|learning|challenge|composer|recipe|workbuddy|hint|evidence|review|attempt|submission|content-resolution)';
 const clientSource = /^(apps\/training-web\/src|extensions\/trainingos-classroom-vscode\/src)\//;
-const clientServiceRole = /\bservice_role\b|SUPABASE_SERVICE_ROLE_KEY|VITE_[A-Z0-9_]*SERVICE_ROLE/i;
+const privilegedRoleToken = ['service', 'role'].join('_');
+const privilegedEnvToken = ['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_');
+const clientServiceRole = new RegExp(`\\b${privilegedRoleToken}\\b|${privilegedEnvToken}|VITE_[A-Z0-9_]*${privilegedRoleToken}`, 'i');
 const clientDirectWrite = /\b(?:supabase|supabaseClient)\s*(?:\?\.)?\.\s*(?:rpc\s*\(|from\s*\([^)]*\)[\s\S]{0,500}?\.\s*(?:insert|update|upsert|delete)\s*\()/i;
 
 export const profileAllowlist = Object.freeze({
