@@ -13,6 +13,7 @@ export const standardValidationProfiles = Object.freeze([
   'teacher-hub',
   'docs-launch',
   'education-ecosystem',
+  'agent-native-learning-product',
   'generic-owned',
 ]);
 
@@ -74,6 +75,15 @@ export function validateInputs(input) {
     if (expectedChangedFileCount !== '0') failures.push('mainChangedFileCount');
     if (expectedMigrationRange !== 'none') failures.push('mainMigrationRange');
     if (expectedFocusedTestCounts !== 'node=0;python=0') failures.push('mainFocusedCountSentinel');
+  }
+
+  if (validationProfile === 'agent-native-learning-product') {
+    if (expectedMigrationRange !== 'none') failures.push('agentNativeLearningMigrationRange');
+    if (String(expectedMigrationCount) !== '0') failures.push('agentNativeLearningMigrationCount');
+    if (expectedFocusedTestCounts !== 'node=0;python=0') failures.push('agentNativeLearningFocusedCountSentinel');
+    for (const [name, value] of Object.entries(runFlags)) {
+      if (String(value) !== 'false') failures.push(`agentNativeLearning:${name}`);
+    }
   }
 
   if (validationProfile === 'docs-launch' && expectedMigrationRange !== 'none') failures.push('docsMigrationRange');
