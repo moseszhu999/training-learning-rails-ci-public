@@ -66,7 +66,7 @@ export const agentNativeLearningProductCommands = Object.freeze([
 const CLIENT_SOURCE = /^(apps\/training-web\/src|extensions\/trainingos-classroom-vscode\/src)\//;
 const privilegedRoleToken = ['service', 'role'].join('_');
 const privilegedEnvToken = ['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_');
-const SERVICE_ROLE = new RegExp(`\\b${privilegedRoleToken}\\b|${privilegedEnvToken}|VITE_[A-Z0-9_]*${privilegedRoleToken}`, 'i');
+const PRIVILEGED_ROLE_PATTERN = new RegExp(`\\b${privilegedRoleToken}\\b|${privilegedEnvToken}|VITE_[A-Z0-9_]*${privilegedRoleToken}`, 'i');
 const DIRECT_WRITE = /\b(?:supabase|supabaseClient)\s*(?:\?\.)?\.\s*(?:rpc\s*\(|from\s*\([^)]*\)[\s\S]{0,500}?\.\s*(?:insert|update|upsert|delete)\s*\()/i;
 
 function git(repoPath, args) {
@@ -103,7 +103,7 @@ async function verifyClientBoundary({ privateRepoPath, runnerTemp }) {
     } catch {
       continue;
     }
-    if (SERVICE_ROLE.test(text)) return false;
+    if (PRIVILEGED_ROLE_PATTERN.test(text)) return false;
     if (DIRECT_WRITE.test(text)) return false;
   }
   return true;
