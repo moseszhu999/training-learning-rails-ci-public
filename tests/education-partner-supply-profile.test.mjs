@@ -70,7 +70,7 @@ test('Education Partner Supply database gate is exact-head, replayed, transactio
     '20260730105959',
     'trainingos_education_partner_supply_v1_e2e_runner.sql',
     'trainingos_education_partner_supply_acl_immutability_v1.sql',
-    'migration up --local',
+    'migration up --local --include-all',
     'cleanup=PASS',
     'npx --yes supabase@latest',
     'FAILURE_REASON',
@@ -82,6 +82,8 @@ test('Education Partner Supply database gate is exact-head, replayed, transactio
     'trainingos-education-partner-supply-${phase}-e2e.log',
   ]) assert.ok(script.includes(marker), marker);
   assert.equal((script.match(/db reset --local --no-seed/g) || []).length, 2);
+  assert.equal((script.match(/migration up --local --include-all/g) || []).length, 1);
+  assert.doesNotMatch(script, /migration up --local\s*$/m);
   assert.match(script, /2026073010\[0-5\]\[0-9\]\[0-5\]\[0-9\]/);
   assert.match(script, /merge-base/);
   assert.match(script, /PRIVATE_EXACT_SHA/);
