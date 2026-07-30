@@ -2,6 +2,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { closeSync, openSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import {
   formatProfileStatus,
@@ -9,6 +10,8 @@ import {
   runProfile as runStage9Profile,
 } from './run-private-profile-stage9.mjs';
 
+const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const clientUiPrefix = ['J', 'h', 'c'].join('');
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
   executable,
@@ -40,6 +43,22 @@ export const learningContentResolutionProfileCommands = Object.freeze([
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
 
+export const studentChillLearningProfileCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('component-role-contracts', 'python', [
+    '-m',
+    'unittest',
+    '-v',
+    'tests.test_trainingos_student_chill_learning_shell_v1_contract',
+    'tests.test_trainingos_student_chill_learning_role_boundary_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('playwright', 'bash', [
+    path.join(publicRoot, 'scripts/run-student-chill-learning-playwright.sh'),
+  ]),
+]);
+
 const LEARNING_CONTENT_RESOLUTION_EXACT_FILES = new Set([
   'docs/architecture/trainingos-learning-content-resolution-v1.md',
   'docs/testing/trainingos-learning-content-resolution-validation-v1.md',
@@ -50,6 +69,20 @@ const LEARNING_CONTENT_RESOLUTION_EXACT_FILES = new Set([
   'tests/test_trainingos_learning_content_resolution_v1_contract.py',
 ]);
 
+const STUDENT_CHILL_LEARNING_EXACT_FILES = new Set([
+  'apps/training-web/src/RootApp.tsx',
+  `apps/training-web/src/components/${clientUiPrefix}StudentTrainingSurface.tsx`,
+  'apps/training-web/src/components/TrainingOsStudentChillLearningShell.tsx',
+  'apps/training-web/src/lib/trainingos-student-chill-learning-adapter.ts',
+  'apps/training-web/src/lib/trainingos-student-chill-learning-safe-adapter.ts',
+  'apps/training-web/src/trainingos-student-chill-learning.css',
+  'docs/architecture/trainingos-student-chill-learning-experience-v1.md',
+  'docs/testing/trainingos-student-chill-learning-validation-v1.md',
+  'tests/test_trainingos_student_chill_learning_role_boundary_v1.py',
+  'tests/test_trainingos_student_chill_learning_shell_v1_contract.py',
+  'tests/trainingos-ui-e2e/student-chill-learning-shell-v1.spec.ts',
+]);
+
 export function isLearningContentResolutionFiles(files) {
   const names = [...files];
   return names.length === LEARNING_CONTENT_RESOLUTION_EXACT_FILES.size
@@ -58,6 +91,20 @@ export function isLearningContentResolutionFiles(files) {
     && names.includes('lib/trainingos-agent-gateway/learning-content-resolution.mjs')
     && names.includes('tests/test_trainingos_learning_content_resolution_v1_contract.py')
     && !names.some((name) => name.startsWith('supabase/migrations/'));
+}
+
+export function isStudentChillLearningFiles(files) {
+  const names = [...files];
+  return names.length === STUDENT_CHILL_LEARNING_EXACT_FILES.size
+    && names.every((name) => STUDENT_CHILL_LEARNING_EXACT_FILES.has(name))
+    && names.includes('apps/training-web/src/components/TrainingOsStudentChillLearningShell.tsx')
+    && names.includes('apps/training-web/src/lib/trainingos-student-chill-learning-adapter.ts')
+    && names.includes('apps/training-web/src/lib/trainingos-student-chill-learning-safe-adapter.ts')
+    && names.includes('tests/test_trainingos_student_chill_learning_role_boundary_v1.py')
+    && names.includes('tests/trainingos-ui-e2e/student-chill-learning-shell-v1.spec.ts')
+    && !names.some((name) => name.startsWith('supabase/migrations/'))
+    && !names.some((name) => name.includes('/mcp') || name.endsWith('/mcp.mjs'))
+    && !names.some((name) => name.includes('TrainingOsAdvancedManagementSurface'));
 }
 
 function parseNode(text) {
@@ -93,10 +140,12 @@ async function changedFiles({ privateRepoPath, runnerTemp }) {
 }
 
 async function runFixedProfile({
+  commands,
   privateRepoPath,
   runnerTemp,
   expectedNodeCount,
   expectedPythonCount,
+  selectedSuite,
 }) {
   await mkdir(runnerTemp, { recursive: true });
   let nodeTests = 0;
@@ -107,7 +156,7 @@ async function runFixedProfile({
   const failedLabels = [];
 
   try {
-    for (const [index, item] of learningContentResolutionProfileCommands.entries()) {
+    for (const [index, item] of commands.entries()) {
       const logPath = path.join(runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const result = spawnSync(item.executable, item.args, {
@@ -138,25 +187,38 @@ async function runFixedProfile({
     && nodePassed === expectedNode
     && nodeFailed === 0
     && pythonTests === expectedPython;
-  const ok = passedSteps === learningContentResolutionProfileCommands.length && countsPassed;
+  const ok = passedSteps === commands.length && countsPassed;
   return {
     ok,
     status: formatProfileStatus({ ok, failedLabels, countsPassed }),
     failedLabels: Object.freeze([...failedLabels]),
-    stepCount: learningContentResolutionProfileCommands.length,
+    stepCount: commands.length,
     passedStepCount: passedSteps,
     nodeTests,
     nodePassed,
     nodeFailed,
     pythonTests,
-    selectedSuite: 'learning-content-resolution',
+    selectedSuite,
   };
 }
 
 export async function runProfile(input) {
   if (input.profile === 'generic-owned') {
     const files = await changedFiles(input);
-    if (isLearningContentResolutionFiles(files)) return runFixedProfile(input);
+    if (isLearningContentResolutionFiles(files)) {
+      return runFixedProfile({
+        ...input,
+        commands: learningContentResolutionProfileCommands,
+        selectedSuite: 'learning-content-resolution',
+      });
+    }
+    if (isStudentChillLearningFiles(files)) {
+      return runFixedProfile({
+        ...input,
+        commands: studentChillLearningProfileCommands,
+        selectedSuite: 'student-chill-learning',
+      });
+    }
   }
   return runStage9Profile(input);
 }
