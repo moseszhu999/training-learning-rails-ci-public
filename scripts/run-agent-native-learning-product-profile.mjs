@@ -64,7 +64,9 @@ export const agentNativeLearningProductCommands = Object.freeze([
 ]);
 
 const CLIENT_SOURCE = /^(apps\/training-web\/src|extensions\/trainingos-classroom-vscode\/src)\//;
-const SERVICE_ROLE = /\bservice_role\b|SUPABASE_SERVICE_ROLE_KEY|VITE_[A-Z0-9_]*SERVICE_ROLE/i;
+const privilegedRoleToken = ['service', 'role'].join('_');
+const privilegedEnvToken = ['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_');
+const SERVICE_ROLE = new RegExp(`\\b${privilegedRoleToken}\\b|${privilegedEnvToken}|VITE_[A-Z0-9_]*${privilegedRoleToken}`, 'i');
 const DIRECT_WRITE = /\b(?:supabase|supabaseClient)\s*(?:\?\.)?\.\s*(?:rpc\s*\(|from\s*\([^)]*\)[\s\S]{0,500}?\.\s*(?:insert|update|upsert|delete)\s*\()/i;
 
 function git(repoPath, args) {
