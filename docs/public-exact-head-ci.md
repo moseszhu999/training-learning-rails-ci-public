@@ -33,6 +33,7 @@ Inputs may declare SHAs, counts, ranges, booleans, and a profile. They cannot su
 - `challenge-web` enforces the route allowlist, direct-Supabase prohibition, secret scan, typecheck, production build, and Playwright.
 - `teacher-hub` enforces Hub mount and role contracts, deep-link/stale/offline validation, typecheck/build, and Playwright.
 - `docs-launch` enforces docs-only scope, Markdown structure, secret/PII scanning, and no runtime, migration, UI, or Gateway delta.
+- `generic-owned` automatically selects the reusable `learning-content-resolution` fixed suite only for its exact seven-file, zero-migration owner scope. That suite runs fixed package/Gateway syntax, 7 Node contracts, 8 Python contracts, typecheck, and production build without mounting shared MCP or running database replay.
 - `main-release` enforces exact live private main, complete migration count and fingerprint, full-history fresh/second/upgrade replay, database and application contracts, Node/Python, typecheck/build, critical role E2E, and zero residue.
 
 The reusable request driver accepts only a same-repository pull request whose branch starts with `ci/exact-head-request/` and whose only request payload is `.github/exact-head-request.json`. The reviewed carrier supplies fixed metadata, dispatches the controller on public `main`, observes the final run, and reports only sanitized identifiers and conclusions. It cannot weaken profile contracts or turn a stale result green.
