@@ -1,0 +1,18 @@
+{
+  "requestId": "learning-content-resolution-v1-7d03a126",
+  "reportIssueNumber": 89,
+  "privateExactSha": "7d03a126d3e69ce319d364c109fb4111b1648fe2",
+  "expectedBaseSha": "90d653485250aadf1901127b183dc3cd35a56dbe",
+  "expectedMainSha": "90d653485250aadf1901127b183dc3cd35a56dbe",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": "7",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=0;python=0",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": true,
+  "runTypecheck": true,
+  "runProductionBuild": true,
+  "runCriticalE2E": false
+}
