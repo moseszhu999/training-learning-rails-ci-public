@@ -76,6 +76,7 @@ const STUDENT_CHILL_LEARNING_EXACT_FILES = new Set([
   'apps/training-web/src/lib/trainingos-student-chill-learning-adapter.ts',
   'apps/training-web/src/lib/trainingos-student-chill-learning-safe-adapter.ts',
   'apps/training-web/src/trainingos-student-chill-learning.css',
+  'apps/training-web/src/types/training-learning-workspace-adapters.d.ts',
   'docs/architecture/trainingos-student-chill-learning-experience-v1.md',
   'docs/testing/trainingos-student-chill-learning-validation-v1.md',
   'tests/test_trainingos_student_chill_learning_role_boundary_v1.py',
@@ -100,6 +101,7 @@ export function isStudentChillLearningFiles(files) {
     && names.includes('apps/training-web/src/components/TrainingOsStudentChillLearningShell.tsx')
     && names.includes('apps/training-web/src/lib/trainingos-student-chill-learning-adapter.ts')
     && names.includes('apps/training-web/src/lib/trainingos-student-chill-learning-safe-adapter.ts')
+    && names.includes('apps/training-web/src/types/training-learning-workspace-adapters.d.ts')
     && names.includes('tests/test_trainingos_student_chill_learning_role_boundary_v1.py')
     && names.includes('tests/trainingos-ui-e2e/student-chill-learning-shell-v1.spec.ts')
     && !names.some((name) => name.startsWith('supabase/migrations/'))
