@@ -1,0 +1,18 @@
+{
+  "requestId": "invite-growth-pr374-d2b08d1c-v11",
+  "reportIssueNumber": 132,
+  "privateExactSha": "d2b08d1cc82a94aa808c937912cb533d8eb2c082",
+  "expectedBaseSha": "b761e8284074d43a86ece93b009948d104e852d7",
+  "expectedMainSha": "",
+  "validationProfile": "challenge-runtime",
+  "expectedChangedFileCount": "16",
+  "expectedMigrationRange": "20260730120000-20260730125959",
+  "expectedFocusedTestCounts": "node=7;python=18",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": false,
+  "runTypecheck": false,
+  "runProductionBuild": false,
+  "runCriticalE2E": false
+}
