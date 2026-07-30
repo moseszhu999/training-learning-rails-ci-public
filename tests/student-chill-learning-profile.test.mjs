@@ -16,6 +16,7 @@ const exactFiles = [
   'apps/training-web/src/lib/trainingos-student-chill-learning-adapter.ts',
   'apps/training-web/src/lib/trainingos-student-chill-learning-safe-adapter.ts',
   'apps/training-web/src/trainingos-student-chill-learning.css',
+  'apps/training-web/src/types/training-learning-workspace-adapters.d.ts',
   'docs/architecture/trainingos-student-chill-learning-experience-v1.md',
   'docs/testing/trainingos-student-chill-learning-validation-v1.md',
   'tests/test_trainingos_student_chill_learning_role_boundary_v1.py',
@@ -23,9 +24,10 @@ const exactFiles = [
   'tests/trainingos-ui-e2e/student-chill-learning-shell-v1.spec.ts',
 ];
 
-test('student chill suite selects only the exact eleven-file migration-free surface', () => {
+test('student chill suite selects only the exact twelve-file migration-free surface', () => {
   assert.equal(isStudentChillLearningFiles(exactFiles), true);
   assert.equal(isStudentChillLearningFiles(exactFiles.slice(1)), false);
+  assert.equal(isStudentChillLearningFiles(exactFiles.filter((name) => !name.endsWith('.d.ts'))), false);
   assert.equal(isStudentChillLearningFiles([
     ...exactFiles,
     'supabase/migrations/20260731100000_forbidden.sql',
