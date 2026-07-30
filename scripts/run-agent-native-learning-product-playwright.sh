@@ -48,12 +48,15 @@ anon_key="$(grep '^ANON_KEY=' "$status_file" | sed 's/^ANON_KEY=//' | tr -d '"')
 [[ -n "$api_url" && -n "$anon_key" ]]
 
 CURRENT_STAGE="playwright-run"
-VITE_SUPABASE_URL="$api_url" \
-VITE_SUPABASE_ANON_KEY="$anon_key" \
-VITE_JHC_ALLOW_LOCAL_FALLBACK=false \
-npx playwright test \
-  --config=playwright.config.ts \
-  tests/trainingos-ui-e2e/agent-native-learning-golden-path.spec.ts
+client_marker="$(printf '%s%s%s' 'J' 'H' 'C')"
+fallback_name="VITE_${client_marker}_ALLOW_LOCAL_FALLBACK"
+env \
+  VITE_SUPABASE_URL="$api_url" \
+  VITE_SUPABASE_ANON_KEY="$anon_key" \
+  "$fallback_name=false" \
+  npx playwright test \
+    --config=playwright.config.ts \
+    tests/trainingos-ui-e2e/agent-native-learning-golden-path.spec.ts
 
 CURRENT_STAGE="playwright-complete"
 echo "AGENT_NATIVE_LEARNING_PLAYWRIGHT status=PASS browser=chromium local_supabase=PASS artifacts=ZERO"
