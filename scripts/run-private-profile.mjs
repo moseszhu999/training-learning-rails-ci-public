@@ -22,6 +22,12 @@ async function readSealedProfileLog(runnerTemp, index) {
   }
 }
 
+function supportsSanitizedDiagnostics(profile, selectedSuite) {
+  return profile === 'challenge-web'
+    || selectedSuite === 'youth-learning'
+    || selectedSuite === 'student-chill-learning';
+}
+
 export function formatPublicProfileStatus({
   profile,
   selectedSuite,
@@ -29,9 +35,7 @@ export function formatPublicProfileStatus({
   typecheckDiagnostics,
   buildSubstage,
 }) {
-  const supportsSanitizedDiagnostics = profile === 'challenge-web'
-    || selectedSuite === 'youth-learning';
-  if (!supportsSanitizedDiagnostics || status === 'PASS') return status;
+  if (!supportsSanitizedDiagnostics(profile, selectedSuite) || status === 'PASS') return status;
   return `${status}|ts=${typecheckDiagnostics}|build=${buildSubstage}`;
 }
 
@@ -61,9 +65,7 @@ async function main() {
 
   let typecheckDiagnostics = 'NOT_APPLICABLE';
   let buildSubstage = 'NOT_APPLICABLE';
-  const supportsSanitizedDiagnostics = profile === 'challenge-web'
-    || result.selectedSuite === 'youth-learning';
-  if (supportsSanitizedDiagnostics) {
+  if (supportsSanitizedDiagnostics(profile, result.selectedSuite)) {
     if (result.failedLabels.includes('typecheck')) {
       typecheckDiagnostics = sanitizeTypeScriptDiagnostics(
         await readSealedProfileLog(runnerTemp, 3),
