@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 const challengeToken = '(challenge|invite|growth|attribution|evaluation|proof|sharing|entitlement|offer|launch)';
 const customerEntry = new RegExp(`^apps/training-web/src/components/${['J', 'h', 'c', 'TrainingAdvancedEntrySurface'].join('')}\\.tsx$`);
 const privilegedKeyPattern = new RegExp(`${['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_')}\\s*[:=]\\s*[^\\s\u0060]+`);
+const agentNativeToken = '(agent-native|golden-path|learning|challenge|composer|recipe|workbuddy|hint|evidence|review|attempt|submission|content-resolution)';
+const clientSource = /^(apps\/training-web\/src|extensions\/trainingos-classroom-vscode\/src)\//;
+const clientServiceRole = /\bservice_role\b|SUPABASE_SERVICE_ROLE_KEY|VITE_[A-Z0-9_]*SERVICE_ROLE/i;
+const clientDirectWrite = /\b(?:supabase|supabaseClient)\s*(?:\?\.)?\.\s*(?:rpc\s*\(|from\s*\([^)]*\)[\s\S]{0,500}?\.\s*(?:insert|update|upsert|delete)\s*\()/i;
 
 export const profileAllowlist = Object.freeze({
   'challenge-runtime': [
@@ -37,6 +41,20 @@ export const profileAllowlist = Object.freeze({
     /^lib\/trainingos-agent-gateway\/.*teacher.*(hub|operations|adapter)/,
     /^tests\/.*teacher.*(hub|operations).*/,
     /^docs\/(architecture|verification|testing|product)\/.*teacher.*(hub|operations).*\.md$/,
+  ],
+  'agent-native-learning-product': [
+    /^api\/integrations\/agents\/mcp\.mjs$/,
+    /^netlify\/functions\/trainingos-mcp\.mjs$/,
+    new RegExp(`^lib/trainingos-agent-gateway/.*${agentNativeToken}.*\\.(mjs|js|ts)$`, 'i'),
+    /^apps\/training-web\/src\/.*\.(ts|tsx|css)$/,
+    new RegExp(`^prototypes/trainingos-agent-mvp-v1/.*${agentNativeToken}.*\\.(mjs|js)$`, 'i'),
+    /^tests\/test_trainingos_agent_native_learning_golden_path_contract\.py$/,
+    /^tests\/trainingos-ui-e2e\/agent-native-learning-golden-path\.spec\.ts$/,
+    /^tests\/sql\/trainingos_agent_native_learning_golden_path_(e2e|cleanup_e2e)\.sql$/,
+    new RegExp(`^tests/.*${agentNativeToken}.*\\.(py|sql|mjs|js|ts|tsx)$`, 'i'),
+    new RegExp(`^docs/(architecture|verification|testing|product)/.*${agentNativeToken}.*\\.md$`, 'i'),
+    /^package\.json$/,
+    /^playwright\.config\.ts$/,
   ],
   'docs-launch': [/^docs\//, /^README\.md$/],
 });
@@ -80,6 +98,20 @@ async function inspectChangedFiles(input, changedFiles, failures) {
       && /@supabase\/supabase-js|createClient\s*\(|\bsupabase\s*\./.test(text)
     ) {
       failures.push('directSupabase');
+    }
+    if (
+      input.validationProfile === 'agent-native-learning-product'
+      && clientSource.test(name)
+      && clientDirectWrite.test(text)
+    ) {
+      failures.push('directSupabaseWrite');
+    }
+    if (
+      input.validationProfile === 'agent-native-learning-product'
+      && clientSource.test(name)
+      && clientServiceRole.test(text)
+    ) {
+      failures.push('clientServiceRole');
     }
     if (input.validationProfile === 'docs-launch' && /(?:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i.test(text)) {
       failures.push('piiEmail');
