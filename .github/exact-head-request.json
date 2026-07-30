@@ -1,0 +1,18 @@
+{
+  "requestId": "learning-assistance-governance-pr400-0f69c48e-v3",
+  "privateExactSha": "0f69c48e503f4d6797352d3cf182c2e617d31cfd",
+  "expectedBaseSha": "00985b1c08f7ef421db6be19e0e6e5a1ca1cd8e4",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": 12,
+  "expectedMigrationRange": "20260730150000-20260730155959",
+  "expectedFocusedTestCounts": "node=7;python=8",
+  "expectedMigrationCount": 3,
+  "runFreshReplay": true,
+  "runUpgradeReplay": true,
+  "runApplicationContracts": true,
+  "runTypecheck": true,
+  "runProductionBuild": true,
+  "runCriticalE2E": true,
+  "reportIssueNumber": 263,
+  "publicControllerMain": "383586c859858cabac3f1e9be0fe4366a0766251"
+}
