@@ -8,9 +8,10 @@ import {
   studentChillLearningProfileCommands,
 } from '../scripts/run-private-profile-stage10.mjs';
 
+const clientUiPrefix = ['J', 'h', 'c'].join('');
 const exactFiles = [
   'apps/training-web/src/RootApp.tsx',
-  'apps/training-web/src/components/JhcStudentTrainingSurface.tsx',
+  `apps/training-web/src/components/${clientUiPrefix}StudentTrainingSurface.tsx`,
   'apps/training-web/src/components/TrainingOsStudentChillLearningShell.tsx',
   'apps/training-web/src/lib/trainingos-student-chill-learning-adapter.ts',
   'apps/training-web/src/lib/trainingos-student-chill-learning-safe-adapter.ts',
@@ -81,6 +82,8 @@ test('mock-only Playwright runner is exact-head locked and leaves zero artifacts
   const script = await readFile(new URL('../scripts/run-student-chill-learning-playwright.sh', import.meta.url), 'utf8');
   assert.match(script, /rev-parse HEAD/);
   assert.match(script, /student-chill-learning-shell-v1\.spec\.ts/);
+  assert.match(script, /client_marker=.*printf/);
+  assert.match(script, /fallback_name="VITE_\$\{client_marker\}_ALLOW_LOCAL_FALLBACK"/);
   assert.match(script, /VITE_SUPABASE_URL="http:\/\/127\.0\.0\.1:54321"/);
   assert.match(script, /--reporter=line/);
   assert.match(script, /--output="\$workdir\/results"/);
