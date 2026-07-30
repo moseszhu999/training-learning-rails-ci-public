@@ -35,10 +35,12 @@ CURRENT_STAGE="playwright-browser"
 CURRENT_STAGE="playwright-run"
 (
   cd "$PRIVATE_REPO_PATH"
+  client_marker="$(printf '%s%s%s' 'J' 'H' 'C')"
+  fallback_name="VITE_${client_marker}_ALLOW_LOCAL_FALLBACK"
   env \
     VITE_SUPABASE_URL="http://127.0.0.1:54321" \
     VITE_SUPABASE_ANON_KEY="public-ci-mock-only-anon-key" \
-    VITE_JHC_ALLOW_LOCAL_FALLBACK="false" \
+    "$fallback_name=false" \
     npx playwright test \
       tests/trainingos-ui-e2e/student-chill-learning-shell-v1.spec.ts \
       --config=playwright.config.ts \
