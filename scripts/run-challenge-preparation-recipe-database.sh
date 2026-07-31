@@ -13,6 +13,14 @@ for name in "${required[@]}"; do
 done
 
 supabase_cli(){ npx --yes supabase@latest "$@"; }
+manifest_count(){
+  python - "$1" <<'PY'
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+print(manifest.get('migrationCount', -1))
+PY
+}
+
 scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
 [[ -f "$scope_file" ]]
 read_scope(){ awk -F= -v wanted="$1" '$1 == wanted { print substr($0,index($0,"=")+1); exit }' "$scope_file"; }
@@ -22,6 +30,7 @@ expected_base_sha="$(read_scope expected_base_sha)"
 expected_changed_file_count="$(read_scope expected_changed_file_count)"
 migration_start="$(read_scope migration_start)"
 migration_end="$(read_scope migration_end)"
+base_migration_count=352
 [[ "$(read_scope validation_profile)" == generic-owned ]]
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ && "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$expected_changed_file_count" == 10 ]]
@@ -91,7 +100,7 @@ python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
   --output-dir "$fresh_project/supabase/migrations" \
   --commit-sha "$PRIVATE_EXACT_SHA"
 CURRENT_STAGE="fresh-manifest"
-generated_migration_count="$(find "$fresh_project/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+generated_migration_count="$(manifest_count "$fresh_project/supabase/trainingos-bootstrap-manifest.json")"
 [[ "$generated_migration_count" == "$EXPECTED_MIGRATION_COUNT" ]]
 CURRENT_STAGE="fresh-start"
 supabase_cli --workdir "$fresh_project" start
@@ -120,10 +129,15 @@ python "$base_worktree/scripts/build-trainingos-fresh-bootstrap.py" \
   --repo-root "$base_worktree" \
   --output-dir "$upgrade_project/supabase/migrations" \
   --commit-sha "$expected_base_sha"
+CURRENT_STAGE="upgrade-manifest"
+[[ "$(manifest_count "$upgrade_project/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
 CURRENT_STAGE="upgrade-start"
 supabase_cli --workdir "$upgrade_project" start
-CURRENT_STAGE="upgrade-migration"
+CURRENT_STAGE="upgrade-base-reset"
+supabase_cli --workdir "$upgrade_project" db reset --local --no-seed
+CURRENT_STAGE="upgrade-copy-migration"
 cp "$PRIVATE_REPO_PATH/$migration" "$upgrade_project/supabase/migrations/"
+CURRENT_STAGE="upgrade-apply"
 supabase_cli --workdir "$upgrade_project" migration up --local --include-all
 CURRENT_STAGE="upgrade-status"
 upgrade_status="$RUNNER_TEMP/trainingos-challenge-preparation-upgrade.env"
