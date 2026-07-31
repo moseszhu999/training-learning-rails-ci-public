@@ -11,18 +11,24 @@ test('Learning Workspace contract-fix profile is fixed to one private file', () 
   assert.match(profile, /files\.every\(\(file\) => EXACT_FILES\.has\(file\)\)/);
 });
 
-test('Learning Workspace contract-fix profile runs bounded validation', () => {
+test('Learning Workspace contract-fix profile runs bounded fixed substages', () => {
   for (const marker of [
-    "label: 'python-contract'",
-    "tests.test_trainingos_learning_workspace_web_adapter_contract",
-    "label: 'learning-workspace-validation'",
-    "scripts/run-trainingos-learning-workspace-bridge-validation.mjs",
-    "label: 'typecheck'",
-    "label: 'production-build'",
+    "command('python-contract'",
+    'tests.test_trainingos_learning_workspace_web_adapter_contract',
+    "command('workspace-node-contracts'",
+    "command('workspace-python-bridge'",
+    "command('workspace-python-assessment'",
+    "command('workspace-python-vscode-classroom'",
+    "command('workspace-python-student-exercise'",
+    "command('workspace-python-vscode-exercise'",
+    "command('workspace-python-assessment-resume'",
+    "command('typecheck'",
+    "command('production-build'",
     'Number(input.expectedNodeCount) === 0',
     'Number(input.expectedPythonCount) === 14',
     'pythonTests === 14',
   ]) assert.match(profile, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(profile, /run-trainingos-learning-workspace-bridge-validation\.mjs/);
 });
 
 test('generic-owned router selects the fixed profile before broad fallback', () => {
