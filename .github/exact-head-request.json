@@ -1,0 +1,18 @@
+{
+  "requestId": "learning-content-resolution-app-0951c061-v3",
+  "reportIssueNumber": 89,
+  "privateExactSha": "0951c061c361cd66177f65b48979e7f827b83fb5",
+  "expectedBaseSha": "0314b0b5fa080812e79960929d65760c5470b246",
+  "expectedMainSha": "0314b0b5fa080812e79960929d65760c5470b246",
+  "validationProfile": "learning-content-resolution",
+  "expectedChangedFileCount": "7",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=7;python=8",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": true,
+  "runTypecheck": true,
+  "runProductionBuild": true,
+  "runCriticalE2E": false
+}
