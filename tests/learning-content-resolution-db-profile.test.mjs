@@ -26,6 +26,12 @@ test('exact private scope is four fixed files and one exact migration', () => {
   assert.match(runner, /20260731100000_trainingos_learning_content_resolution_projection_v1\.sql/);
 });
 
+test('focused Python contract count is fixed to seven', () => {
+  assert.match(profile, /Number\(input\.expectedPythonCount\) === 7/);
+  assert.match(profile, /pythonTests === 7/);
+  assert.doesNotMatch(profile, /expectedPythonCount\) === 6/);
+});
+
 test('database runner locks fresh repeat upgrade SQL E2E and zero residue', () => {
   for (const token of [
     'fresh-reset-one',
