@@ -7,32 +7,52 @@ const EXACT_FILES = new Set([
   'tests/test_trainingos_learning_workspace_web_adapter_contract.py',
 ]);
 
+const command = (label, executable, args, kind = 'status') => Object.freeze({
+  label,
+  executable,
+  args: Object.freeze(args),
+  kind,
+});
+
 const commands = Object.freeze([
-  Object.freeze({ label: 'install', executable: 'npm', args: Object.freeze(['ci']), kind: 'status' }),
-  Object.freeze({
-    label: 'python-contract',
-    executable: 'python',
-    args: Object.freeze([
-      '-m',
-      'unittest',
-      '-v',
-      'tests.test_trainingos_learning_workspace_web_adapter_contract',
-    ]),
-    kind: 'python',
-  }),
-  Object.freeze({
-    label: 'learning-workspace-validation',
-    executable: 'node',
-    args: Object.freeze(['scripts/run-trainingos-learning-workspace-bridge-validation.mjs']),
-    kind: 'status',
-  }),
-  Object.freeze({ label: 'typecheck', executable: 'npm', args: Object.freeze(['run', 'typecheck']), kind: 'status' }),
-  Object.freeze({
-    label: 'production-build',
-    executable: 'npx',
-    args: Object.freeze(['vite', 'build', '--config', 'vite.config.ts']),
-    kind: 'status',
-  }),
+  command('install', 'npm', ['ci']),
+  command('python-contract', 'python', [
+    '-m',
+    'unittest',
+    '-v',
+    'tests.test_trainingos_learning_workspace_web_adapter_contract',
+  ], 'python'),
+  command('workspace-node-contracts', 'node', [
+    '--test',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-bridge.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-native-classroom-coding-adapter.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-native-classroom-web-adapter.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-exercise-activity-projection.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/learning-workspace-assessment-activity-projection.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/student-learning-inbox.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/student-exercise-execution.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/student-assessment-resume.test.mjs',
+  ]),
+  command('workspace-python-bridge', 'python', [
+    'tests/test_trainingos_learning_workspace_bridge_contract.py',
+  ]),
+  command('workspace-python-assessment', 'python', [
+    'tests/test_trainingos_learning_workspace_assessment_projection_contract.py',
+  ]),
+  command('workspace-python-vscode-classroom', 'python', [
+    'tests/test_trainingos_vscode_classroom_extension_contract.py',
+  ]),
+  command('workspace-python-student-exercise', 'python', [
+    'tests/test_trainingos_student_exercise_execution_contract.py',
+  ]),
+  command('workspace-python-vscode-exercise', 'python', [
+    'tests/test_trainingos_vscode_exercise_execution_contract.py',
+  ]),
+  command('workspace-python-assessment-resume', 'python', [
+    'tests/test_trainingos_assessment_resume_execution_contract.py',
+  ]),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
 
 function parsePython(text) {
