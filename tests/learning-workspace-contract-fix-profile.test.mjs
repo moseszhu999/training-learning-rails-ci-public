@@ -5,8 +5,9 @@ import { readFileSync } from 'node:fs';
 const profile = readFileSync(new URL('../scripts/run-learning-workspace-contract-fix-profile.mjs', import.meta.url), 'utf8');
 const router = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
 
-test('Learning Workspace contract-fix profile is fixed to one private file', () => {
+test('Learning Workspace contract-fix profile is fixed to two private contract files', () => {
   assert.match(profile, /tests\/test_trainingos_learning_workspace_web_adapter_contract\.py/);
+  assert.match(profile, /tests\/test_trainingos_learning_workspace_assessment_projection_contract\.py/);
   assert.match(profile, /files\.length === EXACT_FILES\.size/);
   assert.match(profile, /files\.every\(\(file\) => EXACT_FILES\.has\(file\)\)/);
 });
@@ -18,6 +19,8 @@ test('Learning Workspace contract-fix profile runs bounded fixed substages', () 
     "command('workspace-node-contracts'",
     "command('workspace-python-bridge'",
     "command('workspace-python-assessment'",
+    "tests/test_trainingos_learning_workspace_assessment_projection_contract.py",
+    "], 'python')",
     "command('workspace-python-vscode-classroom'",
     "command('workspace-python-student-exercise'",
     "command('workspace-python-vscode-exercise'",
@@ -25,8 +28,8 @@ test('Learning Workspace contract-fix profile runs bounded fixed substages', () 
     "command('typecheck'",
     "command('production-build'",
     'Number(input.expectedNodeCount) === 0',
-    'Number(input.expectedPythonCount) === 14',
-    'pythonTests === 14',
+    'Number(input.expectedPythonCount) === 24',
+    'pythonTests === 24',
   ]) assert.match(profile, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(profile, /run-trainingos-learning-workspace-bridge-validation\.mjs/);
 });
