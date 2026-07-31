@@ -14,6 +14,7 @@ export const standardValidationProfiles = Object.freeze([
   'docs-launch',
   'education-ecosystem',
   'agent-native-learning-product',
+  'learning-content-resolution',
   'generic-owned',
 ]);
 
@@ -83,6 +84,28 @@ export function validateInputs(input) {
     if (expectedFocusedTestCounts !== 'node=0;python=0') failures.push('agentNativeLearningFocusedCountSentinel');
     for (const [name, value] of Object.entries(runFlags)) {
       if (String(value) !== 'false') failures.push(`agentNativeLearning:${name}`);
+    }
+  }
+
+  if (validationProfile === 'learning-content-resolution') {
+    if (expectedChangedFileCount !== '7') failures.push('learningContentResolutionChangedFileCount');
+    if (expectedMigrationRange !== 'none') failures.push('learningContentResolutionMigrationRange');
+    if (String(expectedMigrationCount) !== '0') failures.push('learningContentResolutionMigrationCount');
+    if (expectedFocusedTestCounts !== 'node=7;python=8') {
+      failures.push('learningContentResolutionFocusedTestCounts');
+    }
+    const requiredFlags = {
+      runFreshReplay: 'false',
+      runUpgradeReplay: 'false',
+      runApplicationContracts: 'true',
+      runTypecheck: 'true',
+      runProductionBuild: 'true',
+      runCriticalE2E: 'false',
+    };
+    for (const [name, expected] of Object.entries(requiredFlags)) {
+      if (String(runFlags[name]) !== expected) {
+        failures.push(`learningContentResolution:${name}`);
+      }
     }
   }
 
