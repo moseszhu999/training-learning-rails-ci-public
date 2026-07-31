@@ -23,6 +23,7 @@ challenge-runtime
 challenge-web
 teacher-hub
 docs-launch
+learning-content-resolution
 generic-owned
 main-release
 ```
@@ -33,7 +34,8 @@ Inputs may declare SHAs, counts, ranges, booleans, and a profile. They cannot su
 - `challenge-web` enforces the route allowlist, direct-Supabase prohibition, secret scan, typecheck, production build, and Playwright.
 - `teacher-hub` enforces Hub mount and role contracts, deep-link/stale/offline validation, typecheck/build, and Playwright.
 - `docs-launch` enforces docs-only scope, Markdown structure, secret/PII scanning, and no runtime, migration, UI, or Gateway delta.
-- `generic-owned` automatically selects reusable fixed suites only for exact owned scopes. `learning-content-resolution` runs fixed package/Gateway syntax, 7 Node contracts, 8 Python contracts, typecheck, and production build. `student-chill-learning` locks its exact 12-file, zero-migration student surface, including its narrow TypeScript declaration boundary, and runs 14 Python component/role contracts, typecheck, production build, and isolated mock-only Chromium Playwright. Neither suite mounts shared MCP or performs a production database write.
+- `learning-content-resolution` is the direct reusable application profile. It requires exactly seven changed files, zero migrations, exactly seven focused Node tests and eight focused Python tests, `runApplicationContracts=true`, `runTypecheck=true`, and `runProductionBuild=true`. Package and Gateway syntax checks are fixed internal commands and cannot be disabled. The exact file contract excludes UI and shared MCP files; the focused Python contract rejects direct table REST reads and service-role use.
+- `generic-owned` remains a backward-compatible selector for exact owned scopes. It can select the same `learning-content-resolution` command suite or the `student-chill-learning` suite. `student-chill-learning` locks its exact 12-file, zero-migration student surface, including its narrow TypeScript declaration boundary, and runs 14 Python component/role contracts, typecheck, production build, and isolated mock-only Chromium Playwright. Neither suite performs a production database write.
 - `main-release` enforces exact live private main, complete migration count and fingerprint, full-history fresh/second/upgrade replay, database and application contracts, Node/Python, typecheck/build, critical role E2E, and zero residue.
 
 The reusable request driver accepts only a same-repository pull request whose branch starts with `ci/exact-head-request/` and whose only request payload is `.github/exact-head-request.json`. The reviewed carrier supplies fixed metadata, dispatches the controller on public `main`, observes the final run, and reports only sanitized identifiers and conclusions. It cannot weaken profile contracts or turn a stale result green.
