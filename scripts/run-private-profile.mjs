@@ -3,6 +3,7 @@ export * from './youth-guardian-release-gate.mjs';
 export * from './run-agent-native-learning-product-profile.mjs';
 export * from './run-learning-content-resolution-db-profile.mjs';
 export * from './run-challenge-preparation-recipe-profile.mjs';
+export * from './run-learning-workspace-contract-fix-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,6 +12,7 @@ import { runProfile as runBaseProfile } from './run-private-profile-stage10.mjs'
 import { runAgentNativeLearningProductProfile } from './run-agent-native-learning-product-profile.mjs';
 import { maybeRunLearningContentResolutionDbProfile } from './run-learning-content-resolution-db-profile.mjs';
 import { maybeRunChallengePreparationRecipeProfile } from './run-challenge-preparation-recipe-profile.mjs';
+import { maybeRunLearningWorkspaceContractFixProfile } from './run-learning-workspace-contract-fix-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -49,6 +51,9 @@ export async function runProfile(input) {
   if (input.profile === 'agent-native-learning-product') {
     return runAgentNativeLearningProductProfile(input);
   }
+
+  const learningWorkspaceContractFix = await maybeRunLearningWorkspaceContractFixProfile(input);
+  if (learningWorkspaceContractFix) return learningWorkspaceContractFix;
 
   const challengePreparation = await maybeRunChallengePreparationRecipeProfile(input);
   if (challengePreparation) return challengePreparation;
