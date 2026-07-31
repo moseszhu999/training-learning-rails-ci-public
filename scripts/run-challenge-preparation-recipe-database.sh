@@ -47,6 +47,7 @@ CURRENT_STAGE="scope-migration-count"
 migration="supabase/migrations/20260731120000_trainingos_challenge_preparation_recipe_v1.sql"
 e2e="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_preparation_recipe_v1_e2e.sql"
 source_migration_count="$(find "$PRIVATE_REPO_PATH/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
+CURRENT_STAGE="scope-migration-count-${source_migration_count}"
 [[ "$source_migration_count" == "$EXPECTED_MIGRATION_COUNT" ]]
 [[ -f "$PRIVATE_REPO_PATH/$migration" && -f "$e2e" ]]
 
