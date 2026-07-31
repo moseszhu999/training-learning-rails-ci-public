@@ -1,12 +1,14 @@
 export * from './run-private-profile-stage10.mjs';
 export * from './youth-guardian-release-gate.mjs';
 export * from './run-agent-native-learning-product-profile.mjs';
+export * from './run-learning-content-resolution-db-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runProfile as runBaseProfile } from './run-private-profile-stage10.mjs';
 import { runAgentNativeLearningProductProfile } from './run-agent-native-learning-product-profile.mjs';
+import { maybeRunLearningContentResolutionDbProfile } from './run-learning-content-resolution-db-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -46,6 +48,9 @@ export async function runProfile(input) {
     return runAgentNativeLearningProductProfile(input);
   }
 
+  const databaseProjection = await maybeRunLearningContentResolutionDbProfile(input);
+  if (databaseProjection) return databaseProjection;
+
   const result = await runBaseProfile(input);
   if (input.profile !== 'challenge-web') return result;
 
@@ -64,6 +69,7 @@ async function main() {
   const result = await runProfile({
     profile,
     privateRepoPath: process.env.PRIVATE_REPO_PATH,
+    privateExactSha: process.env.PRIVATE_EXACT_SHA,
     runnerTemp,
     expectedNodeCount: process.env.EXPECTED_NODE_COUNT,
     expectedPythonCount: process.env.EXPECTED_PYTHON_COUNT,
