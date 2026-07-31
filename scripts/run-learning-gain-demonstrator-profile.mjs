@@ -8,6 +8,7 @@ const EXACT_FILES = new Set([
   'apps/training-web/src/components/TrainingOsLearningGainDemonstrator.tsx',
   'apps/training-web/src/lib/trainingos-learning-gain-projection.test.ts',
   'apps/training-web/src/lib/trainingos-learning-gain-projection.ts',
+  'apps/training-web/src/lib/trainingos-learning-gain-read-adapter.ts',
   'apps/training-web/src/trainingos-learning-gain-demonstrator.css',
   'docs/product/trainingos-learning-gain-demonstrator-v1.md',
   'tests/test_trainingos_learning_gain_demonstrator_v1_contract.py',
