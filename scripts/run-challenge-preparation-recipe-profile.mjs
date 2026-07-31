@@ -13,7 +13,7 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
 });
 
 const SAFE_DATABASE_STAGES = new Set([
-  'scope-file', 'scope-contract',
+  'scope-file', 'scope-inputs', 'scope-files', 'scope-migration-count', 'scope-head', 'scope-e2e-contract',
   'fresh-init', 'fresh-bootstrap', 'fresh-manifest', 'fresh-start',
   'fresh-reset-one', 'fresh-reset-two', 'fresh-status', 'fresh-e2e', 'fresh-stop',
   'upgrade-worktree', 'upgrade-init', 'upgrade-bootstrap', 'upgrade-start',
