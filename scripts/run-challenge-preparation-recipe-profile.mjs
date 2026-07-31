@@ -90,6 +90,7 @@ function parsePython(text) {
 export function sanitizeChallengePreparationDatabaseStage(text) {
   const matches = [...text.matchAll(/CHALLENGE_DATABASE status=FAIL stage=([a-z0-9-]+)/g)];
   const candidate = matches.at(-1)?.[1] ?? 'unknown';
+  if (/^scope-migration-count-[0-9]+$/.test(candidate)) return candidate;
   return SAFE_DATABASE_STAGES.has(candidate) ? candidate : 'unknown';
 }
 
