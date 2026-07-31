@@ -1,0 +1,18 @@
+{
+  "requestId": "learning-content-resolution-db-history-2ed2819f-v2",
+  "reportIssueNumber": 89,
+  "privateExactSha": "2ed2819f490d214df9ee1f92b824f92338306df9",
+  "expectedBaseSha": "0314b0b5fa080812e79960929d65760c5470b246",
+  "expectedMainSha": "",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": "4",
+  "expectedMigrationRange": "20260731110000-20260731110000",
+  "expectedFocusedTestCounts": "node=0;python=9",
+  "expectedMigrationCount": "354",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": false,
+  "runTypecheck": false,
+  "runProductionBuild": false,
+  "runCriticalE2E": false
+}
