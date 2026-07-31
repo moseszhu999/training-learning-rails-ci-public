@@ -1,10 +1,12 @@
 export * from './run-private-profile-stage10.mjs';
 export * from './youth-guardian-release-gate.mjs';
+export * from './run-agent-native-learning-product-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runProfile as runBaseProfile } from './run-private-profile-stage10.mjs';
+import { runAgentNativeLearningProductProfile } from './run-agent-native-learning-product-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -40,6 +42,10 @@ export function formatPublicProfileStatus({
 }
 
 export async function runProfile(input) {
+  if (input.profile === 'agent-native-learning-product') {
+    return runAgentNativeLearningProductProfile(input);
+  }
+
   const result = await runBaseProfile(input);
   if (input.profile !== 'challenge-web') return result;
 

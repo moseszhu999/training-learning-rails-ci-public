@@ -31,6 +31,7 @@ on:
           - challenge-web
           - teacher-hub
           - docs-launch
+          - agent-native-learning-product
           - generic-owned
           - main-release
       expectedChangedFileCount:
@@ -46,7 +47,7 @@ on:
         required: true
         type: string
       expectedMigrationCount:
-        description: Complete canonical migration count for challenge-runtime or main-release
+        description: Canonical count for release profiles; exact changed count for agent-native-learning-product
         required: false
         default: '0'
         type: string
@@ -110,7 +111,7 @@ jobs:
           python-version: '3.12'
 
       - name: Set up Supabase CLI for database profiles
-        if: inputs.validationProfile == 'main-release' || inputs.validationProfile == 'challenge-runtime'
+        if: inputs.validationProfile == 'main-release' || inputs.validationProfile == 'challenge-runtime' || inputs.validationProfile == 'agent-native-learning-product'
         uses: supabase/setup-cli@v2
         with:
           version: latest
@@ -125,6 +126,10 @@ jobs:
             npm test
             bash -n scripts/run-main-release-database.sh
             shellcheck scripts/run-main-release-database.sh
+            bash -n scripts/run-agent-native-learning-product-playwright.sh
+            shellcheck scripts/run-agent-native-learning-product-playwright.sh
+            bash -n scripts/run-agent-native-learning-product-database.sh
+            shellcheck scripts/run-agent-native-learning-product-database.sh
           } > "$RUNNER_TEMP/trainingos-public-contracts.log" 2>&1
           code=$?
           [[ "$code" == 0 ]] && echo 'status=PASS' >> "$GITHUB_OUTPUT" || echo 'status=FAIL' >> "$GITHUB_OUTPUT"
@@ -379,4 +384,5 @@ jobs:
         run: |
           rm -rf private-repo private-main \
             "$RUNNER_TEMP"/trainingos-main-release-* \
+            "$RUNNER_TEMP"/trainingos-agent-native-learning-* \
             "$RUNNER_TEMP"/trainingos-*.log
