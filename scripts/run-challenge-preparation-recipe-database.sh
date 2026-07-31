@@ -17,7 +17,7 @@ scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
 [[ -f "$scope_file" ]]
 read_scope(){ awk -F= -v wanted="$1" '$1 == wanted { print substr($0,index($0,"=")+1); exit }' "$scope_file"; }
 
-CURRENT_STAGE="scope-contract"
+CURRENT_STAGE="scope-inputs"
 expected_base_sha="$(read_scope expected_base_sha)"
 expected_changed_file_count="$(read_scope expected_changed_file_count)"
 migration_start="$(read_scope migration_start)"
@@ -28,6 +28,7 @@ migration_end="$(read_scope migration_end)"
 [[ "$EXPECTED_MIGRATION_COUNT" == 355 ]]
 [[ "$migration_start" == 20260731120000 && "$migration_end" == 20260731120000 ]]
 
+CURRENT_STAGE="scope-files"
 expected_files="$(printf '%s\n' \
   docs/architecture/trainingos-challenge-preparation-recipe-v1.md \
   docs/testing/trainingos-challenge-preparation-recipe-validation-v1.md \
@@ -42,13 +43,18 @@ expected_files="$(printf '%s\n' \
 changed_files="$(git -C "$PRIVATE_REPO_PATH" diff --name-only "$expected_base_sha" "$PRIVATE_EXACT_SHA" | sort)"
 [[ "$changed_files" == "$expected_files" ]]
 
+CURRENT_STAGE="scope-migration-count"
 migration="supabase/migrations/20260731120000_trainingos_challenge_preparation_recipe_v1.sql"
 e2e="$PRIVATE_REPO_PATH/tests/sql/trainingos_challenge_preparation_recipe_v1_e2e.sql"
 source_migration_count="$(find "$PRIVATE_REPO_PATH/supabase/migrations" -maxdepth 1 -type f -name '*.sql' | wc -l | tr -d ' ')"
 [[ "$source_migration_count" == "$EXPECTED_MIGRATION_COUNT" ]]
 [[ -f "$PRIVATE_REPO_PATH/$migration" && -f "$e2e" ]]
+
+CURRENT_STAGE="scope-head"
 [[ "$(git -C "$PRIVATE_REPO_PATH" rev-parse HEAD)" == "$PRIVATE_EXACT_SHA" ]]
 [[ "$(git -C "$PRIVATE_REPO_PATH" merge-base "$expected_base_sha" "$PRIVATE_EXACT_SHA")" == "$expected_base_sha" ]]
+
+CURRENT_STAGE="scope-e2e-contract"
 grep -Eiq '^[[:space:]]*begin;' "$e2e"
 grep -Eiq '^[[:space:]]*rollback;' "$e2e"
 ! grep -Eiq '^[[:space:]]*insert[[:space:]]+into[[:space:]]+public\.' "$e2e"
