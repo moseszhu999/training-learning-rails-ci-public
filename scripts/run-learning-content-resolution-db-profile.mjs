@@ -93,8 +93,8 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
   }
 
   const countsPassed = Number(input.expectedNodeCount) === 0
-    && Number(input.expectedPythonCount) === 6
-    && pythonTests === 6;
+    && Number(input.expectedPythonCount) === 7
+    && pythonTests === 7;
   const ok = passedStepCount === COMMANDS.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
