@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 
 const EXACT_FILES = new Set([
   'tests/test_trainingos_learning_workspace_web_adapter_contract.py',
+  'tests/test_trainingos_learning_workspace_assessment_projection_contract.py',
 ]);
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
@@ -38,7 +39,7 @@ const commands = Object.freeze([
   ]),
   command('workspace-python-assessment', 'python', [
     'tests/test_trainingos_learning_workspace_assessment_projection_contract.py',
-  ]),
+  ], 'python'),
   command('workspace-python-vscode-classroom', 'python', [
     'tests/test_trainingos_vscode_classroom_extension_contract.py',
   ]),
@@ -108,8 +109,8 @@ export async function maybeRunLearningWorkspaceContractFixProfile(input) {
   }
 
   const countsPassed = Number(input.expectedNodeCount) === 0
-    && Number(input.expectedPythonCount) === 14
-    && pythonTests === 14;
+    && Number(input.expectedPythonCount) === 24
+    && pythonTests === 24;
   const ok = passedStepCount === commands.length && countsPassed;
   const status = ok
     ? 'PASS'
