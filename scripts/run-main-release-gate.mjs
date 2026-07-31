@@ -249,7 +249,7 @@ export async function runMainReleaseGate(input) {
     for (const [label, executable, args] of buildCommands) {
       const result = await runFixed({ label, executable, args, cwd: input.privateRepoPath, runnerTemp: input.runnerTemp });
       buildOk &&= result.ok;
-      if (!result.ok) recordFailure(label, result, 'production-build');
+      if (!result.ok) recordFailure(label, result, label);
     }
     stages.productionBuild = buildOk ? 'PASS' : 'FAIL';
   }
