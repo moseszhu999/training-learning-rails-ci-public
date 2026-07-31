@@ -7,6 +7,7 @@ import {
   CHALLENGE_PREPARATION_EXACT_FILES,
   challengePreparationProfileCommands,
   isChallengePreparationRecipeFiles,
+  sanitizeChallengePreparationDatabaseStage,
 } from '../scripts/run-challenge-preparation-recipe-profile.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,8 +27,22 @@ test('fixed profile runs syntax, exact focused counts, build and database replay
   ]);
   const node = challengePreparationProfileCommands.find((item) => item.label === 'node-contract');
   const python = challengePreparationProfileCommands.find((item) => item.label === 'python-contract');
+  const database = challengePreparationProfileCommands.find((item) => item.label === 'database-replay');
   assert.equal(node.kind, 'node');
   assert.equal(python.kind, 'python');
+  assert.equal(database.kind, 'database');
+});
+
+test('database failure stage is allowlisted and private output stays sealed', () => {
+  assert.equal(
+    sanitizeChallengePreparationDatabaseStage('private output\nCHALLENGE_DATABASE status=FAIL stage=fresh-bootstrap reason=unclassified\n'),
+    'fresh-bootstrap',
+  );
+  assert.equal(
+    sanitizeChallengePreparationDatabaseStage('CHALLENGE_DATABASE status=FAIL stage=private-table-name reason=secret'),
+    'unknown',
+  );
+  assert.equal(sanitizeChallengePreparationDatabaseStage('no fixed status'), 'unknown');
 });
 
 test('database runner is exact-head, fresh, second, upgrade, rollback and cleanup bounded', async () => {

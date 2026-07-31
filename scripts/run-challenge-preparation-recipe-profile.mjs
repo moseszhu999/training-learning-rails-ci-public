@@ -12,6 +12,14 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
+const SAFE_DATABASE_STAGES = new Set([
+  'scope-file', 'scope-contract',
+  'fresh-init', 'fresh-bootstrap', 'fresh-manifest', 'fresh-start',
+  'fresh-reset-one', 'fresh-reset-two', 'fresh-status', 'fresh-e2e', 'fresh-stop',
+  'upgrade-worktree', 'upgrade-init', 'upgrade-bootstrap', 'upgrade-start',
+  'upgrade-migration', 'upgrade-status', 'upgrade-e2e', 'upgrade-stop', 'complete',
+]);
+
 export const CHALLENGE_PREPARATION_EXACT_FILES = Object.freeze(new Set([
   'docs/architecture/trainingos-challenge-preparation-recipe-v1.md',
   'docs/testing/trainingos-challenge-preparation-recipe-validation-v1.md',
@@ -53,7 +61,7 @@ export const challengePreparationProfileCommands = Object.freeze([
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
   command('database-replay', 'bash', [
     path.join(publicRoot, 'scripts/run-challenge-preparation-recipe-database.sh'),
-  ]),
+  ], 'database'),
 ]);
 
 export function isChallengePreparationRecipeFiles(files) {
@@ -77,6 +85,12 @@ function parsePython(text) {
   return {
     tests: [...text.matchAll(/Ran\s+(\d+)\s+tests?/g)].reduce((sum, match) => sum + Number(match[1]), 0),
   };
+}
+
+export function sanitizeChallengePreparationDatabaseStage(text) {
+  const matches = [...text.matchAll(/CHALLENGE_DATABASE status=FAIL stage=([a-z0-9-]+)/g)];
+  const candidate = matches.at(-1)?.[1] ?? 'unknown';
+  return SAFE_DATABASE_STAGES.has(candidate) ? candidate : 'unknown';
 }
 
 async function changedFiles({ privateRepoPath, runnerTemp }) {
@@ -104,6 +118,7 @@ async function runFixedProfile(input) {
   let nodeFailed = 0;
   let pythonTests = 0;
   let passedSteps = 0;
+  let databaseStage = 'not-run';
   const failedLabels = [];
 
   try {
@@ -125,6 +140,11 @@ async function runFixedProfile(input) {
         nodeFailed += parsed.failed;
       }
       if (item.kind === 'python') pythonTests += parsePython(output).tests;
+      if (item.kind === 'database') {
+        databaseStage = result.status === 0
+          ? 'complete'
+          : sanitizeChallengePreparationDatabaseStage(output);
+      }
       if (result.status === 0) passedSteps += 1;
       else failedLabels.push(item.label);
     }
@@ -139,11 +159,10 @@ async function runFixedProfile(input) {
     && nodeFailed === 0
     && pythonTests === expectedPython;
   const ok = passedSteps === challengePreparationProfileCommands.length && countsPassed;
+  const failure = failedLabels.length ? failedLabels.join(',') : 'focused-counts';
   return {
     ok,
-    status: ok
-      ? 'PASS'
-      : `FAIL:${failedLabels.length ? failedLabels.join(',') : 'focused-counts'}`,
+    status: ok ? 'PASS' : `FAIL:${failure}@${databaseStage}`,
     failedLabels: Object.freeze([...failedLabels]),
     stepCount: challengePreparationProfileCommands.length,
     passedStepCount: passedSteps,
