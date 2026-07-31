@@ -16,8 +16,9 @@ const SAFE_DATABASE_STAGES = new Set([
   'scope-file', 'scope-inputs', 'scope-files', 'scope-migration-count', 'scope-head', 'scope-e2e-contract',
   'fresh-init', 'fresh-bootstrap', 'fresh-manifest', 'fresh-start',
   'fresh-reset-one', 'fresh-reset-two', 'fresh-status', 'fresh-e2e', 'fresh-stop',
-  'upgrade-worktree', 'upgrade-init', 'upgrade-bootstrap', 'upgrade-start',
-  'upgrade-migration', 'upgrade-status', 'upgrade-e2e', 'upgrade-stop', 'complete',
+  'upgrade-worktree', 'upgrade-init', 'upgrade-bootstrap', 'upgrade-manifest', 'upgrade-start',
+  'upgrade-base-reset', 'upgrade-copy-migration', 'upgrade-apply',
+  'upgrade-status', 'upgrade-e2e', 'upgrade-stop', 'complete',
 ]);
 
 export const CHALLENGE_PREPARATION_EXACT_FILES = Object.freeze(new Set([
