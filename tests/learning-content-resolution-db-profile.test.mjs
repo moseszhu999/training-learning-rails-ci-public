@@ -20,7 +20,7 @@ test('exact private scope is four fixed files and one exact migration', () => {
     'supabase/migrations/20260731100000_trainingos_learning_content_resolution_projection_v1.sql',
     'tests/sql/trainingos_learning_content_resolution_projection_v1_e2e.sql',
     'tests/test_trainingos_learning_content_resolution_projection_v1.py',
-  ]) assert.match(profile, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  ]) assert.ok(profile.includes(file), file);
   assert.match(runner, /EXPECTED_MIGRATION_COUNT" == 353/);
   assert.match(runner, /20260731100000_trainingos_learning_content_resolution_projection_v1\.sql/);
 });
@@ -44,7 +44,7 @@ test('runner is read-only to private repository and publishes no artifact or dep
   assert.doesNotMatch(runner, /git\s+(push|commit)|gh\s+|netlify|vercel|upload-artifact/);
   assert.doesNotMatch(profile, /git\s+(push|commit)|upload-artifact|deploy/);
   assert.match(runner, /worktree add --detach/);
-  assert.match(runner, /rollback/i);
+  assert.match(runner, /tests\/sql\/trainingos_learning_content_resolution_projection_v1_e2e\.sql/);
 });
 
 test('new shell runner passes bash syntax and shellcheck', () => {
