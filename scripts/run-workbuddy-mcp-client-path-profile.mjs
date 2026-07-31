@@ -16,22 +16,27 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
+const pythonContractRunner = [
+  'import runpy',
+  "scope = runpy.run_path('tests/test_trainingos_workbuddy_mcp_acceptance_contract.py')",
+  "tests = sorted(value for name, value in scope.items() if name.startswith('test_') and callable(value))",
+  "assert len(tests) == 4, f'expected 4 tests, found {len(tests)}'",
+  'for test in tests:',
+  '    test()',
+  "print(f'Ran {len(tests)} tests')",
+].join('\n');
+
 const commands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('syntax-netlify-mcp', 'node', ['--check', 'netlify/functions/trainingos-mcp.mjs']),
   command('syntax-vercel-mcp', 'node', ['--check', 'api/integrations/agents/mcp.mjs']),
-  command('python-contract', 'python', [
-    '-m',
-    'pytest',
-    '-q',
-    'tests/test_trainingos_workbuddy_mcp_acceptance_contract.py',
-  ], 'python'),
+  command('python-contract', 'python', ['-c', pythonContractRunner], 'python'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
 
 function parsePython(text) {
-  const match = text.match(/(?:^|\s)(\d+)\s+passed(?:,|\s|$)/m);
+  const match = text.match(/Ran\s+(\d+)\s+tests?/m);
   return match ? Number(match[1]) : 0;
 }
 
