@@ -5,20 +5,51 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const EXACT_FILES = new Set([
+
+const PROJECTION_FILES = new Set([
   'docs/architecture/trainingos-learning-content-resolution-db-projection-v1.md',
   'supabase/migrations/20260731100000_trainingos_learning_content_resolution_projection_v1.sql',
   'tests/sql/trainingos_learning_content_resolution_projection_v1_e2e.sql',
   'tests/test_trainingos_learning_content_resolution_projection_v1.py',
 ]);
-const SAFE_DATABASE_STAGES = new Set([
-  'inputs','scope-contract','supabase-wrapper',
-  'fresh-init','fresh-bootstrap','fresh-migration-count','fresh-start','fresh-reset-one','fresh-reset-two',
-  'fresh-status','fresh-sql-e2e','fresh-zero-residue','fresh-stop',
-  'upgrade-worktree','upgrade-init','upgrade-bootstrap','upgrade-migration-count','upgrade-start',
-  'upgrade-base-reset','upgrade-copy-migration','upgrade-apply','upgrade-status','upgrade-sql-e2e',
-  'upgrade-zero-residue','upgrade-stop','complete',
+
+const HISTORY_FIX_FILES = new Set([
+  'docs/architecture/trainingos-learning-content-resolution-db-projection-v1.md',
+  'supabase/migrations/20260731110000_trainingos_lcr_historical_rights_fix_v1.sql',
+  'tests/sql/trainingos_learning_content_resolution_projection_v1_e2e.sql',
+  'tests/test_trainingos_learning_content_resolution_projection_v1.py',
 ]);
+
+const VARIANTS = Object.freeze({
+  projection: Object.freeze({
+    key: 'projection-v1',
+    files: PROJECTION_FILES,
+    migrationStart: '20260731100000',
+    migrationEnd: '20260731100000',
+    canonicalMigrationCount: 353,
+    pythonCount: 7,
+    selectedSuite: 'learning-content-resolution-db',
+  }),
+  historyFix: Object.freeze({
+    key: 'history-fix',
+    files: HISTORY_FIX_FILES,
+    migrationStart: '20260731110000',
+    migrationEnd: '20260731110000',
+    canonicalMigrationCount: 354,
+    pythonCount: 9,
+    selectedSuite: 'learning-content-resolution-db-history-fix',
+  }),
+});
+
+const SAFE_DATABASE_STAGES = new Set([
+  'inputs', 'scope-contract', 'supabase-wrapper',
+  'fresh-init', 'fresh-bootstrap', 'fresh-migration-count', 'fresh-start', 'fresh-reset-one', 'fresh-reset-two',
+  'fresh-status', 'fresh-sql-e2e', 'fresh-zero-residue', 'fresh-stop',
+  'upgrade-worktree', 'upgrade-init', 'upgrade-bootstrap', 'upgrade-migration-count', 'upgrade-start',
+  'upgrade-base-reset', 'upgrade-copy-migration', 'upgrade-apply', 'upgrade-status', 'upgrade-sql-e2e',
+  'upgrade-zero-residue', 'upgrade-stop', 'complete',
+]);
+
 const SAFE_E2E_REASONS = new Set([
   'TRAININGOS_LCR_CLASS_PLAN_REQUIRED',
   'TRAININGOS_LCR_ZERO_WRITE_ASSERTION_FAILED',
@@ -52,6 +83,16 @@ const SAFE_E2E_REASONS = new Set([
   'TRAININGOS_LCR_E2E_REVOCATION_FAILED',
   'TRAININGOS_LCR_E2E_ROLE_DENIALS_FAILED',
   'TRAININGOS_LCR_E2E_STAGE_FAILED',
+  'TRAININGOS_LCR_HISTORY_ACTIVE_EXACT_RIGHTS_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_ENDED_AGREEMENT_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_NO_ACTIVE_ACCOUNT_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_CROSS_CLASS_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_OWNER_VERSION_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_TERMINATED_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_REPLACED_ACCOUNT_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_STATUS_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_SYMMETRY_ASSERTION_FAILED',
+  'TRAININGOS_LCR_HISTORY_LOCAL_CONTENT_ASSERTION_FAILED',
 ]);
 
 const command = (label, executable, args, kind = 'status') => ({ label, executable, args, kind });
@@ -62,6 +103,17 @@ const COMMANDS = Object.freeze([
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
+
+function sameFiles(files, expected) {
+  return files.length === expected.size && files.every((name) => expected.has(name));
+}
+
+export function selectLearningContentResolutionDbVariant(files) {
+  const names = [...files].sort();
+  if (sameFiles(names, VARIANTS.projection.files)) return VARIANTS.projection;
+  if (sameFiles(names, VARIANTS.historyFix.files)) return VARIANTS.historyFix;
+  return null;
+}
 
 function parsePython(text) {
   return [...text.matchAll(/Ran\s+(\d+)\s+tests?/g)].reduce((sum, match) => sum + Number(match[1]), 0);
@@ -98,13 +150,46 @@ async function exactChangedFiles(input) {
     scope.expected_base_sha, input.privateExactSha,
   ], { encoding: 'utf8', shell: false });
   if (result.status !== 0) throw new Error('git scope failed');
-  return result.stdout.trim() ? result.stdout.trim().split('\n').sort() : [];
+  return {
+    files: result.stdout.trim() ? result.stdout.trim().split('\n').sort() : [],
+    scope,
+  };
+}
+
+function fixedInputContract(input, scope, variant) {
+  return Number(input.expectedNodeCount) === 0
+    && Number(input.expectedPythonCount) === variant.pythonCount
+    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(variant.canonicalMigrationCount)
+    && scope.expected_changed_file_count === '4'
+    && scope.migration_start === variant.migrationStart
+    && scope.migration_end === variant.migrationEnd;
+}
+
+function failedContractResult(variant) {
+  return {
+    ok: false,
+    status: 'FAIL:fixed-input-contract@not-run',
+    failedLabels: Object.freeze(['fixed-input-contract']),
+    stepCount: COMMANDS.length,
+    passedStepCount: 0,
+    nodeTests: 0,
+    nodePassed: 0,
+    nodeFailed: 0,
+    pythonTests: 0,
+    selectedSuite: variant.selectedSuite,
+  };
 }
 
 export async function maybeRunLearningContentResolutionDbProfile(input) {
   if (input.profile !== 'generic-owned') return null;
-  const files = await exactChangedFiles(input);
-  if (files.length !== EXACT_FILES.size || !files.every((name) => EXACT_FILES.has(name))) return null;
+  const { files, scope } = await exactChangedFiles(input);
+  const variant = selectLearningContentResolutionDbVariant(files);
+  if (!variant) return null;
+
+  if (!fixedInputContract(input, scope, variant)) {
+    await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
+    return failedContractResult(variant);
+  }
 
   await mkdir(input.runnerTemp, { recursive: true });
   let passedStepCount = 0;
@@ -122,7 +207,8 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
           ...process.env,
           PRIVATE_REPO_PATH: input.privateRepoPath,
           PRIVATE_EXACT_SHA: input.privateExactSha,
-          EXPECTED_MIGRATION_COUNT: process.env.EXPECTED_MIGRATION_COUNT,
+          EXPECTED_MIGRATION_COUNT: String(variant.canonicalMigrationCount),
+          LCR_DB_PROFILE_VARIANT: variant.key,
           RUNNER_TEMP: input.runnerTemp,
         },
         stdio: ['ignore', descriptor, descriptor],
@@ -139,9 +225,7 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const countsPassed = Number(input.expectedNodeCount) === 0
-    && Number(input.expectedPythonCount) === 7
-    && pythonTests === 7;
+  const countsPassed = pythonTests === variant.pythonCount;
   const ok = passedStepCount === COMMANDS.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
@@ -154,6 +238,6 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests,
-    selectedSuite: 'learning-content-resolution-db',
+    selectedSuite: variant.selectedSuite,
   };
 }

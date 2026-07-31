@@ -6,10 +6,27 @@ CURRENT_STAGE="inputs"
 on_error(){ echo "LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=$CURRENT_STAGE"; }
 trap on_error ERR
 
-required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT RUNNER_TEMP)
+required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT LCR_DB_PROFILE_VARIANT RUNNER_TEMP)
 for name in "${required[@]}"; do
   [[ -n "${!name:-}" ]] || { echo "LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=inputs"; exit 2; }
 done
+
+case "$LCR_DB_PROFILE_VARIANT" in
+  projection-v1)
+    canonical_migration_count=353
+    base_migration_count=352
+    migration_file=20260731100000_trainingos_learning_content_resolution_projection_v1.sql
+    ;;
+  history-fix)
+    canonical_migration_count=354
+    base_migration_count=353
+    migration_file=20260731110000_trainingos_lcr_historical_rights_fix_v1.sql
+    ;;
+  *)
+    echo "LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=inputs"
+    exit 2
+    ;;
+esac
 
 CURRENT_STAGE="scope-contract"
 scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
@@ -17,7 +34,7 @@ scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
 read_scope(){ awk -F= -v wanted="$1" '$1 == wanted { print substr($0,index($0,"=")+1); exit }' "$scope_file"; }
 expected_base_sha="$(read_scope expected_base_sha)"
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ && "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
-[[ "$EXPECTED_MIGRATION_COUNT" == 353 ]]
+[[ "$EXPECTED_MIGRATION_COUNT" == "$canonical_migration_count" ]]
 
 CURRENT_STAGE="supabase-wrapper"
 bin_dir="$RUNNER_TEMP/trainingos-learning-content-resolution-bin"
@@ -93,7 +110,17 @@ sanitize_e2e_reason(){
     TRAININGOS_LCR_E2E_CONTENT_ASSERTIONS_FAILED|\
     TRAININGOS_LCR_E2E_REVOCATION_FAILED|\
     TRAININGOS_LCR_E2E_ROLE_DENIALS_FAILED|\
-    TRAININGOS_LCR_E2E_STAGE_FAILED)
+    TRAININGOS_LCR_E2E_STAGE_FAILED|\
+    TRAININGOS_LCR_HISTORY_ACTIVE_EXACT_RIGHTS_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_ENDED_AGREEMENT_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_NO_ACTIVE_ACCOUNT_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_CROSS_CLASS_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_OWNER_VERSION_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_TERMINATED_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_REPLACED_ACCOUNT_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_STATUS_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_SYMMETRY_ASSERTION_FAILED|\
+    TRAININGOS_LCR_HISTORY_LOCAL_CONTENT_ASSERTION_FAILED)
       printf '%s:%s' "$reason" "$sqlstate"
       ;;
   esac
@@ -137,7 +164,7 @@ sealed fresh-bootstrap python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh
   --output-dir "$fresh/supabase/migrations" \
   --commit-sha "$PRIVATE_EXACT_SHA"
 CURRENT_STAGE="fresh-migration-count"
-[[ "$(manifest_count "$fresh/supabase/trainingos-bootstrap-manifest.json")" == 353 ]]
+[[ "$(manifest_count "$fresh/supabase/trainingos-bootstrap-manifest.json")" == "$canonical_migration_count" ]]
 CURRENT_STAGE="fresh-start"
 sealed fresh-start supabase --workdir "$fresh" start
 CURRENT_STAGE="fresh-reset-one"
@@ -160,14 +187,13 @@ sealed upgrade-bootstrap python "$base_worktree/scripts/build-trainingos-fresh-b
   --output-dir "$upgrade/supabase/migrations" \
   --commit-sha "$expected_base_sha"
 CURRENT_STAGE="upgrade-migration-count"
-[[ "$(manifest_count "$upgrade/supabase/trainingos-bootstrap-manifest.json")" == 352 ]]
+[[ "$(manifest_count "$upgrade/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
 CURRENT_STAGE="upgrade-start"
 sealed upgrade-start supabase --workdir "$upgrade" start
 CURRENT_STAGE="upgrade-base-reset"
 sealed upgrade-base-reset supabase --workdir "$upgrade" db reset --local --no-seed
 CURRENT_STAGE="upgrade-copy-migration"
-cp "$PRIVATE_REPO_PATH/supabase/migrations/20260731100000_trainingos_learning_content_resolution_projection_v1.sql" \
-  "$upgrade/supabase/migrations/"
+cp "$PRIVATE_REPO_PATH/supabase/migrations/$migration_file" "$upgrade/supabase/migrations/"
 CURRENT_STAGE="upgrade-apply"
 sealed upgrade-apply supabase --workdir "$upgrade" migration up --local
 run_e2e "$upgrade" upgrade
@@ -175,4 +201,4 @@ CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "LEARNING_CONTENT_RESOLUTION_DB status=PASS canonical_migrations=353 fresh=PASS second_replay=PASS upgrade=PASS sql_e2e=PASS zero_residue=PASS"
+echo "LEARNING_CONTENT_RESOLUTION_DB status=PASS variant=$LCR_DB_PROFILE_VARIANT canonical_migrations=$canonical_migration_count fresh=PASS second_replay=PASS upgrade=PASS sql_e2e=PASS zero_residue=PASS cleanup=PASS"
