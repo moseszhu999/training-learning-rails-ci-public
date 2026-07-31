@@ -34,10 +34,15 @@ test('fixed profile runs syntax, exact focused counts, build and database replay
 });
 
 test('database failure stage is allowlisted and private output stays sealed', () => {
-  assert.equal(
-    sanitizeChallengePreparationDatabaseStage('private output\nCHALLENGE_DATABASE status=FAIL stage=fresh-bootstrap reason=unclassified\n'),
-    'fresh-bootstrap',
-  );
+  for (const stage of [
+    'scope-inputs', 'scope-files', 'scope-migration-count', 'scope-head', 'scope-e2e-contract',
+    'fresh-bootstrap', 'upgrade-e2e',
+  ]) {
+    assert.equal(
+      sanitizeChallengePreparationDatabaseStage(`private output\nCHALLENGE_DATABASE status=FAIL stage=${stage} reason=unclassified\n`),
+      stage,
+    );
+  }
   assert.equal(
     sanitizeChallengePreparationDatabaseStage('CHALLENGE_DATABASE status=FAIL stage=private-table-name reason=secret'),
     'unknown',
@@ -45,9 +50,14 @@ test('database failure stage is allowlisted and private output stays sealed', ()
   assert.equal(sanitizeChallengePreparationDatabaseStage('no fixed status'), 'unknown');
 });
 
-test('database runner is exact-head, fresh, second, upgrade, rollback and cleanup bounded', async () => {
+test('database runner is exact-head, segmented scope, fresh, second, upgrade, rollback and cleanup bounded', async () => {
   const text = await readFile(path.join(root, 'scripts/run-challenge-preparation-recipe-database.sh'), 'utf8');
   for (const token of [
+    'CURRENT_STAGE="scope-inputs"',
+    'CURRENT_STAGE="scope-files"',
+    'CURRENT_STAGE="scope-migration-count"',
+    'CURRENT_STAGE="scope-head"',
+    'CURRENT_STAGE="scope-e2e-contract"',
     'expected_changed_file_count" == 10',
     'EXPECTED_MIGRATION_COUNT" == 355',
     'fresh-reset-one',
