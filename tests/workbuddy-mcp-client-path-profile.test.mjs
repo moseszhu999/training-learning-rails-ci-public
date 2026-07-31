@@ -15,20 +15,24 @@ test('WorkBuddy MCP client path profile is fixed to three private files', () => 
   ]) assert.match(profile, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
-test('WorkBuddy MCP client path profile runs bounded fixed validation', () => {
+test('WorkBuddy MCP client path profile runs bounded fixed validation without pytest', () => {
   for (const marker of [
     "command('syntax-netlify-mcp'",
     'netlify/functions/trainingos-mcp.mjs',
     "command('syntax-vercel-mcp'",
     'api/integrations/agents/mcp.mjs',
     "command('python-contract'",
-    'tests/test_trainingos_workbuddy_mcp_acceptance_contract.py',
+    'runpy.run_path',
+    "name.startswith('test_')",
+    'assert len(tests) == 4',
+    "print(f'Ran {len(tests)} tests')",
     "command('typecheck'",
     "command('production-build'",
     'Number(input.expectedNodeCount) === 0',
     'Number(input.expectedPythonCount) === 4',
     'pythonTests === 4',
   ]) assert.match(profile, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(profile, /pytest/);
 });
 
 test('generic-owned router selects WorkBuddy fixed profile before broad fallback', () => {
