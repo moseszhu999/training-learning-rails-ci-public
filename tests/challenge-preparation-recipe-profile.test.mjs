@@ -51,7 +51,7 @@ test('database failure stage is allowlisted and private output stays sealed', ()
   assert.equal(sanitizeChallengePreparationDatabaseStage('no fixed status'), 'unknown');
 });
 
-test('database runner uses bootstrap manifests and exact fresh and upgrade replay contracts', async () => {
+test('database runner distinguishes source and generated bootstrap migration totals', async () => {
   const text = await readFile(path.join(root, 'scripts/run-challenge-preparation-recipe-database.sh'), 'utf8');
   for (const token of [
     'CURRENT_STAGE="scope-inputs"',
@@ -61,7 +61,11 @@ test('database runner uses bootstrap manifests and exact fresh and upgrade repla
     'CURRENT_STAGE="scope-e2e-contract"',
     'expected_changed_file_count" == 10',
     'EXPECTED_MIGRATION_COUNT" == 353',
-    'base_migration_count=352',
+    'base_source_migration_count=352',
+    'fresh_bootstrap_migration_count=355',
+    'base_bootstrap_migration_count=354',
+    'EXPECTED_MIGRATION_COUNT + 2',
+    'base_source_migration_count + 2',
     'manifest_count "$fresh_project/supabase/trainingos-bootstrap-manifest.json"',
     'manifest_count "$upgrade_project/supabase/trainingos-bootstrap-manifest.json"',
     'fresh-reset-one',
