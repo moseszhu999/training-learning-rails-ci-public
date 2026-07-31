@@ -36,7 +36,8 @@ test('fixed profile runs syntax, exact focused counts, build and database replay
 test('database failure stage is allowlisted and private output stays sealed', () => {
   for (const stage of [
     'scope-inputs', 'scope-files', 'scope-migration-count', 'scope-head', 'scope-e2e-contract',
-    'fresh-bootstrap', 'upgrade-e2e',
+    'fresh-bootstrap', 'fresh-manifest', 'upgrade-manifest', 'upgrade-base-reset',
+    'upgrade-copy-migration', 'upgrade-apply', 'upgrade-e2e',
   ]) {
     assert.equal(
       sanitizeChallengePreparationDatabaseStage(`private output\nCHALLENGE_DATABASE status=FAIL stage=${stage} reason=unclassified\n`),
@@ -50,7 +51,7 @@ test('database failure stage is allowlisted and private output stays sealed', ()
   assert.equal(sanitizeChallengePreparationDatabaseStage('no fixed status'), 'unknown');
 });
 
-test('database runner is exact-head, segmented scope, fresh, second, upgrade, rollback and cleanup bounded', async () => {
+test('database runner uses bootstrap manifests and exact fresh and upgrade replay contracts', async () => {
   const text = await readFile(path.join(root, 'scripts/run-challenge-preparation-recipe-database.sh'), 'utf8');
   for (const token of [
     'CURRENT_STAGE="scope-inputs"',
@@ -60,9 +61,14 @@ test('database runner is exact-head, segmented scope, fresh, second, upgrade, ro
     'CURRENT_STAGE="scope-e2e-contract"',
     'expected_changed_file_count" == 10',
     'EXPECTED_MIGRATION_COUNT" == 353',
+    'base_migration_count=352',
+    'manifest_count "$fresh_project/supabase/trainingos-bootstrap-manifest.json"',
+    'manifest_count "$upgrade_project/supabase/trainingos-bootstrap-manifest.json"',
     'fresh-reset-one',
     'fresh-reset-two',
-    'upgrade-migration',
+    'CURRENT_STAGE="upgrade-base-reset"',
+    'CURRENT_STAGE="upgrade-copy-migration"',
+    'CURRENT_STAGE="upgrade-apply"',
     'migration up --local --include-all',
     'rollback=PASS',
     'cleanup=PASS',
