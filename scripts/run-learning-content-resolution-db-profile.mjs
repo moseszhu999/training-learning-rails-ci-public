@@ -19,6 +19,40 @@ const SAFE_DATABASE_STAGES = new Set([
   'upgrade-base-reset','upgrade-copy-migration','upgrade-apply','upgrade-status','upgrade-sql-e2e',
   'upgrade-zero-residue','upgrade-stop','complete',
 ]);
+const SAFE_E2E_REASONS = new Set([
+  'TRAININGOS_LCR_CLASS_PLAN_REQUIRED',
+  'TRAININGOS_LCR_ZERO_WRITE_ASSERTION_FAILED',
+  'TRAININGOS_LCR_LOCAL_UNIT_ASSERTION_FAILED',
+  'TRAININGOS_LCR_LOCAL_EXERCISE_ASSERTION_FAILED',
+  'TRAININGOS_LCR_PARTNER_UNIT_RIGHTS_ASSERTION_FAILED',
+  'TRAININGOS_LCR_PARTNER_EXERCISE_RIGHTS_ASSERTION_FAILED',
+  'TRAININGOS_LCR_MISSING_PROVENANCE_ASSERTION_FAILED',
+  'TRAININGOS_LCR_PURPOSE_MISMATCH_ASSERTION_FAILED',
+  'TRAININGOS_LCR_REGION_MISMATCH_ASSERTION_FAILED',
+  'TRAININGOS_LCR_MATERIAL_FAIL_CLOSED_ASSERTION_FAILED',
+  'TRAININGOS_LCR_SECRET_DISCLOSURE_ASSERTION_FAILED',
+  'TRAININGOS_LCR_REVOKED_RIGHTS_ASSERTION_FAILED',
+  'TRAININGOS_LCR_STUDENT_DENIAL_ASSERTION_FAILED',
+  'TRAININGOS_LCR_CROSS_CLASS_DENIAL_ASSERTION_FAILED',
+  'TRAININGOS_LCR_UNRELATED_COURSE_ASSERTION_FAILED',
+  'TRAININGOS_LCR_E2E_FIXTURE_USERS_FAILED',
+  'TRAININGOS_LCR_E2E_FIXTURE_COURSE_FAILED',
+  'TRAININGOS_LCR_E2E_FIXTURE_CONTENT_FAILED',
+  'TRAININGOS_LCR_E2E_FIXTURE_MATERIAL_FAILED',
+  'TRAININGOS_LCR_E2E_FIXTURE_COMMERCIAL_FAILED',
+  'TRAININGOS_LCR_E2E_PARTNER_BINDING_FAILED',
+  'TRAININGOS_LCR_E2E_AGREEMENT_FAILED',
+  'TRAININGOS_LCR_E2E_SOURCE_FAILED',
+  'TRAININGOS_LCR_E2E_REVIEW_REQUEST_FAILED',
+  'TRAININGOS_LCR_E2E_REVIEW_APPROVAL_FAILED',
+  'TRAININGOS_LCR_E2E_RIGHTS_FAILED',
+  'TRAININGOS_LCR_E2E_USAGE_FAILED',
+  'TRAININGOS_LCR_E2E_RESOLVE_FAILED',
+  'TRAININGOS_LCR_E2E_CONTENT_ASSERTIONS_FAILED',
+  'TRAININGOS_LCR_E2E_REVOCATION_FAILED',
+  'TRAININGOS_LCR_E2E_ROLE_DENIALS_FAILED',
+  'TRAININGOS_LCR_E2E_STAGE_FAILED',
+]);
 
 const command = (label, executable, args, kind = 'status') => ({ label, executable, args, kind });
 const COMMANDS = Object.freeze([
@@ -37,6 +71,19 @@ export function sanitizeDatabaseStage(text) {
   const matches = [...text.matchAll(/LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=([a-z0-9-]+)/g)];
   const candidate = matches.at(-1)?.[1] ?? 'unknown';
   return SAFE_DATABASE_STAGES.has(candidate) ? candidate : 'unknown';
+}
+
+export function sanitizeDatabaseReason(text) {
+  const matches = [...text.matchAll(/LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=[a-z0-9-]+ reason=(TRAININGOS_LCR_[A-Z0-9_]+):([A-Z0-9]{5})/g)];
+  const match = matches.at(-1);
+  if (!match || !SAFE_E2E_REASONS.has(match[1])) return '';
+  return `${match[1]}:${match[2]}`;
+}
+
+export function sanitizeDatabaseFailure(text) {
+  const stage = sanitizeDatabaseStage(text);
+  const reason = sanitizeDatabaseReason(text);
+  return reason ? `${stage}:${reason}` : stage;
 }
 
 async function exactChangedFiles(input) {
@@ -84,7 +131,7 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
       closeSync(descriptor);
       const output = await readFile(logPath, 'utf8');
       if (item.kind === 'python') pythonTests += parsePython(output);
-      if (item.kind === 'database') databaseStage = result.status === 0 ? 'complete' : sanitizeDatabaseStage(output);
+      if (item.kind === 'database') databaseStage = result.status === 0 ? 'complete' : sanitizeDatabaseFailure(output);
       if (result.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
     }

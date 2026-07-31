@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { sanitizeDatabaseStage } from '../scripts/run-learning-content-resolution-db-profile.mjs';
+import {
+  sanitizeDatabaseFailure,
+  sanitizeDatabaseReason,
+  sanitizeDatabaseStage,
+} from '../scripts/run-learning-content-resolution-db-profile.mjs';
 
 const profile = readFileSync('scripts/run-learning-content-resolution-db-profile.mjs', 'utf8');
 const runner = readFileSync('scripts/run-learning-content-resolution-db-profile.sh', 'utf8');
@@ -47,11 +51,18 @@ test('database runner locks fresh repeat upgrade SQL E2E and zero residue', () =
   assert.match(profile, /production-build/);
 });
 
-test('failure diagnostics expose only an allowlisted stage', () => {
-  assert.equal(sanitizeDatabaseStage('LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=fresh-reset-one'), 'fresh-reset-one');
+test('failure diagnostics expose only allowlisted stage reason and SQLSTATE', () => {
+  const safe = 'LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=fresh-sql-e2e reason=TRAININGOS_LCR_E2E_USAGE_FAILED:23514';
+  assert.equal(sanitizeDatabaseStage(safe), 'fresh-sql-e2e');
+  assert.equal(sanitizeDatabaseReason(safe), 'TRAININGOS_LCR_E2E_USAGE_FAILED:23514');
+  assert.equal(sanitizeDatabaseFailure(safe), 'fresh-sql-e2e:TRAININGOS_LCR_E2E_USAGE_FAILED:23514');
+  assert.equal(sanitizeDatabaseReason(
+    'LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=fresh-sql-e2e reason=TRAININGOS_LCR_PRIVATE_TABLE_FAILED:23514'
+  ), '');
   assert.equal(sanitizeDatabaseStage('private SQL error stage=secret-table'), 'unknown');
-  assert.match(runner, /CURRENT_STAGE="fresh-bootstrap"/);
-  assert.match(runner, /CURRENT_STAGE="upgrade-sql-e2e"/);
+  assert.match(runner, /sanitize_e2e_reason/);
+  assert.match(runner, /TRAININGOS_LCR_E2E_USAGE_FAILED/);
+  assert.match(runner, /set \+e[\s\S]*psql[\s\S]*code=\$\?[\s\S]*set -e/);
   assert.doesNotMatch(profile, /readFile\([^)]*fresh-reset-one/);
 });
 
