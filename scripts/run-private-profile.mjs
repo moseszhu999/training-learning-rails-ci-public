@@ -5,6 +5,7 @@ export * from './run-learning-content-resolution-db-profile.mjs';
 export * from './run-challenge-preparation-recipe-profile.mjs';
 export * from './run-learning-workspace-contract-fix-profile.mjs';
 export * from './run-workbuddy-mcp-client-path-profile.mjs';
+export * from './run-learning-gain-demonstrator-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,6 +16,7 @@ import { maybeRunLearningContentResolutionDbProfile } from './run-learning-conte
 import { maybeRunChallengePreparationRecipeProfile } from './run-challenge-preparation-recipe-profile.mjs';
 import { maybeRunLearningWorkspaceContractFixProfile } from './run-learning-workspace-contract-fix-profile.mjs';
 import { maybeRunWorkBuddyMcpClientPathProfile } from './run-workbuddy-mcp-client-path-profile.mjs';
+import { maybeRunLearningGainDemonstratorProfile } from './run-learning-gain-demonstrator-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -53,6 +55,9 @@ export async function runProfile(input) {
   if (input.profile === 'agent-native-learning-product') {
     return runAgentNativeLearningProductProfile(input);
   }
+
+  const learningGainDemonstrator = await maybeRunLearningGainDemonstratorProfile(input);
+  if (learningGainDemonstrator) return learningGainDemonstrator;
 
   const workBuddyMcpClientPath = await maybeRunWorkBuddyMcpClientPathProfile(input);
   if (workBuddyMcpClientPath) return workBuddyMcpClientPath;
