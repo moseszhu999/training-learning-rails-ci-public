@@ -1,18 +1,18 @@
 {
-  "requestId": "main-release-93121c41-v1",
+  "requestId": "learning-workspace-contract-e49cfad2-v1",
   "reportIssueNumber": 89,
-  "privateExactSha": "93121c41bf38bd89044fb41338219f52244531bb",
+  "privateExactSha": "e49cfad24ef296cf03c7715b663571fcff8ed49f",
   "expectedBaseSha": "93121c41bf38bd89044fb41338219f52244531bb",
-  "expectedMainSha": "93121c41bf38bd89044fb41338219f52244531bb",
-  "validationProfile": "main-release",
-  "expectedChangedFileCount": "0",
+  "expectedMainSha": "",
+  "validationProfile": "generic-owned",
+  "expectedChangedFileCount": "2",
   "expectedMigrationRange": "none",
-  "expectedFocusedTestCounts": "node=0;python=0",
-  "expectedMigrationCount": "355",
-  "runFreshReplay": true,
-  "runUpgradeReplay": true,
+  "expectedFocusedTestCounts": "node=0;python=24",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
   "runApplicationContracts": true,
   "runTypecheck": true,
   "runProductionBuild": true,
-  "runCriticalE2E": true
+  "runCriticalE2E": false
 }
