@@ -16,21 +16,32 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
-const pythonContractRunner = [
-  'import runpy',
-  "scope = runpy.run_path('tests/test_trainingos_workbuddy_mcp_acceptance_contract.py')",
-  "tests = sorted(value for name, value in scope.items() if name.startswith('test_') and callable(value))",
-  "assert len(tests) == 4, f'expected 4 tests, found {len(tests)}'",
-  'for test in tests:',
-  '    test()',
-  "print(f'Ran {len(tests)} tests')",
-].join('\n');
+function pythonContractRunner(functionName) {
+  return [
+    'import runpy',
+    "scope = runpy.run_path('tests/test_trainingos_workbuddy_mcp_acceptance_contract.py')",
+    `test = scope[${JSON.stringify(functionName)}]`,
+    'test()',
+    "print('Ran 1 test')",
+  ].join('\n');
+}
 
 const commands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('syntax-netlify-mcp', 'node', ['--check', 'netlify/functions/trainingos-mcp.mjs']),
   command('syntax-vercel-mcp', 'node', ['--check', 'api/integrations/agents/mcp.mjs']),
-  command('python-contract', 'python', ['-c', pythonContractRunner], 'python'),
+  command('python-adapter', 'python', ['-c', pythonContractRunner(
+    'test_workbuddy_acceptance_uses_the_existing_netlify_mcp_adapter',
+  )], 'python'),
+  command('python-composition', 'python', ['-c', pythonContractRunner(
+    'test_netlify_and_vercel_keep_one_canonical_mcp_composition',
+  )], 'python'),
+  command('python-shortcut', 'python', ['-c', pythonContractRunner(
+    'test_workbuddy_acceptance_restores_the_real_exercise_agent_shortcut',
+  )], 'python'),
+  command('python-boundary', 'python', ['-c', pythonContractRunner(
+    'test_workbuddy_acceptance_is_ordinary_user_and_non_production_only',
+  )], 'python'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
