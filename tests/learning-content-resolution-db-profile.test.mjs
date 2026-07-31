@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { sanitizeDatabaseStage } from '../scripts/run-learning-content-resolution-db-profile.mjs';
 
 const profile = readFileSync('scripts/run-learning-content-resolution-db-profile.mjs', 'utf8');
 const runner = readFileSync('scripts/run-learning-content-resolution-db-profile.sh', 'utf8');
@@ -38,6 +39,14 @@ test('database runner locks fresh repeat upgrade SQL E2E and zero residue', () =
   assert.match(profile, /python-contract/);
   assert.match(profile, /typecheck/);
   assert.match(profile, /production-build/);
+});
+
+test('failure diagnostics expose only an allowlisted stage', () => {
+  assert.equal(sanitizeDatabaseStage('LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=fresh-reset-one'), 'fresh-reset-one');
+  assert.equal(sanitizeDatabaseStage('private SQL error stage=secret-table'), 'unknown');
+  assert.match(runner, /CURRENT_STAGE="fresh-bootstrap"/);
+  assert.match(runner, /CURRENT_STAGE="upgrade-sql-e2e"/);
+  assert.doesNotMatch(profile, /readFile\([^)]*fresh-reset-one/);
 });
 
 test('runner is read-only to private repository and publishes no artifact or deployment', () => {
