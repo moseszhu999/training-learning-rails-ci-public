@@ -205,6 +205,18 @@ async function runFixedProfile({
 }
 
 export async function runProfile(input) {
+  if (input.profile === 'learning-content-resolution') {
+    const files = await changedFiles(input);
+    if (!isLearningContentResolutionFiles(files)) {
+      throw new Error('learning content resolution scope mismatch');
+    }
+    return runFixedProfile({
+      ...input,
+      commands: learningContentResolutionProfileCommands,
+      selectedSuite: 'learning-content-resolution',
+    });
+  }
+
   if (input.profile === 'generic-owned') {
     const files = await changedFiles(input);
     if (isLearningContentResolutionFiles(files)) {

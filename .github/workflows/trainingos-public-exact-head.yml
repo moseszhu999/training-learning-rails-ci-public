@@ -32,6 +32,7 @@ on:
           - teacher-hub
           - docs-launch
           - agent-native-learning-product
+          - learning-content-resolution
           - generic-owned
           - main-release
       expectedChangedFileCount:
