@@ -11,18 +11,32 @@ const EXACT_FILES = new Set([
   'tests/sql/trainingos_learning_content_resolution_projection_v1_e2e.sql',
   'tests/test_trainingos_learning_content_resolution_projection_v1.py',
 ]);
+const SAFE_DATABASE_STAGES = new Set([
+  'inputs','scope-contract','supabase-wrapper',
+  'fresh-init','fresh-bootstrap','fresh-migration-count','fresh-start','fresh-reset-one','fresh-reset-two',
+  'fresh-status','fresh-sql-e2e','fresh-zero-residue','fresh-stop',
+  'upgrade-worktree','upgrade-init','upgrade-bootstrap','upgrade-migration-count','upgrade-start',
+  'upgrade-base-reset','upgrade-copy-migration','upgrade-apply','upgrade-status','upgrade-sql-e2e',
+  'upgrade-zero-residue','upgrade-stop','complete',
+]);
 
 const command = (label, executable, args, kind = 'status') => ({ label, executable, args, kind });
 const COMMANDS = Object.freeze([
   command('install', 'npm', ['ci']),
   command('python-contract', 'python', ['-m', 'unittest', '-v', 'tests.test_trainingos_learning_content_resolution_projection_v1'], 'python'),
-  command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-learning-content-resolution-db-profile.sh')]),
+  command('database-replay', 'bash', [path.join(publicRoot, 'scripts/run-learning-content-resolution-db-profile.sh')], 'database'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
 
 function parsePython(text) {
   return [...text.matchAll(/Ran\s+(\d+)\s+tests?/g)].reduce((sum, match) => sum + Number(match[1]), 0);
+}
+
+export function sanitizeDatabaseStage(text) {
+  const matches = [...text.matchAll(/LEARNING_CONTENT_RESOLUTION_DB status=FAIL stage=([a-z0-9-]+)/g)];
+  const candidate = matches.at(-1)?.[1] ?? 'unknown';
+  return SAFE_DATABASE_STAGES.has(candidate) ? candidate : 'unknown';
 }
 
 async function exactChangedFiles(input) {
@@ -48,6 +62,7 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
   await mkdir(input.runnerTemp, { recursive: true });
   let passedStepCount = 0;
   let pythonTests = 0;
+  let databaseStage = 'not-run';
   const failedLabels = [];
 
   try {
@@ -69,6 +84,7 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
       closeSync(descriptor);
       const output = await readFile(logPath, 'utf8');
       if (item.kind === 'python') pythonTests += parsePython(output);
+      if (item.kind === 'database') databaseStage = result.status === 0 ? 'complete' : sanitizeDatabaseStage(output);
       if (result.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
     }
@@ -80,9 +96,10 @@ export async function maybeRunLearningContentResolutionDbProfile(input) {
     && Number(input.expectedPythonCount) === 6
     && pythonTests === 6;
   const ok = passedStepCount === COMMANDS.length && countsPassed;
+  const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
     ok,
-    status: ok ? 'PASS' : `FAIL:${failedLabels.length ? failedLabels.join(',') : 'count-contract'}`,
+    status: ok ? 'PASS' : `FAIL:${failure}@${databaseStage}`,
     failedLabels: Object.freeze(failedLabels),
     stepCount: COMMANDS.length,
     passedStepCount,
