@@ -1,0 +1,18 @@
+{
+  "requestId": "learning-content-resolution-window-d-18d108ad-final",
+  "reportIssueNumber": 89,
+  "privateExactSha": "18d108ad93f97c8683f90bb7aa598c01dd265697",
+  "expectedBaseSha": "0314b0b5fa080812e79960929d65760c5470b246",
+  "expectedMainSha": "0314b0b5fa080812e79960929d65760c5470b246",
+  "validationProfile": "learning-content-resolution",
+  "expectedChangedFileCount": "7",
+  "expectedMigrationRange": "none",
+  "expectedFocusedTestCounts": "node=7;python=8",
+  "expectedMigrationCount": "0",
+  "runFreshReplay": false,
+  "runUpgradeReplay": false,
+  "runApplicationContracts": true,
+  "runTypecheck": true,
+  "runProductionBuild": true,
+  "runCriticalE2E": false
+}
