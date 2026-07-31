@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+const profile = readFileSync('scripts/run-learning-content-resolution-db-profile.mjs', 'utf8');
+const runner = readFileSync('scripts/run-learning-content-resolution-db-profile.sh', 'utf8');
+const controller = readFileSync('scripts/run-private-profile.mjs', 'utf8');
+
+test('fixed suite is routed only through the existing generic-owned controller', () => {
+  assert.match(controller, /maybeRunLearningContentResolutionDbProfile/);
+  assert.match(profile, /input\.profile !== 'generic-owned'/);
+  assert.match(profile, /learning-content-resolution-db/);
+  assert.doesNotMatch(profile, /workflow_dispatch|pull_request:/);
+});
+
+test('exact private scope is four fixed files and one exact migration', () => {
+  for (const file of [
+    'docs/architecture/trainingos-learning-content-resolution-db-projection-v1.md',
+    'supabase/migrations/20260731100000_trainingos_learning_content_resolution_projection_v1.sql',
+    'tests/sql/trainingos_learning_content_resolution_projection_v1_e2e.sql',
+    'tests/test_trainingos_learning_content_resolution_projection_v1.py',
+  ]) assert.match(profile, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(runner, /EXPECTED_MIGRATION_COUNT" == 353/);
+  assert.match(runner, /20260731100000_trainingos_learning_content_resolution_projection_v1\.sql/);
+});
+
+test('database runner locks fresh repeat upgrade SQL E2E and zero residue', () => {
+  for (const token of [
+    'fresh-reset-one',
+    'fresh-reset-two',
+    'upgrade-base-reset',
+    'upgrade-apply',
+    'trainingos_learning_content_resolution_projection_v1_e2e.sql',
+    "id::text like '8a010000-%'",
+    'zero_residue=PASS',
+  ]) assert.ok(runner.includes(token), token);
+  assert.match(profile, /python-contract/);
+  assert.match(profile, /typecheck/);
+  assert.match(profile, /production-build/);
+});
+
+test('runner is read-only to private repository and publishes no artifact or deployment', () => {
+  assert.doesNotMatch(runner, /git\s+(push|commit)|gh\s+|netlify|vercel|upload-artifact/);
+  assert.doesNotMatch(profile, /git\s+(push|commit)|upload-artifact|deploy/);
+  assert.match(runner, /worktree add --detach/);
+  assert.match(runner, /rollback/i);
+});
+
+test('new shell runner passes bash syntax and shellcheck', () => {
+  const bash = spawnSync('bash', ['-n', 'scripts/run-learning-content-resolution-db-profile.sh'], { encoding: 'utf8' });
+  assert.equal(bash.status, 0, bash.stderr);
+  const shellcheck = spawnSync('shellcheck', ['scripts/run-learning-content-resolution-db-profile.sh'], { encoding: 'utf8' });
+  assert.equal(shellcheck.status, 0, shellcheck.stdout || shellcheck.stderr);
+});
