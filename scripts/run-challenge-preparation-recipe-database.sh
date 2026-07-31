@@ -30,12 +30,17 @@ expected_base_sha="$(read_scope expected_base_sha)"
 expected_changed_file_count="$(read_scope expected_changed_file_count)"
 migration_start="$(read_scope migration_start)"
 migration_end="$(read_scope migration_end)"
-base_migration_count=352
+base_source_migration_count=352
+fresh_bootstrap_migration_count=355
+base_bootstrap_migration_count=354
 [[ "$(read_scope validation_profile)" == generic-owned ]]
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ && "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$expected_changed_file_count" == 10 ]]
 [[ "$EXPECTED_MIGRATION_COUNT" == 353 ]]
 [[ "$migration_start" == 20260731120000 && "$migration_end" == 20260731120000 ]]
+[[ "$EXPECTED_MIGRATION_COUNT" == $((base_source_migration_count + 1)) ]]
+[[ "$fresh_bootstrap_migration_count" == $((EXPECTED_MIGRATION_COUNT + 2)) ]]
+[[ "$base_bootstrap_migration_count" == $((base_source_migration_count + 2)) ]]
 
 CURRENT_STAGE="scope-files"
 expected_files="$(printf '%s\n' \
@@ -101,7 +106,7 @@ python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
   --commit-sha "$PRIVATE_EXACT_SHA"
 CURRENT_STAGE="fresh-manifest"
 generated_migration_count="$(manifest_count "$fresh_project/supabase/trainingos-bootstrap-manifest.json")"
-[[ "$generated_migration_count" == "$EXPECTED_MIGRATION_COUNT" ]]
+[[ "$generated_migration_count" == "$fresh_bootstrap_migration_count" ]]
 CURRENT_STAGE="fresh-start"
 supabase_cli --workdir "$fresh_project" start
 CURRENT_STAGE="fresh-reset-one"
@@ -130,7 +135,7 @@ python "$base_worktree/scripts/build-trainingos-fresh-bootstrap.py" \
   --output-dir "$upgrade_project/supabase/migrations" \
   --commit-sha "$expected_base_sha"
 CURRENT_STAGE="upgrade-manifest"
-[[ "$(manifest_count "$upgrade_project/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
+[[ "$(manifest_count "$upgrade_project/supabase/trainingos-bootstrap-manifest.json")" == "$base_bootstrap_migration_count" ]]
 CURRENT_STAGE="upgrade-start"
 supabase_cli --workdir "$upgrade_project" start
 CURRENT_STAGE="upgrade-base-reset"
@@ -150,4 +155,4 @@ CURRENT_STAGE="upgrade-stop"
 supabase_cli --workdir "$upgrade_project" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "CHALLENGE_DATABASE status=PASS suite=challenge-preparation-recipe changed_migrations=1 source=$source_migration_count generated=$generated_migration_count fresh=PASS second_pass=PASS upgrade=PASS e2e=PASS rollback=PASS cleanup=PASS"
+echo "CHALLENGE_DATABASE status=PASS suite=challenge-preparation-recipe changed_migrations=1 source=$source_migration_count bootstrap=$generated_migration_count fresh=PASS second_pass=PASS upgrade=PASS e2e=PASS rollback=PASS cleanup=PASS"
