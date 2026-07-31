@@ -59,7 +59,7 @@ test('database runner is exact-head, segmented scope, fresh, second, upgrade, ro
     'CURRENT_STAGE="scope-head"',
     'CURRENT_STAGE="scope-e2e-contract"',
     'expected_changed_file_count" == 10',
-    'EXPECTED_MIGRATION_COUNT" == 355',
+    'EXPECTED_MIGRATION_COUNT" == 353',
     'fresh-reset-one',
     'fresh-reset-two',
     'upgrade-migration',

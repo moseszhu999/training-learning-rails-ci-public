@@ -25,7 +25,7 @@ migration_end="$(read_scope migration_end)"
 [[ "$(read_scope validation_profile)" == generic-owned ]]
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ && "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
 [[ "$expected_changed_file_count" == 10 ]]
-[[ "$EXPECTED_MIGRATION_COUNT" == 355 ]]
+[[ "$EXPECTED_MIGRATION_COUNT" == 353 ]]
 [[ "$migration_start" == 20260731120000 && "$migration_end" == 20260731120000 ]]
 
 CURRENT_STAGE="scope-files"
