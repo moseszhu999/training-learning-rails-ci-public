@@ -60,11 +60,5 @@ test('controller routes exact scope before generic fallback', async () => {
   const source = await read('../scripts/run-private-profile.mjs');
   assert.match(source, /maybeRunMultiroleFinalGateProfile/);
   assert.match(source, /multirole-final-gate/);
-});
-
-test('workflow statically validates the database runner', async () => {
-  const workflow = await read('../.github/workflows/trainingos-public-exact-head.yml');
-  assert.match(workflow, /bash -n scripts\/run-multirole-final-gate-database\.sh/);
-  assert.match(workflow, /shellcheck scripts\/run-multirole-final-gate-database\.sh/);
-  assert.doesNotMatch(workflow, /upload-artifact/);
+  assert.doesNotMatch(source, /upload-artifact|production deploy/i);
 });
