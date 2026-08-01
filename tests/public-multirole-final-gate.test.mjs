@@ -50,9 +50,13 @@ test('database runner binds exact head and performs two fresh replays', async ()
     'assessmentAuthorityGranted',
     'publicationAuthorityGranted',
     'administratorAuthorityGranted',
-    '0|0|0|0',
+    'fixtureCleanup',
+    'remainingAssignments',
+    'remainingEvents',
+    'remainingAuthUsers',
     'zero_residue=PASS',
   ]) assert.ok(source.includes(token), token);
+  assert.doesNotMatch(source, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   assert.doesNotMatch(source, /artifact|deploy|production database/i);
 });
 

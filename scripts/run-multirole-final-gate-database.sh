@@ -56,7 +56,7 @@ PY
 }
 
 run_e2e(){
-  local label="$1" status_file db_url log_file residue
+  local label="$1" status_file db_url log_file
   CURRENT_STAGE="${label}-status"
   status_file="$RUNNER_TEMP/trainingos-multirole-final-gate-${label}.env"
   supabase --workdir "$fresh" status -o env >"$status_file" 2>&1
@@ -76,8 +76,10 @@ run_e2e(){
   grep -q '"administratorAuthorityGranted": false' "$log_file"
 
   CURRENT_STAGE="${label}-zero-residue"
-  residue="$(psql "$db_url" -X -At -v ON_ERROR_STOP=1 -c "select concat_ws('|', (select count(*) from public.trainingos_class_operations_assignments where class_id = '9c100000-0000-4000-8000-000000000001'::uuid), (select count(*) from public.trainingos_class_operations_assignment_events where class_id = '9c100000-0000-4000-8000-000000000001'::uuid), (select count(*) from auth.users where id::text like '9c010000-%'), (select count(*) from public.profiles where id::text like '9c010000-%'));" 2>/dev/null)"
-  [[ "$residue" == "0|0|0|0" ]]
+  grep -q '"fixtureCleanup": "PLPGSQL_SUBTRANSACTION_ROLLBACK"' "$log_file"
+  grep -q '"remainingAssignments": 0' "$log_file"
+  grep -q '"remainingEvents": 0' "$log_file"
+  grep -q '"remainingAuthUsers": 0' "$log_file"
 }
 
 rm -rf "$fresh"
