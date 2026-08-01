@@ -13,7 +13,7 @@ export const MULTIROLE_FINAL_GATE_EXACT_FILES = new Set([
 ]);
 
 const CANONICAL_MIGRATION_COUNT = 357;
-const EXPECTED_PYTHON_COUNT = 27;
+const EXPECTED_PYTHON_COUNT = 26;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -31,10 +31,7 @@ export const multiroleFinalGateCommands = Object.freeze([
     'tests.test_trainingos_multirole_zero_admin_entry_v1_contract',
   ], 'python'),
   command('python-assignment-contract', 'python', [
-    '-m',
-    'unittest',
-    '-v',
-    'tests.test_trainingos_class_operations_assignment_v1',
+    path.join(publicRoot, 'scripts/run-multirole-integrated-assignment-contract.py'),
   ], 'python'),
   command('database-replay', 'bash', [
     path.join(publicRoot, 'scripts/run-multirole-final-gate-database.sh'),
