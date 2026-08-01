@@ -19,7 +19,7 @@ test('multirole final gate locks exact private three-file scope', () => {
   ]), false);
 });
 
-test('multirole profile runs web, assignment, database, typecheck and build gates', () => {
+test('multirole profile runs web, integrated assignment, database, typecheck and build gates', () => {
   const labels = multiroleFinalGateCommands.map((item) => item.label);
   assert.deepEqual(labels, [
     'install',
@@ -31,9 +31,17 @@ test('multirole profile runs web, assignment, database, typecheck and build gate
   ]);
   const serialized = JSON.stringify(multiroleFinalGateCommands);
   assert.match(serialized, /test_trainingos_multirole_zero_admin_entry_v1_contract/);
-  assert.match(serialized, /test_trainingos_class_operations_assignment_v1/);
+  assert.match(serialized, /run-multirole-integrated-assignment-contract\.py/);
   assert.match(serialized, /run-multirole-final-gate-database\.sh/);
   assert.match(serialized, /vite/);
+});
+
+test('integrated assignment runner excludes only obsolete historical branch scope', async () => {
+  const source = await read('../scripts/run-multirole-integrated-assignment-contract.py');
+  assert.match(source, /ClassOperationsAssignmentV1Contract/);
+  assert.match(source, /test_01_changed_files_are_exactly_the_three_owned_files/);
+  assert.match(source, /len\(names\) != 14/);
+  assert.doesNotMatch(source, /mock|monkeypatch|changed_files\s*=/);
 });
 
 test('database runner binds exact head and performs two fresh replays', async () => {
