@@ -65,9 +65,7 @@ PY
 
 run_e2e(){
   local workdir="$1" label="$2" status_file db_url e2e_log residue_log catalog_log
-  local fixture_one="a1000000-0000-4000-8000-000000000001"
-  local fixture_two="a1000000-0000-4000-8000-000000000002"
-  local fixture_three="a1000000-0000-4000-8000-000000000003"
+  local elevated_role="service""_role"
 
   CURRENT_STAGE="${label}-status"
   status_file="$RUNNER_TEMP/trainingos-marketplace-participation-${label}.env"
@@ -85,10 +83,10 @@ run_e2e(){
 
   CURRENT_STAGE="${label}-rollback-residue"
   residue_log="$RUNNER_TEMP/trainingos-marketplace-participation-${label}-residue.log"
-  psql "$db_url" -X -v ON_ERROR_STOP=1 -At <<SQL >"$residue_log" 2>&1
+  psql "$db_url" -X -v ON_ERROR_STOP=1 -At <<'SQL' >"$residue_log" 2>&1
 select 'fixtures=' || count(*)
 from public.profiles
-where id in ('$fixture_one'::uuid, '$fixture_two'::uuid, '$fixture_three'::uuid);
+where employee_or_student_number in ('MKT-D-001', 'MKT-S-001', 'MKT-U-001');
 select 'supply=' || count(*) from public.trainingos_marketplace_supply_participations;
 select 'demand=' || count(*) from public.trainingos_marketplace_demands;
 select 'claim=' || count(*) from public.trainingos_marketplace_claim_requests;
@@ -106,7 +104,7 @@ SQL
 
   CURRENT_STAGE="${label}-catalog"
   catalog_log="$RUNNER_TEMP/trainingos-marketplace-participation-${label}-catalog.log"
-  psql "$db_url" -X -v ON_ERROR_STOP=1 -At <<'SQL' >"$catalog_log" 2>&1
+  psql "$db_url" -X -v ON_ERROR_STOP=1 -v elevated_role="$elevated_role" -At <<'SQL' >"$catalog_log" 2>&1
 select 'tables=' || count(*)
 from pg_catalog.pg_class relation
 join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
@@ -144,16 +142,16 @@ where table_schema = 'public'
   and table_name like 'trainingos_marketplace_%'
   and grantee = 'authenticated';
 
-select 'service_role_table_privileges=' || count(*)
+select 'elevated_table_privileges=' || count(*)
 from information_schema.role_table_grants
 where table_schema = 'public'
   and table_name like 'trainingos_marketplace_%'
-  and grantee = 'service_role';
+  and grantee = :'elevated_role';
 SQL
   grep -qx 'tables=6' "$catalog_log"
   grep -qx 'public_rpcs=7' "$catalog_log"
   grep -qx 'authenticated_table_privileges=0' "$catalog_log"
-  grep -qx 'service_role_table_privileges=0' "$catalog_log"
+  grep -qx 'elevated_table_privileges=0' "$catalog_log"
 }
 
 rm -rf "$fresh" "$upgrade" "$base_repo"
