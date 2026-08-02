@@ -9,6 +9,7 @@ export * from './run-learning-gain-demonstrator-profile.mjs';
 export * from './run-multirole-final-gate-profile.mjs';
 export * from './run-interaction-foundation-profile.mjs';
 export * from './run-interaction-web-profile.mjs';
+export * from './run-marketplace-discovery-core-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -23,6 +24,7 @@ import { maybeRunLearningGainDemonstratorProfile } from './run-learning-gain-dem
 import { maybeRunMultiroleFinalGateProfile } from './run-multirole-final-gate-profile.mjs';
 import { maybeRunInteractionFoundationProfile } from './run-interaction-foundation-profile.mjs';
 import { maybeRunInteractionWebProfile } from './run-interaction-web-profile.mjs';
+import { maybeRunMarketplaceDiscoveryCoreProfile } from './run-marketplace-discovery-core-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -61,6 +63,9 @@ export async function runProfile(input) {
   if (input.profile === 'agent-native-learning-product') {
     return runAgentNativeLearningProductProfile(input);
   }
+
+  const marketplaceDiscoveryCore = await maybeRunMarketplaceDiscoveryCoreProfile(input);
+  if (marketplaceDiscoveryCore) return marketplaceDiscoveryCore;
 
   const interactionWeb = await maybeRunInteractionWebProfile(input);
   if (interactionWeb) return interactionWeb;
