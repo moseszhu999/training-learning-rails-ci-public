@@ -1,0 +1,53 @@
+import {
+  formatProfileStatus,
+  profileCommands,
+  runProfile as runStage14Profile,
+} from './run-private-profile-stage14.mjs';
+
+const teacherHubCommands = profileCommands['teacher-hub'];
+const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
+if (roleContractsIndex < 0) {
+  throw new Error('teacher-hub role-contracts command is required');
+}
+
+const permissionContracts = [
+  {
+    label: 'python-role-menu-content',
+    moduleName: 'tests.test_trainingos_role_menu_content_permissions_v1',
+  },
+  {
+    label: 'python-advanced-settings',
+    moduleName: 'tests.test_trainingos_advanced_settings',
+  },
+  {
+    label: 'python-risk-intervention',
+    moduleName: 'tests.test_trainingos_risk_intervention_ui_contract',
+  },
+  {
+    label: 'python-zero-permission-core',
+    moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract',
+  },
+];
+
+for (const { label } of permissionContracts) {
+  if (teacherHubCommands.some((item) => item.label === label)) {
+    throw new Error(`duplicate teacher-hub permission label: ${label}`);
+  }
+}
+
+teacherHubCommands.splice(
+  roleContractsIndex,
+  0,
+  ...permissionContracts.map(({ label, moduleName }) => ({
+    label,
+    executable: 'python',
+    args: ['-m', 'unittest', '-v', moduleName],
+    kind: 'python',
+  })),
+);
+
+export async function runProfile(input) {
+  return runStage14Profile(input);
+}
+
+export { formatProfileStatus, profileCommands };
