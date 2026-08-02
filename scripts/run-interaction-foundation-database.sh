@@ -90,19 +90,28 @@ run_e2e(){
   grep -q '"formalBusinessWriteClaims": 0' "$primary_log"
   grep -q '"fixtureCleanup": "PLPGSQL_SUBTRANSACTION_ROLLBACK"' "$primary_log"
 
-  CURRENT_STAGE="${label}-direct-revocation-e2e"
+  CURRENT_STAGE="${label}-direct-revocation-sql"
   revocation_log="$RUNNER_TEMP/trainingos-interaction-foundation-${label}-direct-revocation-e2e.log"
   psql "$db_url" -X -v ON_ERROR_STOP=1 \
     -f "$PRIVATE_REPO_PATH/tests/sql/trainingos_interaction_direct_revocation_v1_e2e.sql" \
     >"$revocation_log" 2>&1
+  CURRENT_STAGE="${label}-direct-revocation-status"
   grep -q '"status": "PASS"' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-membership"
   grep -q '"canonicalMembershipStatus": "rejected"' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-student-read"
   grep -q '"studentReadDenied": true' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-student-post"
   grep -q '"studentPostDenied": true' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-teacher-read"
   grep -q '"teacherReadDenied": true' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-projection"
   grep -q '"directRemovedFromProjection": true' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-history"
   grep -q '"immutableHistoryRetained": true' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-formal-write"
   grep -q '"formalBusinessWritePerformed": false' "$revocation_log"
+  CURRENT_STAGE="${label}-direct-revocation-cleanup"
   grep -q '"fixtureCleanup": "PLPGSQL_SUBTRANSACTION_ROLLBACK"' "$revocation_log"
 
   CURRENT_STAGE="${label}-catalog"
