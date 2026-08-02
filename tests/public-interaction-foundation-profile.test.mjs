@@ -44,7 +44,7 @@ test('profile runs fixed syntax, Node, Python, database, typecheck and build sta
   assert.match(serialized, /run-interaction-foundation-database\.sh/);
 });
 
-test('database runner performs two fresh replays, exact-base upgrade, and direct revocation E2E', async () => {
+test('database runner performs two fresh replays, exact-base upgrade, and bounded revocation diagnostics', async () => {
   const source = await read('../scripts/run-interaction-foundation-database.sh');
   for (const token of [
     'canonical_migration_count=360',
@@ -63,6 +63,14 @@ test('database runner performs two fresh replays, exact-base upgrade, and direct
     'teacherReadDenied',
     'directRemovedFromProjection',
     'immutableHistoryRetained',
+    'direct-revocation-sql',
+    'direct-revocation-status',
+    'direct-revocation-student-read',
+    'direct-revocation-student-post',
+    'direct-revocation-teacher-read',
+    'direct-revocation-projection',
+    'direct-revocation-history',
+    'direct-revocation-cleanup',
     'formalBusinessWriteClaims',
     'fixtureCleanup',
     'tables=8',
