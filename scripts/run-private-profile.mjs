@@ -7,6 +7,7 @@ export * from './run-learning-workspace-contract-fix-profile.mjs';
 export * from './run-workbuddy-mcp-client-path-profile.mjs';
 export * from './run-learning-gain-demonstrator-profile.mjs';
 export * from './run-multirole-final-gate-profile.mjs';
+export * from './run-interaction-foundation-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -19,6 +20,7 @@ import { maybeRunLearningWorkspaceContractFixProfile } from './run-learning-work
 import { maybeRunWorkBuddyMcpClientPathProfile } from './run-workbuddy-mcp-client-path-profile.mjs';
 import { maybeRunLearningGainDemonstratorProfile } from './run-learning-gain-demonstrator-profile.mjs';
 import { maybeRunMultiroleFinalGateProfile } from './run-multirole-final-gate-profile.mjs';
+import { maybeRunInteractionFoundationProfile } from './run-interaction-foundation-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -57,6 +59,9 @@ export async function runProfile(input) {
   if (input.profile === 'agent-native-learning-product') {
     return runAgentNativeLearningProductProfile(input);
   }
+
+  const interactionFoundation = await maybeRunInteractionFoundationProfile(input);
+  if (interactionFoundation) return interactionFoundation;
 
   const multiroleFinalGate = await maybeRunMultiroleFinalGateProfile(input);
   if (multiroleFinalGate) return multiroleFinalGate;
