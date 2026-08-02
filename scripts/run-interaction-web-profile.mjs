@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 
 const studentExerciseWorkspaceName = ['J', 'h', 'c', 'StudentExerciseWorkspace.tsx'].join('');
 const studentExerciseWorkspaceFile = `apps/training-web/src/components/${studentExerciseWorkspaceName}`;
+const pythonTestClass = 'tests.test_trainingos_interaction_web_v1.TrainingOsInteractionWebV1ContractTest';
 
 export const INTERACTION_WEB_EXACT_FILES = new Set([
   studentExerciseWorkspaceFile,
@@ -27,6 +28,30 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
+const pythonCommand = (label, method) => command(label, 'python', [
+  '-m',
+  'unittest',
+  '-v',
+  `${pythonTestClass}.${method}`,
+], 'python');
+
+export const interactionWebPythonCommands = Object.freeze([
+  pythonCommand('web-python-files', 'test_exact_web_slice_files_exist'),
+  pythonCommand('web-python-rpcs', 'test_adapter_uses_only_fixed_interaction_rpcs'),
+  pythonCommand('web-python-raw-boundary', 'test_adapter_has_no_raw_interaction_table_fallback_or_privileged_key'),
+  pythonCommand('web-python-provider-boundary', 'test_adapter_has_no_external_network_or_provider_send'),
+  pythonCommand('web-python-projection', 'test_projection_truth_fields_fail_closed'),
+  pythonCommand('web-python-page-load', 'test_page_load_does_not_create_space_thread_or_message'),
+  pythonCommand('web-python-human-send', 'test_human_send_is_explicit_and_agent_does_not_send'),
+  pythonCommand('web-python-class-mount', 'test_class_page_mounts_on_real_selected_class'),
+  pythonCommand('web-python-exercise-binding', 'test_exercise_page_binds_real_publication_uuid'),
+  pythonCommand('web-python-student-space', 'test_student_cannot_silently_create_class_space'),
+  pythonCommand('web-python-truth-boundary', 'test_discussion_is_not_formal_learning_truth'),
+  pythonCommand('web-python-errors', 'test_structured_errors_never_render_object_object'),
+  pythonCommand('web-python-collision', 'test_active_parallel_owner_files_are_untouched_by_contract'),
+  pythonCommand('web-python-css', 'test_responsive_styles_are_bounded_to_interaction_namespace'),
+]);
+
 export const interactionWebCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('foundation-package-syntax', 'node', ['--check', 'packages/training-interaction/src/index.mjs']),
@@ -36,12 +61,7 @@ export const interactionWebCommands = Object.freeze([
     '--test',
     'prototypes/trainingos-agent-mvp-v1/test/interaction-foundation-v1.test.mjs',
   ], 'node'),
-  command('web-python-contract', 'python', [
-    '-m',
-    'unittest',
-    '-v',
-    'tests.test_trainingos_interaction_web_v1',
-  ], 'python'),
+  ...interactionWebPythonCommands,
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
