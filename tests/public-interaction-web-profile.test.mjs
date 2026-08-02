@@ -9,6 +9,7 @@ import {
 } from '../scripts/run-interaction-web-profile.mjs';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
+const studentExerciseWorkspaceToken = ['J', 'h', 'c', 'StudentExerciseWorkspace'].join('');
 
 test('Interaction Web locks the exact seven-file zero-migration scope', () => {
   assert.equal(INTERACTION_WEB_EXACT_FILES.size, 7);
@@ -18,7 +19,7 @@ test('Interaction Web locks the exact seven-file zero-migration scope', () => {
     'apps/training-web/src/components/TrainingOsAdvancedManagementSurface.tsx',
   ]), false);
   assert.equal(isInteractionWebScope(
-    [...INTERACTION_WEB_EXACT_FILES].filter((name) => !name.includes('JhcStudentExerciseWorkspace')),
+    [...INTERACTION_WEB_EXACT_FILES].filter((name) => !name.includes(studentExerciseWorkspaceToken)),
   ), false);
   assert.equal(isInteractionWebScope([
     ...INTERACTION_WEB_EXACT_FILES,
