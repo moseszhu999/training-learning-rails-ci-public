@@ -58,12 +58,13 @@ test('database runner fixes migration counts, fresh replays, upgrade, rollback a
     'tables=6',
     'public_rpcs=7',
     'authenticated_table_privileges=0',
-    'service_role_table_privileges=0',
+    'elevated_table_privileges=0',
     'rollback=PASS',
     'zero_residue=PASS',
   ]) assert.ok(source.includes(token), token);
   assert.doesNotMatch(source, /upload-artifact|production deploy/i);
   assert.doesNotMatch(source, /supabase\.co|postgres(?:ql)?:\/\//i);
+  assert.doesNotMatch(source, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
 });
 
 test('private profile controller routes Marketplace Participation before generic fallback', async () => {
