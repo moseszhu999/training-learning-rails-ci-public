@@ -13,6 +13,32 @@ const privilegedEnvToken = ['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_');
 const clientServiceRole = new RegExp(`\\b${privilegedRoleToken}\\b|${privilegedEnvToken}|VITE_[A-Z0-9_]*${privilegedRoleToken}`, 'i');
 const clientDirectWrite = /\b(?:supabase|supabaseClient)\s*(?:\?\.)?\.\s*(?:rpc\s*\(|from\s*\([^)]*\)[\s\S]{0,500}?\.\s*(?:insert|update|upsert|delete)\s*\()/i;
 
+export const TEACHER_HUB_ROLE_MENU_EXACT_FILES = Object.freeze([
+  'apps/training-web/src/components/JhcTrainingAdvancedEntrySurface.tsx',
+  'apps/training-web/src/components/TrainingOsAdvancedManagementSurface.tsx',
+  'apps/training-web/src/lib/trainingos-role-menu-permissions.ts',
+  'netlify.toml',
+  'netlify/functions/trainingos-agent-executions.mjs',
+  'netlify/functions/trainingos-mcp-preview-runtime.mjs',
+  'netlify/functions/trainingos-mcp.mjs',
+  'prototypes/trainingos-agent-mvp-v1/test/netlify-agent-executions-preview-runtime.test.mjs',
+  'prototypes/trainingos-agent-mvp-v1/test/netlify-mcp-preview-runtime.test.mjs',
+  'tests/test_trainingos_advanced_settings.py',
+  'tests/test_trainingos_risk_intervention_ui_contract.py',
+  'tests/test_trainingos_role_menu_content_permissions_v1.py',
+  'tests/test_trainingos_teacher_operations_hub_acceptance_contract.py',
+  'tests/test_trainingos_teacher_operations_hub_mount_contract.py',
+  'tests/test_trainingos_zero_permission_bridge_core_contract.py',
+]);
+
+export function isTeacherHubRoleMenuExactFiles(files) {
+  const names = [...files].sort();
+  const expected = [...TEACHER_HUB_ROLE_MENU_EXACT_FILES].sort();
+  return names.length === expected.length
+    && names.every((name, index) => name === expected[index])
+    && !names.some((name) => name.startsWith('supabase/migrations/'));
+}
+
 export const profileAllowlist = Object.freeze({
   'challenge-runtime': [
     new RegExp(`^packages/training-${challengeToken}`),
@@ -80,7 +106,13 @@ function git(repoPath, args) {
 
 async function inspectChangedFiles(input, changedFiles, failures) {
   const allowlist = profileAllowlist[input.validationProfile];
-  if (allowlist && changedFiles.some((name) => !allowlist.some((rule) => rule.test(name)))) {
+  const exactTeacherHubRoleMenu = input.validationProfile === 'teacher-hub'
+    && isTeacherHubRoleMenuExactFiles(changedFiles);
+  if (
+    !exactTeacherHubRoleMenu
+    && allowlist
+    && changedFiles.some((name) => !allowlist.some((rule) => rule.test(name)))
+  ) {
     failures.push('profileAllowlist');
   }
 
