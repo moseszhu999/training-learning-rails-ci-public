@@ -12,12 +12,13 @@ const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
 const expectedFiles = [
   'docs/architecture/trainingos-marketplace-discovery-core-v1.md',
+  'packages/training-marketplace-core/examples/marketplace-demo.mjs',
   'packages/training-marketplace-core/package.json',
   'packages/training-marketplace-core/src/index.mjs',
   'packages/training-marketplace-core/test/marketplace-core.test.mjs',
 ];
 
-test('marketplace discovery core locks the exact four-file zero-migration scope', () => {
+test('marketplace discovery core locks the exact five-file zero-migration scope', () => {
   assert.deepEqual([...MARKETPLACE_DISCOVERY_CORE_EXACT_FILES].sort(), expectedFiles.sort());
   assert.equal(isMarketplaceDiscoveryCoreScope([...MARKETPLACE_DISCOVERY_CORE_EXACT_FILES]), true);
   assert.equal(isMarketplaceDiscoveryCoreScope([
@@ -34,16 +35,18 @@ test('marketplace discovery core locks the exact four-file zero-migration scope'
   ]), false);
 });
 
-test('profile runs only fixed package validation, typecheck and production build', () => {
+test('profile runs fixed package validation, demo, typecheck and production build', () => {
   assert.deepEqual(marketplaceDiscoveryCoreCommands.map((item) => item.label), [
     'install',
     'package-syntax',
     'package-tests',
+    'package-demo',
     'typecheck',
     'production-build',
   ]);
   const serialized = JSON.stringify(marketplaceDiscoveryCoreCommands);
   assert.match(serialized, /packages\/training-marketplace-core/);
+  assert.match(serialized, /run.*demo/);
   assert.match(serialized, /npm/);
   assert.match(serialized, /vite/);
 });
@@ -51,7 +54,8 @@ test('profile runs only fixed package validation, typecheck and production build
 test('profile contains no database, deployment, network collection or artifact stage', async () => {
   const source = await read('../scripts/run-marketplace-discovery-core-profile.mjs');
   assert.match(source, /CANONICAL_MIGRATION_COUNT = 360/);
-  assert.match(source, /EXPECTED_NODE_COUNT = 12/);
+  assert.match(source, /EXPECTED_NODE_COUNT = 13/);
+  assert.match(source, /scope\.expected_changed_file_count === '5'/);
   assert.match(source, /scope\.migration_start === 'none'/);
   assert.match(source, /scope\.migration_end === 'none'/);
   assert.doesNotMatch(source, /db reset|migration up|psql|supabase start/i);

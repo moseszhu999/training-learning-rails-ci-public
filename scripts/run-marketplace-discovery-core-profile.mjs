@@ -5,13 +5,14 @@ import { spawnSync } from 'node:child_process';
 
 export const MARKETPLACE_DISCOVERY_CORE_EXACT_FILES = new Set([
   'docs/architecture/trainingos-marketplace-discovery-core-v1.md',
+  'packages/training-marketplace-core/examples/marketplace-demo.mjs',
   'packages/training-marketplace-core/package.json',
   'packages/training-marketplace-core/src/index.mjs',
   'packages/training-marketplace-core/test/marketplace-core.test.mjs',
 ]);
 
 const CANONICAL_MIGRATION_COUNT = 360;
-const EXPECTED_NODE_COUNT = 12;
+const EXPECTED_NODE_COUNT = 13;
 const EXPECTED_PYTHON_COUNT = 0;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
@@ -25,6 +26,7 @@ export const marketplaceDiscoveryCoreCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('package-syntax', 'npm', ['--prefix', 'packages/training-marketplace-core', 'run', 'syntax']),
   command('package-tests', 'npm', ['--prefix', 'packages/training-marketplace-core', 'test'], 'node'),
+  command('package-demo', 'npm', ['--prefix', 'packages/training-marketplace-core', 'run', 'demo']),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
@@ -70,7 +72,7 @@ function fixedInputContract(input, scope) {
   return Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
     && String(process.env.EXPECTED_MIGRATION_COUNT) === String(CANONICAL_MIGRATION_COUNT)
-    && scope.expected_changed_file_count === '4'
+    && scope.expected_changed_file_count === '5'
     && scope.migration_start === 'none'
     && scope.migration_end === 'none';
 }
