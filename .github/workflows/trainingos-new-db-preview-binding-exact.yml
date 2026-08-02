@@ -1,0 +1,84 @@
+name: TrainingOS New DB Preview Binding Exact
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify-preview-binding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify private exact-head hosted preview
+        env:
+          PRIVATE_EXACT_SHA: 13c934e7b6f8eb597c94b943cccca2866a556a12
+          PREVIEW_ORIGIN: https://deploy-preview-435--gleaming-cajeta-c158d9.netlify.app
+          EXPECTED_SUPABASE_URL: https://aalkgqprgggyhdrzvxal.supabase.co
+          OLD_SUPABASE_URL: https://vlrtofnodpmbulcmorcs.supabase.co
+          EXPECTED_PUBLISHABLE_KEY: sb_publishable_Np1YhDDoX7lmJ8JRdwkGIA_2ygNNLF8
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in $(seq 1 72); do
+            status="$(curl --silent --show-error --location --output preview.html --write-out '%{http_code}' "$PREVIEW_ORIGIN/jhc" || true)"
+            if [ "$status" != "200" ]; then
+              sleep 10
+              continue
+            fi
+
+            asset_path="$(python - <<'PY'
+          import re
+          html = open('preview.html', encoding='utf-8').read()
+          matches = re.findall(r'<script[^>]+src="([^"]+\.js)"', html)
+          print(matches[-1] if matches else '')
+          PY
+            )"
+            if [ -z "$asset_path" ]; then
+              sleep 10
+              continue
+            fi
+
+            if ! curl --fail-with-body --silent --show-error --location "$PREVIEW_ORIGIN$asset_path" --output preview.js; then
+              sleep 10
+              continue
+            fi
+
+            if grep --fixed-strings --quiet "$EXPECTED_SUPABASE_URL" preview.js \
+              && grep --fixed-strings --quiet "$EXPECTED_PUBLISHABLE_KEY" preview.js; then
+              ready=true
+              break
+            fi
+            sleep 10
+          done
+
+          if [ "$ready" != "true" ]; then
+            echo "Exact private preview never exposed the expected new database binding" >&2
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json, os, re
+          bundle = open('preview.js', encoding='utf-8').read()
+          expected_url = os.environ['EXPECTED_SUPABASE_URL']
+          old_url = os.environ['OLD_SUPABASE_URL']
+          expected_key = os.environ['EXPECTED_PUBLISHABLE_KEY']
+          secret_key_present = bool(re.search(r"sb_secret_[A-Za-z0-9_-]{20,}", bundle))
+          checks = {
+              'routeHttp200': True,
+              'newSupabaseUrlPresent': expected_url in bundle,
+              'newPublishableKeyPresent': expected_key in bundle,
+              'oldSupabaseUrlAbsent': old_url not in bundle,
+              'completeSecretKeyAbsent': not secret_key_present,
+          }
+          if not all(checks.values()):
+              raise SystemExit('Preview binding checks failed: ' + json.dumps(checks, sort_keys=True))
+          print(json.dumps({
+              'finalVerdict': 'PASS',
+              'privateExactSha': os.environ['PRIVATE_EXACT_SHA'],
+              **checks,
+          }, sort_keys=True))
+          PY
