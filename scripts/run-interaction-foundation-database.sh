@@ -11,7 +11,7 @@ for name in "${required[@]}"; do
   [[ -n "${!name:-}" ]] || { echo "INTERACTION_FOUNDATION_DB status=FAIL stage=inputs"; exit 2; }
 done
 
-canonical_migration_count=359
+canonical_migration_count=360
 base_migration_count=357
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$EXPECTED_MIGRATION_COUNT" == "$canonical_migration_count" ]]
@@ -22,9 +22,9 @@ scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
 read_scope(){ awk -F= -v wanted="$1" '$1 == wanted { print substr($0,index($0,"=")+1); exit }' "$scope_file"; }
 expected_base_sha="$(read_scope expected_base_sha)"
 [[ "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
-[[ "$(read_scope expected_changed_file_count)" == "11" ]]
+[[ "$(read_scope expected_changed_file_count)" == "13" ]]
 [[ "$(read_scope migration_start)" == "20260802100000" ]]
-[[ "$(read_scope migration_end)" == "20260802100100" ]]
+[[ "$(read_scope migration_end)" == "20260802100200" ]]
 
 CURRENT_STAGE="supabase-wrapper"
 bin_dir="$RUNNER_TEMP/trainingos-interaction-foundation-bin"
@@ -63,7 +63,7 @@ PY
 }
 
 run_e2e(){
-  local workdir="$1" label="$2" status_file db_url log_file catalog_file
+  local workdir="$1" label="$2" status_file db_url primary_log revocation_log catalog_file
   local elevated_role="service""_role"
   CURRENT_STAGE="${label}-status"
   status_file="$RUNNER_TEMP/trainingos-interaction-foundation-${label}.env"
@@ -71,24 +71,39 @@ run_e2e(){
   db_url="$(grep '^DB_URL=' "$status_file" | sed 's/^DB_URL=//' | tr -d '"')"
   [[ -n "$db_url" ]]
 
-  CURRENT_STAGE="${label}-sql-e2e"
-  log_file="$RUNNER_TEMP/trainingos-interaction-foundation-${label}-sql-e2e.log"
+  CURRENT_STAGE="${label}-primary-sql-e2e"
+  primary_log="$RUNNER_TEMP/trainingos-interaction-foundation-${label}-primary-sql-e2e.log"
   psql "$db_url" -X -v ON_ERROR_STOP=1 \
     -f "$PRIVATE_REPO_PATH/tests/sql/trainingos_interaction_foundation_v1_e2e.sql" \
-    >"$log_file" 2>&1
-  grep -q '"status": "PASS"' "$log_file"
-  grep -q '"agent_post_rejected": true' "$log_file"
-  grep -q '"outsider_read_rejected": true' "$log_file"
-  grep -q '"outsider_direct_rejected": true' "$log_file"
-  grep -q '"raw_table_denied": true' "$log_file"
-  grep -q '"rls_enabled_forced": true' "$log_file"
-  grep -q '"authenticated_raw_privileges": false' "$log_file"
-  grep -q "\"${elevated_role}_raw_privileges\": false" "$log_file"
-  grep -q '"authenticated_rpc_execute": true' "$log_file"
-  grep -q '"anon_rpc_execute": false' "$log_file"
-  grep -q "\"${elevated_role}_rpc_execute\": false" "$log_file"
-  grep -q '"formalBusinessWriteClaims": 0' "$log_file"
-  grep -q '"fixtureCleanup": "PLPGSQL_SUBTRANSACTION_ROLLBACK"' "$log_file"
+    >"$primary_log" 2>&1
+  grep -q '"status": "PASS"' "$primary_log"
+  grep -q '"agent_post_rejected": true' "$primary_log"
+  grep -q '"outsider_read_rejected": true' "$primary_log"
+  grep -q '"outsider_direct_rejected": true' "$primary_log"
+  grep -q '"raw_table_denied": true' "$primary_log"
+  grep -q '"rls_enabled_forced": true' "$primary_log"
+  grep -q '"authenticated_raw_privileges": false' "$primary_log"
+  grep -q "\"${elevated_role}_raw_privileges\": false" "$primary_log"
+  grep -q '"authenticated_rpc_execute": true' "$primary_log"
+  grep -q '"anon_rpc_execute": false' "$primary_log"
+  grep -q "\"${elevated_role}_rpc_execute\": false" "$primary_log"
+  grep -q '"formalBusinessWriteClaims": 0' "$primary_log"
+  grep -q '"fixtureCleanup": "PLPGSQL_SUBTRANSACTION_ROLLBACK"' "$primary_log"
+
+  CURRENT_STAGE="${label}-direct-revocation-e2e"
+  revocation_log="$RUNNER_TEMP/trainingos-interaction-foundation-${label}-direct-revocation-e2e.log"
+  psql "$db_url" -X -v ON_ERROR_STOP=1 \
+    -f "$PRIVATE_REPO_PATH/tests/sql/trainingos_interaction_direct_revocation_v1_e2e.sql" \
+    >"$revocation_log" 2>&1
+  grep -q '"status": "PASS"' "$revocation_log"
+  grep -q '"canonicalMembershipStatus": "rejected"' "$revocation_log"
+  grep -q '"studentReadDenied": true' "$revocation_log"
+  grep -q '"studentPostDenied": true' "$revocation_log"
+  grep -q '"teacherReadDenied": true' "$revocation_log"
+  grep -q '"directRemovedFromProjection": true' "$revocation_log"
+  grep -q '"immutableHistoryRetained": true' "$revocation_log"
+  grep -q '"formalBusinessWritePerformed": false' "$revocation_log"
+  grep -q '"fixtureCleanup": "PLPGSQL_SUBTRANSACTION_ROLLBACK"' "$revocation_log"
 
   CURRENT_STAGE="${label}-catalog"
   catalog_file="$RUNNER_TEMP/trainingos-interaction-foundation-${label}-catalog.log"
@@ -183,6 +198,8 @@ cp "$PRIVATE_REPO_PATH/supabase/migrations/20260802100000_trainingos_interaction
   "$upgrade/supabase/migrations/"
 cp "$PRIVATE_REPO_PATH/supabase/migrations/20260802100100_trainingos_interaction_foundation_rpc_v1.sql" \
   "$upgrade/supabase/migrations/"
+cp "$PRIVATE_REPO_PATH/supabase/migrations/20260802100200_trainingos_interaction_direct_revocation_hardening_v1.sql" \
+  "$upgrade/supabase/migrations/"
 
 CURRENT_STAGE="upgrade-apply"
 sealed upgrade-apply supabase --workdir "$upgrade" migration up --local --include-all
@@ -192,4 +209,4 @@ CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "INTERACTION_FOUNDATION_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
+echo "INTERACTION_FOUNDATION_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count fresh_replay=PASS second_replay=PASS upgrade_replay=PASS primary_sql_e2e=PASS direct_revocation_e2e=PASS catalog=PASS zero_residue=PASS cleanup=PASS"

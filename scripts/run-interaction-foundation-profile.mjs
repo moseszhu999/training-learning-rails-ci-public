@@ -16,11 +16,13 @@ export const INTERACTION_FOUNDATION_EXACT_FILES = new Set([
   'prototypes/trainingos-agent-mvp-v1/test/interaction-foundation-v1.test.mjs',
   'supabase/migrations/20260802100000_trainingos_interaction_foundation_schema_v1.sql',
   'supabase/migrations/20260802100100_trainingos_interaction_foundation_rpc_v1.sql',
+  'supabase/migrations/20260802100200_trainingos_interaction_direct_revocation_hardening_v1.sql',
   'tests/sql/trainingos_interaction_foundation_v1_e2e.sql',
+  'tests/sql/trainingos_interaction_direct_revocation_v1_e2e.sql',
   'tests/test_trainingos_interaction_foundation_v1.py',
 ]);
 
-const CANONICAL_MIGRATION_COUNT = 359;
+const CANONICAL_MIGRATION_COUNT = 360;
 const EXPECTED_NODE_COUNT = 13;
 const EXPECTED_PYTHON_COUNT = 14;
 
@@ -90,16 +92,16 @@ export function isInteractionFoundationScope(files) {
   const names = [...files];
   return names.length === INTERACTION_FOUNDATION_EXACT_FILES.size
     && names.every((name) => INTERACTION_FOUNDATION_EXACT_FILES.has(name))
-    && names.filter((name) => name.startsWith('supabase/migrations/')).length === 2;
+    && names.filter((name) => name.startsWith('supabase/migrations/')).length === 3;
 }
 
 function fixedInputContract(input, scope) {
   return Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
     && String(process.env.EXPECTED_MIGRATION_COUNT) === String(CANONICAL_MIGRATION_COUNT)
-    && scope.expected_changed_file_count === '11'
+    && scope.expected_changed_file_count === '13'
     && scope.migration_start === '20260802100000'
-    && scope.migration_end === '20260802100100';
+    && scope.migration_end === '20260802100200';
 }
 
 function parseDatabaseStage(text) {

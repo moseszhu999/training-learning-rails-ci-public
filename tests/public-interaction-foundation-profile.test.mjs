@@ -10,15 +10,18 @@ import {
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('Interaction Foundation locks the exact private eleven-file scope', () => {
-  assert.equal(INTERACTION_FOUNDATION_EXACT_FILES.size, 11);
+test('Interaction Foundation locks the exact private thirteen-file scope', () => {
+  assert.equal(INTERACTION_FOUNDATION_EXACT_FILES.size, 13);
   assert.equal(isInteractionFoundationScope([...INTERACTION_FOUNDATION_EXACT_FILES]), true);
   assert.equal(isInteractionFoundationScope([
     ...INTERACTION_FOUNDATION_EXACT_FILES,
     'apps/training-web/src/components/UnexpectedInteraction.tsx',
   ]), false);
   assert.equal(isInteractionFoundationScope(
-    [...INTERACTION_FOUNDATION_EXACT_FILES].filter((name) => !name.includes('rpc_v1.sql')),
+    [...INTERACTION_FOUNDATION_EXACT_FILES].filter((name) => !name.includes('direct_revocation_hardening')),
+  ), false);
+  assert.equal(isInteractionFoundationScope(
+    [...INTERACTION_FOUNDATION_EXACT_FILES].filter((name) => !name.includes('direct_revocation_v1_e2e')),
   ), false);
 });
 
@@ -41,22 +44,30 @@ test('profile runs fixed syntax, Node, Python, database, typecheck and build sta
   assert.match(serialized, /run-interaction-foundation-database\.sh/);
 });
 
-test('database runner performs two fresh replays and exact-base upgrade', async () => {
+test('database runner performs two fresh replays, exact-base upgrade, and direct revocation E2E', async () => {
   const source = await read('../scripts/run-interaction-foundation-database.sh');
   for (const token of [
-    'canonical_migration_count=359',
+    'canonical_migration_count=360',
     'base_migration_count=357',
     'fresh-reset-one',
     'fresh-reset-two',
     'worktree add --detach',
     'migration up --local --include-all',
+    '20260802100200_trainingos_interaction_direct_revocation_hardening_v1.sql',
     'trainingos_interaction_foundation_v1_e2e.sql',
+    'trainingos_interaction_direct_revocation_v1_e2e.sql',
     'agent_post_rejected',
     'outsider_read_rejected',
+    'studentReadDenied',
+    'studentPostDenied',
+    'teacherReadDenied',
+    'directRemovedFromProjection',
+    'immutableHistoryRetained',
     'formalBusinessWriteClaims',
     'fixtureCleanup',
     'tables=8',
     'public_rpcs=8',
+    'direct_revocation_e2e=PASS',
     'zero_residue=PASS',
   ]) assert.ok(source.includes(token), token);
   assert.doesNotMatch(source, /upload-artifact|production deploy/i);
