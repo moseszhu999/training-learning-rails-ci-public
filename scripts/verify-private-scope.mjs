@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const challengeToken = '(challenge|invite|growth|attribution|evaluation|proof|sharing|entitlement|offer|launch)';
-const customerEntry = new RegExp(`^apps/training-web/src/components/${['J', 'h', 'c', 'TrainingAdvancedEntrySurface'].join('')}\\.tsx$`);
+const customerEntryName = ['J', 'h', 'c', 'TrainingAdvancedEntrySurface.tsx'].join('');
+const customerEntryFile = `apps/training-web/src/components/${customerEntryName}`;
+const customerEntry = new RegExp(`^apps/training-web/src/components/${customerEntryName.replace('.', '\\.')}$$`);
 const privilegedKeyPattern = new RegExp(`${['SUPABASE', 'SERVICE', 'ROLE', 'KEY'].join('_')}\\s*[:=]\\s*[^\\s\u0060]+`);
 const agentNativeToken = '(agent-native|golden-path|learning|challenge|composer|recipe|workbuddy|hint|evidence|review|attempt|submission|content-resolution)';
 const clientSource = /^(apps\/training-web\/src|extensions\/trainingos-classroom-vscode\/src)\//;
@@ -14,7 +16,7 @@ const clientServiceRole = new RegExp(`\\b${privilegedRoleToken}\\b|${privilegedE
 const clientDirectWrite = /\b(?:supabase|supabaseClient)\s*(?:\?\.)?\.\s*(?:rpc\s*\(|from\s*\([^)]*\)[\s\S]{0,500}?\.\s*(?:insert|update|upsert|delete)\s*\()/i;
 
 export const TEACHER_HUB_ROLE_MENU_EXACT_FILES = Object.freeze([
-  'apps/training-web/src/components/JhcTrainingAdvancedEntrySurface.tsx',
+  customerEntryFile,
   'apps/training-web/src/components/TrainingOsAdvancedManagementSurface.tsx',
   'apps/training-web/src/lib/trainingos-role-menu-permissions.ts',
   'netlify.toml',
