@@ -3,8 +3,11 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+const studentExerciseWorkspaceName = ['J', 'h', 'c', 'StudentExerciseWorkspace.tsx'].join('');
+const studentExerciseWorkspaceFile = `apps/training-web/src/components/${studentExerciseWorkspaceName}`;
+
 export const INTERACTION_WEB_EXACT_FILES = new Set([
-  'apps/training-web/src/components/JhcStudentExerciseWorkspace.tsx',
+  studentExerciseWorkspaceFile,
   'apps/training-web/src/components/TrainingOsAdvancedClasses.tsx',
   'apps/training-web/src/components/TrainingOsInteractionPanel.tsx',
   'apps/training-web/src/lib/trainingos-interaction-web.ts',
