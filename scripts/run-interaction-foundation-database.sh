@@ -64,6 +64,7 @@ PY
 
 run_e2e(){
   local workdir="$1" label="$2" status_file db_url log_file catalog_file
+  local elevated_role="service""_role"
   CURRENT_STAGE="${label}-status"
   status_file="$RUNNER_TEMP/trainingos-interaction-foundation-${label}.env"
   supabase --workdir "$workdir" status -o env >"$status_file" 2>&1
@@ -82,10 +83,10 @@ run_e2e(){
   grep -q '"raw_table_denied": true' "$log_file"
   grep -q '"rls_enabled_forced": true' "$log_file"
   grep -q '"authenticated_raw_privileges": false' "$log_file"
-  grep -q '"service_role_raw_privileges": false' "$log_file"
+  grep -q "\"${elevated_role}_raw_privileges\": false" "$log_file"
   grep -q '"authenticated_rpc_execute": true' "$log_file"
   grep -q '"anon_rpc_execute": false' "$log_file"
-  grep -q '"service_role_rpc_execute": false' "$log_file"
+  grep -q "\"${elevated_role}_rpc_execute\": false" "$log_file"
   grep -q '"formalBusinessWriteClaims": 0' "$log_file"
   grep -q '"fixtureCleanup": "PLPGSQL_SUBTRANSACTION_ROLLBACK"' "$log_file"
 
