@@ -41,6 +41,7 @@ import {
   sanitizeBuildSubstage,
   sanitizeTypeScriptDiagnostics,
 } from './sanitize-challenge-web-diagnostics.mjs';
+import { sanitizeTeacherHubPlaywrightFailure } from './sanitize-teacher-hub-playwright-diagnostics.mjs';
 
 async function readSealedProfileLog(runnerTemp, index) {
   try {
@@ -62,9 +63,16 @@ export function formatPublicProfileStatus({
   status,
   typecheckDiagnostics,
   buildSubstage,
+  playwrightFailure = 'NOT_APPLICABLE',
 }) {
-  if (!supportsSanitizedDiagnostics(profile, selectedSuite) || status === 'PASS') return status;
-  return `${status}|ts=${typecheckDiagnostics}|build=${buildSubstage}`;
+  if (status === 'PASS') return status;
+  if (supportsSanitizedDiagnostics(profile, selectedSuite)) {
+    return `${status}|ts=${typecheckDiagnostics}|build=${buildSubstage}`;
+  }
+  if (profile === 'teacher-hub' && status.includes('FAIL:playwright')) {
+    return `${status}|pw=${playwrightFailure}`;
+  }
+  return status;
 }
 
 export async function runProfile(input) {
@@ -140,6 +148,7 @@ async function main() {
 
   let typecheckDiagnostics = 'NOT_APPLICABLE';
   let buildSubstage = 'NOT_APPLICABLE';
+  let playwrightFailure = 'NOT_APPLICABLE';
   if (supportsSanitizedDiagnostics(profile, result.selectedSuite)) {
     if (result.failedLabels.includes('typecheck')) {
       typecheckDiagnostics = sanitizeTypeScriptDiagnostics(
@@ -152,6 +161,11 @@ async function main() {
       );
     }
   }
+  if (profile === 'teacher-hub' && result.failedLabels.includes('playwright')) {
+    playwrightFailure = sanitizeTeacherHubPlaywrightFailure(
+      await readSealedProfileLog(runnerTemp, result.stepCount),
+    );
+  }
 
   const publicStatus = formatPublicProfileStatus({
     profile,
@@ -159,6 +173,7 @@ async function main() {
     status: result.status,
     typecheckDiagnostics,
     buildSubstage,
+    playwrightFailure,
   });
   await appendFile(outputPath, [
     `status=${publicStatus}`,
@@ -169,11 +184,12 @@ async function main() {
     `python_tests=${result.pythonTests}`,
     `typecheck_diagnostics=${typecheckDiagnostics}`,
     `build_substage=${buildSubstage}`,
+    `playwright_failure=${playwrightFailure}`,
     `selected_suite=${result.selectedSuite ?? 'NOT_APPLICABLE'}`,
     `youth_guardian_gate=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
   ].join('\n') + '\n', 'utf8');
   console.log(
-    `PROFILE_VALIDATION status=${publicStatus} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests} suite=${result.selectedSuite ?? 'NOT_APPLICABLE'} youth_guardian=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
+    `PROFILE_VALIDATION status=${publicStatus} steps=${result.passedStepCount}/${result.stepCount} node=${result.nodePassed}/${result.nodeTests} python=${result.pythonTests} playwright=${playwrightFailure} suite=${result.selectedSuite ?? 'NOT_APPLICABLE'} youth_guardian=${result.youthGuardianGate ?? 'NOT_APPLICABLE'}`,
   );
 }
 
