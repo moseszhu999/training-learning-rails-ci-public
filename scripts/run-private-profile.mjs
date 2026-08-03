@@ -63,13 +63,14 @@ export function formatPublicProfileStatus({
   status,
   typecheckDiagnostics,
   buildSubstage,
+  hasPlaywrightFailure = false,
   playwrightFailure = 'NOT_APPLICABLE',
 }) {
   if (status === 'PASS') return status;
   if (supportsSanitizedDiagnostics(profile, selectedSuite)) {
     return `${status}|ts=${typecheckDiagnostics}|build=${buildSubstage}`;
   }
-  if (profile === 'teacher-hub' && status.includes('FAIL:playwright')) {
+  if (profile === 'teacher-hub' && hasPlaywrightFailure) {
     return `${status}|pw=${playwrightFailure}`;
   }
   return status;
@@ -161,7 +162,9 @@ async function main() {
       );
     }
   }
-  if (profile === 'teacher-hub' && result.failedLabels.includes('playwright')) {
+  const hasPlaywrightFailure = profile === 'teacher-hub'
+    && result.failedLabels.includes('playwright');
+  if (hasPlaywrightFailure) {
     playwrightFailure = sanitizeTeacherHubPlaywrightFailure(
       await readSealedProfileLog(runnerTemp, result.stepCount),
     );
@@ -173,6 +176,7 @@ async function main() {
     status: result.status,
     typecheckDiagnostics,
     buildSubstage,
+    hasPlaywrightFailure,
     playwrightFailure,
   });
   await appendFile(outputPath, [
