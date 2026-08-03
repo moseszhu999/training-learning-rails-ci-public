@@ -12,6 +12,7 @@ export const standardValidationProfiles = Object.freeze([
   'challenge-web',
   'teacher-hub',
   'workspace-remediation',
+  'structured-agent-preview',
   'docs-launch',
   'education-ecosystem',
   'agent-native-learning-product',
@@ -88,6 +89,18 @@ export function validateInputs(input) {
     }
     for (const [name, value] of Object.entries(runFlags)) {
       if (String(value) !== 'false') failures.push(`workspaceRemediation:${name}`);
+    }
+  }
+
+  if (validationProfile === 'structured-agent-preview') {
+    if (expectedChangedFileCount !== '6') failures.push('structuredAgentPreviewChangedFileCount');
+    if (expectedMigrationRange !== 'none') failures.push('structuredAgentPreviewMigrationRange');
+    if (String(expectedMigrationCount) !== '0') failures.push('structuredAgentPreviewMigrationCount');
+    if (expectedFocusedTestCounts !== 'node=0;python=6') {
+      failures.push('structuredAgentPreviewFocusedTestCounts');
+    }
+    for (const [name, value] of Object.entries(runFlags)) {
+      if (String(value) !== 'false') failures.push(`structuredAgentPreview:${name}`);
     }
   }
 
