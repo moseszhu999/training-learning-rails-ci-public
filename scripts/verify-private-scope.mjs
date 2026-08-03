@@ -66,11 +66,14 @@ export const profileAllowlist = Object.freeze({
   ],
   'teacher-hub': [
     /^apps\/training-web\/src\/.*(TeacherOperationsHub|teacher-operations-hub|teacher-hub)/,
+    /^apps\/training-web\/src\/lib\/trainingos-today-workspace-selection\.ts$/,
     /^apps\/training-web\/src\/components\/(TrainingOsAdvancedManagementSurface)\.tsx$/,
     customerEntry,
     /^lib\/trainingos-agent-gateway\/.*teacher.*(hub|operations|adapter)/,
     /^tests\/.*teacher.*(hub|operations).*/,
+    /^tests\/test_trainingos_today_master_detail_v1\.py$/,
     /^docs\/(architecture|verification|testing|product)\/.*teacher.*(hub|operations).*\.md$/,
+    /^docs\/product\/trainingos-today-master-detail-v1\.md$/,
   ],
   'agent-native-learning-product': [
     /^api\/integrations\/agents\/mcp\.mjs$/,
