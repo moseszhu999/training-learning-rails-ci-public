@@ -22,12 +22,41 @@ test('sanitizer emits only the allowlisted failed Teacher Hub case id', () => {
 
 test('sanitizer removes ANSI reporter control codes before matching', () => {
   const log = [
-    '\u001b[31m  ✘  4 [chromium] › teacher-operations-hub-fixture.spec.ts:93:3 › resets selected occurrence and disclosure state when the authorized class changes\u001b[39m',
-    '\u001b[31m  1) [chromium] › teacher-operations-hub-fixture.spec.ts:93:3 › resets selected occurrence and disclosure state when the authorized class changes\u001b[39m',
+    '\u001b[31m  ✘  4 [chromium] › teacher-operations-hub-fixture.spec.ts:71:3 › resets selected occurrence and disclosure state when the authorized class changes\u001b[39m',
+    '\u001b[31m  1) [chromium] › teacher-operations-hub-fixture.spec.ts:71:3 › resets selected occurrence and disclosure state when the authorized class changes\u001b[39m',
   ].join('\n');
 
   assert.equal(sanitizeTeacherHubPlaywrightFailure(log), 'class-change-reset');
   assert.equal(teacherHubPlaywrightDiagnosticContract.ansiControlCodesPublished, false);
+});
+
+test('sanitizer emits a safe class-reset substep from a Playwright code frame', () => {
+  const log = [
+    '  ✘  4 [chromium] › teacher-operations-hub-fixture.spec.ts:71:3 › resets selected occurrence and disclosure state when the authorized class changes',
+    '  1) [chromium] › teacher-operations-hub-fixture.spec.ts:71:3 › resets selected occurrence and disclosure state when the authorized class changes',
+    '    81 | hidden neighboring line',
+    '  > 82 | hidden failing assertion',
+    '       | hidden caret',
+  ].join('\n');
+
+  assert.equal(
+    sanitizeTeacherHubPlaywrightFailure(log),
+    'class-change-reset--switched-detail-visible',
+  );
+  assert.equal(teacherHubPlaywrightDiagnosticContract.classChangeStepLinesPublished, false);
+});
+
+test('sanitizer falls back to a safe class-reset stack location', () => {
+  const log = [
+    '  ✘  4 [chromium] › teacher-operations-hub-fixture.spec.ts:71:3 › resets selected occurrence and disclosure state when the authorized class changes',
+    'Error: hidden private assertion',
+    '    at tests/trainingos-ui-e2e/teacher-operations-hub-fixture.spec.ts:83:72',
+  ].join('\n');
+
+  assert.equal(
+    sanitizeTeacherHubPlaywrightFailure(log),
+    'class-change-reset--boundary-reset-visible',
+  );
 });
 
 test('sanitizer supports common cross-platform failure glyphs', () => {
@@ -60,8 +89,8 @@ test('public status appends the safe Playwright id from the failed-label signal'
     typecheckDiagnostics: 'NOT_APPLICABLE',
     buildSubstage: 'NOT_APPLICABLE',
     hasPlaywrightFailure: true,
-    playwrightFailure: 'class-change-reset',
-  }), 'FAIL|pw=class-change-reset');
+    playwrightFailure: 'class-change-reset--boundary-reset-visible',
+  }), 'FAIL|pw=class-change-reset--boundary-reset-visible');
 
   assert.equal(formatPublicProfileStatus({
     profile: 'teacher-hub',

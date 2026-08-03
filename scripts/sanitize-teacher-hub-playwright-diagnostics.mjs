@@ -33,12 +33,46 @@ const FAILURE_CASES = Object.freeze([
   },
 ]);
 
+const CLASS_CHANGE_STEP_BY_LINE = Object.freeze({
+  74: 'select-occurrence-click',
+  75: 'selected-detail-visible',
+  76: 'expand-boundary-click',
+  77: 'expanded-boundary-visible',
+  79: 'switch-authorized-class',
+  81: 'switched-header-visible',
+  82: 'switched-detail-visible',
+  83: 'boundary-reset-visible',
+  84: 'old-occurrence-removed',
+});
+
 const ANSI_ESCAPE = /(?:\u001B\[[0-?]*[ -/]*[@-~]|\u009B[0-?]*[ -/]*[@-~])/g;
 const FAILURE_LINE = /^\s*(?:\d+\)|(?:✘|×|✗|⨯|x|X)\s*(?:\d+)?(?:\s|\[)|\[[^\]]+\]\s+›)/;
 const PASS_LINE = /^\s*(?:✓|✔|√)/;
 
 function normalizeReporterLine(line) {
   return String(line || '').replace(ANSI_ESCAPE, '');
+}
+
+function normalizeReporterText(text) {
+  return String(text || '').replace(ANSI_ESCAPE, '');
+}
+
+function classChangeStepId(text) {
+  const normalized = normalizeReporterText(text);
+  const codeFrameLines = [...normalized.matchAll(/^\s*>\s*(\d+)\s*\|/gm)]
+    .map((match) => Number(match[1]));
+  for (const lineNumber of codeFrameLines) {
+    const step = CLASS_CHANGE_STEP_BY_LINE[lineNumber];
+    if (step) return step;
+  }
+
+  const stackLines = [...normalized.matchAll(/teacher-operations-hub-fixture\.spec\.ts:(\d+):\d+/g)]
+    .map((match) => Number(match[1]));
+  for (const lineNumber of stackLines) {
+    const step = CLASS_CHANGE_STEP_BY_LINE[lineNumber];
+    if (step) return step;
+  }
+  return null;
 }
 
 export function sanitizeTeacherHubPlaywrightFailure(text) {
@@ -54,12 +88,27 @@ export function sanitizeTeacherHubPlaywrightFailure(text) {
     }
   }
 
+  if (failed.has('class-change-reset')) {
+    const step = classChangeStepId(text);
+    if (step) {
+      failed.delete('class-change-reset');
+      failed.add(`class-change-reset--${step}`);
+    }
+  }
+
   return failed.size ? [...failed].sort().join('+') : 'unknown';
 }
 
+const detailedClassChangeIds = Object.values(CLASS_CHANGE_STEP_BY_LINE)
+  .map((step) => `class-change-reset--${step}`);
+
 export const teacherHubPlaywrightDiagnosticContract = Object.freeze({
-  version: 'teacher-hub-playwright-diagnostics-v2-ansi-safe',
-  allowedFailureIds: Object.freeze(FAILURE_CASES.map((item) => item.id)),
+  version: 'teacher-hub-playwright-diagnostics-v3-class-step-safe',
+  allowedFailureIds: Object.freeze([
+    ...FAILURE_CASES.map((item) => item.id),
+    ...detailedClassChangeIds,
+  ]),
+  classChangeStepLinesPublished: false,
   ansiControlCodesPublished: false,
   rawLogPublished: false,
   privateSourcePublished: false,
