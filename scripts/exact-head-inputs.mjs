@@ -11,6 +11,7 @@ export const standardValidationProfiles = Object.freeze([
   'challenge-runtime',
   'challenge-web',
   'teacher-hub',
+  'workspace-remediation',
   'docs-launch',
   'education-ecosystem',
   'agent-native-learning-product',
@@ -76,6 +77,18 @@ export function validateInputs(input) {
     if (expectedChangedFileCount !== '0') failures.push('mainChangedFileCount');
     if (expectedMigrationRange !== 'none') failures.push('mainMigrationRange');
     if (expectedFocusedTestCounts !== 'node=0;python=0') failures.push('mainFocusedCountSentinel');
+  }
+
+  if (validationProfile === 'workspace-remediation') {
+    if (expectedChangedFileCount !== '3') failures.push('workspaceRemediationChangedFileCount');
+    if (expectedMigrationRange !== 'none') failures.push('workspaceRemediationMigrationRange');
+    if (String(expectedMigrationCount) !== '0') failures.push('workspaceRemediationMigrationCount');
+    if (expectedFocusedTestCounts !== 'node=0;python=3') {
+      failures.push('workspaceRemediationFocusedTestCounts');
+    }
+    for (const [name, value] of Object.entries(runFlags)) {
+      if (String(value) !== 'false') failures.push(`workspaceRemediation:${name}`);
+    }
   }
 
   if (validationProfile === 'agent-native-learning-product') {
