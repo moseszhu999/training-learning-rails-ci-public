@@ -30,6 +30,7 @@ on:
           - challenge-runtime
           - challenge-web
           - teacher-hub
+          - workspace-remediation
           - docs-launch
           - agent-native-learning-product
           - learning-content-resolution
