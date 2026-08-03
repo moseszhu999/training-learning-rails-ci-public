@@ -82,6 +82,23 @@ test('database failure exposes only a bounded category, SQLSTATE, line and exit 
   assert.doesNotMatch(source, /cat\s+.*sql-e2e|tail\s+.*sql-e2e|echo\s+.*e2e_log/);
 });
 
+test('start diagnosis compares base and exact migrations without exposing private output', async () => {
+  const source = await read('../scripts/run-marketplace-participation-database.sh');
+  for (const token of [
+    'sanitized_start_failure_marker',
+    'start_with_marker',
+    'baseline-migration-count',
+    'start_with_marker "$upgrade" baseline-start',
+    'start_with_marker "$fresh" fresh-start',
+    "migration_scope=\"marketplace\"",
+    "migration_scope=\"base_history\"",
+    "migration_scope=\"none\"",
+    "printf '%s-%s-migration%s-exit%s'",
+  ]) assert.ok(source.includes(token), token);
+  assert.doesNotMatch(source, /cat\s+.*baseline-start|cat\s+.*fresh-start|echo\s+.*start_log/);
+  assert.doesNotMatch(source, /migration_scope=.*[0-9]{14}_/);
+});
+
 test('private profile controller routes Marketplace Participation before generic fallback', async () => {
   const source = await read('../scripts/run-private-profile.mjs');
   assert.match(source, /maybeRunMarketplaceParticipationProfile/);
