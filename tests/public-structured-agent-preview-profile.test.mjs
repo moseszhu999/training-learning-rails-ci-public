@@ -5,6 +5,7 @@ import { validateInputs } from '../scripts/exact-head-inputs.mjs';
 
 const profile = readFileSync(new URL('../scripts/run-structured-agent-preview-profile.mjs', import.meta.url), 'utf8');
 const router = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../.github/workflows/trainingos-public-exact-head.yml', import.meta.url), 'utf8');
 
 const escaped = (value) => new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
@@ -38,9 +39,10 @@ test('structured Agent preview profile runs fixed contracts and build gates', ()
   assert.doesNotMatch(profile, /supabase/);
 });
 
-test('structured Agent preview is routed as a reusable fixed profile', () => {
+test('structured Agent preview is routed and dispatchable as a reusable fixed profile', () => {
   assert.match(router, /runStructuredAgentPreviewProfile/);
   assert.match(router, /input\.profile === 'structured-agent-preview'/);
+  assert.match(workflow, /- structured-agent-preview/);
 });
 
 test('structured Agent preview input contract fails closed', () => {

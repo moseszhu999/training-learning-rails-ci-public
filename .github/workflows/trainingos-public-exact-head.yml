@@ -31,6 +31,7 @@ on:
           - challenge-web
           - teacher-hub
           - workspace-remediation
+          - structured-agent-preview
           - docs-launch
           - agent-native-learning-product
           - learning-content-resolution
