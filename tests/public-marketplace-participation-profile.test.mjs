@@ -38,8 +38,8 @@ test('profile runs fixed Python, database, typecheck and build stages', () => {
 test('database runner fixes migration counts, fresh replays, upgrade, rollback and zero residue', async () => {
   const source = await read('../scripts/run-marketplace-participation-database.sh');
   for (const token of [
-    'canonical_migration_count=361',
-    'base_migration_count=360',
+    'canonical_migration_count=364',
+    'base_migration_count=363',
     '20260803072000_trainingos_marketplace_participation_v1.sql',
     'fresh-one',
     'fresh-two',
