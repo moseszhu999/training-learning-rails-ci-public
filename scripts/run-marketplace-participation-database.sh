@@ -63,9 +63,21 @@ print(manifest.get('migrationCount', -1))
 PY
 }
 
+sanitized_sqlstate(){
+  local log_path="$1" code
+  code="$(grep -Eo 'ERROR:[[:space:]]+[A-Z0-9]{5}:' "$log_path" 2>/dev/null \
+    | tail -n 1 \
+    | grep -Eo '[A-Z0-9]{5}' \
+    | tr '[:upper:]' '[:lower:]' \
+    || true)"
+  [[ "$code" =~ ^[a-z0-9]{5}$ ]] || code="unknown"
+  printf '%s' "$code"
+}
+
 run_e2e(){
   local workdir="$1" label="$2" status_file db_url e2e_log residue_log catalog_log
   local elevated_role="service""_role"
+  local e2e_code sqlstate
 
   CURRENT_STAGE="${label}-status"
   status_file="$RUNNER_TEMP/trainingos-marketplace-participation-${label}.env"
@@ -75,10 +87,18 @@ run_e2e(){
 
   CURRENT_STAGE="${label}-sql-e2e"
   e2e_log="$RUNNER_TEMP/trainingos-marketplace-participation-${label}-sql-e2e.log"
-  psql "$db_url" -X -v ON_ERROR_STOP=1 \
+  set +e
+  psql "$db_url" -X -v ON_ERROR_STOP=1 -v VERBOSITY=verbose \
     -c 'begin;' \
     -f "$PRIVATE_REPO_PATH/tests/sql/trainingos_marketplace_participation_v1_e2e.sql" \
     -c 'rollback;' >"$e2e_log" 2>&1
+  e2e_code=$?
+  set -e
+  if [[ "$e2e_code" != 0 ]]; then
+    sqlstate="$(sanitized_sqlstate "$e2e_log")"
+    CURRENT_STAGE="${label}-sql-e2e-${sqlstate}"
+    return 1
+  fi
   grep -q 'TRAININGOS_MARKETPLACE_PARTICIPATION_V1_E2E_PASS' "$e2e_log"
 
   CURRENT_STAGE="${label}-rollback-residue"
