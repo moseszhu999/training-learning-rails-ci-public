@@ -13,7 +13,7 @@ export const MARKETPLACE_PARTICIPATION_EXACT_FILES = new Set([
   'tests/test_trainingos_marketplace_participation_v1.py',
 ]);
 
-const CANONICAL_MIGRATION_COUNT = 361;
+const CANONICAL_MIGRATION_COUNT = 364;
 const EXPECTED_NODE_COUNT = 0;
 const EXPECTED_PYTHON_COUNT = 16;
 

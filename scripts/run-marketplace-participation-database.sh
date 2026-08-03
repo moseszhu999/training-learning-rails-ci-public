@@ -11,8 +11,8 @@ for name in "${required[@]}"; do
   [[ -n "${!name:-}" ]] || { echo "MARKETPLACE_PARTICIPATION_DB status=FAIL stage=inputs"; exit 2; }
 done
 
-canonical_migration_count=361
-base_migration_count=360
+canonical_migration_count=364
+base_migration_count=363
 migration_name="20260803072000_trainingos_marketplace_participation_v1.sql"
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$EXPECTED_MIGRATION_COUNT" == "$canonical_migration_count" ]]
