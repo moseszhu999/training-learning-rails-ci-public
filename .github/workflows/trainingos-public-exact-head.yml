@@ -32,6 +32,7 @@ on:
           - teacher-hub
           - workspace-remediation
           - structured-agent-preview
+          - source-audit-action-receipt
           - docs-launch
           - agent-native-learning-product
           - learning-content-resolution

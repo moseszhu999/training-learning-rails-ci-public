@@ -13,6 +13,7 @@ export const standardValidationProfiles = Object.freeze([
   'teacher-hub',
   'workspace-remediation',
   'structured-agent-preview',
+  'source-audit-action-receipt',
   'docs-launch',
   'education-ecosystem',
   'agent-native-learning-product',
@@ -101,6 +102,18 @@ export function validateInputs(input) {
     }
     for (const [name, value] of Object.entries(runFlags)) {
       if (String(value) !== 'false') failures.push(`structuredAgentPreview:${name}`);
+    }
+  }
+
+  if (validationProfile === 'source-audit-action-receipt') {
+    if (expectedChangedFileCount !== '7') failures.push('sourceAuditActionReceiptChangedFileCount');
+    if (expectedMigrationRange !== 'none') failures.push('sourceAuditActionReceiptMigrationRange');
+    if (String(expectedMigrationCount) !== '0') failures.push('sourceAuditActionReceiptMigrationCount');
+    if (expectedFocusedTestCounts !== 'node=0;python=13') {
+      failures.push('sourceAuditActionReceiptFocusedTestCounts');
+    }
+    for (const [name, value] of Object.entries(runFlags)) {
+      if (String(value) !== 'false') failures.push(`sourceAuditActionReceipt:${name}`);
     }
   }
 

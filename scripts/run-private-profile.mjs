@@ -3,6 +3,7 @@ export * from './youth-guardian-release-gate.mjs';
 export * from './run-agent-native-learning-product-profile.mjs';
 export * from './run-workspace-remediation-profile.mjs';
 export * from './run-structured-agent-preview-profile.mjs';
+export * from './run-source-audit-action-receipt-profile.mjs';
 export * from './run-learning-content-resolution-db-profile.mjs';
 export * from './run-challenge-preparation-recipe-profile.mjs';
 export * from './run-learning-workspace-contract-fix-profile.mjs';
@@ -21,6 +22,7 @@ import { runProfile as runBaseProfile } from './run-private-profile-stage15.mjs'
 import { runAgentNativeLearningProductProfile } from './run-agent-native-learning-product-profile.mjs';
 import { runWorkspaceRemediationProfile } from './run-workspace-remediation-profile.mjs';
 import { runStructuredAgentPreviewProfile } from './run-structured-agent-preview-profile.mjs';
+import { runSourceAuditActionReceiptProfile } from './run-source-audit-action-receipt-profile.mjs';
 import { maybeRunLearningContentResolutionDbProfile } from './run-learning-content-resolution-db-profile.mjs';
 import { maybeRunChallengePreparationRecipeProfile } from './run-challenge-preparation-recipe-profile.mjs';
 import { maybeRunLearningWorkspaceContractFixProfile } from './run-learning-workspace-contract-fix-profile.mjs';
@@ -76,6 +78,10 @@ export async function runProfile(input) {
 
   if (input.profile === 'structured-agent-preview') {
     return runStructuredAgentPreviewProfile(input);
+  }
+
+  if (input.profile === 'source-audit-action-receipt') {
+    return runSourceAuditActionReceiptProfile(input);
   }
 
   const marketplaceParticipation = await maybeRunMarketplaceParticipationProfile(input);
