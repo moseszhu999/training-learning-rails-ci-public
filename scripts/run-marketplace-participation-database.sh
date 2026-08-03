@@ -63,21 +63,39 @@ print(manifest.get('migrationCount', -1))
 PY
 }
 
-sanitized_sqlstate(){
-  local log_path="$1" code
-  code="$(grep -Eo 'ERROR:[[:space:]]+[A-Z0-9]{5}:' "$log_path" 2>/dev/null \
+sanitized_failure_marker(){
+  local log_path="$1" exit_code="$2" sqlstate line category
+  sqlstate="$(grep -Eo '(ERROR|FATAL|PANIC):[[:space:]]+[A-Z0-9]{5}:' "$log_path" 2>/dev/null \
     | tail -n 1 \
     | grep -Eo '[A-Z0-9]{5}' \
     | tr '[:upper:]' '[:lower:]' \
     || true)"
-  [[ "$code" =~ ^[a-z0-9]{5}$ ]] || code="unknown"
-  printf '%s' "$code"
+  [[ "$sqlstate" =~ ^[a-z0-9]{5}$ ]] || sqlstate="unknown"
+
+  line="$(grep -Eo 'trainingos_marketplace_participation_v1_e2e\.sql:[0-9]+' "$log_path" 2>/dev/null \
+    | tail -n 1 \
+    | grep -Eo '[0-9]+$' \
+    || true)"
+  [[ "$line" =~ ^[0-9]{1,5}$ ]] || line="0"
+
+  if grep -q 'FATAL:' "$log_path" 2>/dev/null; then
+    category="fatal"
+  elif grep -q 'ERROR:' "$log_path" 2>/dev/null; then
+    category="error"
+  elif grep -qi 'psql:.*error:' "$log_path" 2>/dev/null; then
+    category="client"
+  else
+    category="unknown"
+  fi
+
+  [[ "$exit_code" =~ ^[0-9]{1,3}$ ]] || exit_code="0"
+  printf '%s-%s-line%s-exit%s' "$category" "$sqlstate" "$line" "$exit_code"
 }
 
 run_e2e(){
   local workdir="$1" label="$2" status_file db_url e2e_log residue_log catalog_log
   local elevated_role="service""_role"
-  local e2e_code sqlstate
+  local e2e_code marker
 
   CURRENT_STAGE="${label}-status"
   status_file="$RUNNER_TEMP/trainingos-marketplace-participation-${label}.env"
@@ -95,8 +113,8 @@ run_e2e(){
   e2e_code=$?
   set -e
   if [[ "$e2e_code" != 0 ]]; then
-    sqlstate="$(sanitized_sqlstate "$e2e_log")"
-    CURRENT_STAGE="${label}-sql-e2e-${sqlstate}"
+    marker="$(sanitized_failure_marker "$e2e_log" "$e2e_code")"
+    CURRENT_STAGE="${label}-sql-e2e-${marker}"
     return 1
   fi
   grep -q 'TRAININGOS_MARKETPLACE_PARTICIPATION_V1_E2E_PASS' "$e2e_log"
