@@ -33,13 +33,24 @@ test('sanitizer reports multiple safe ids deterministically and unknown otherwis
   assert.equal(sanitizeTeacherHubPlaywrightFailure('raw failure without an allowlisted title'), 'unknown');
 });
 
-test('public status appends the safe Playwright id only for failed teacher-hub runs', () => {
+test('public status appends the safe Playwright id from the failed-label signal', () => {
+  assert.equal(formatPublicProfileStatus({
+    profile: 'teacher-hub',
+    selectedSuite: null,
+    status: 'FAIL',
+    typecheckDiagnostics: 'NOT_APPLICABLE',
+    buildSubstage: 'NOT_APPLICABLE',
+    hasPlaywrightFailure: true,
+    playwrightFailure: 'class-change-reset',
+  }), 'FAIL|pw=class-change-reset');
+
   assert.equal(formatPublicProfileStatus({
     profile: 'teacher-hub',
     selectedSuite: null,
     status: 'FAIL:playwright',
     typecheckDiagnostics: 'NOT_APPLICABLE',
     buildSubstage: 'NOT_APPLICABLE',
+    hasPlaywrightFailure: true,
     playwrightFailure: 'class-change-reset',
   }), 'FAIL:playwright|pw=class-change-reset');
 
@@ -49,6 +60,7 @@ test('public status appends the safe Playwright id only for failed teacher-hub r
     status: 'PASS',
     typecheckDiagnostics: 'NOT_APPLICABLE',
     buildSubstage: 'NOT_APPLICABLE',
+    hasPlaywrightFailure: false,
     playwrightFailure: 'NOT_APPLICABLE',
   }), 'PASS');
 });
