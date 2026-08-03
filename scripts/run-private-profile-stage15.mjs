@@ -10,6 +10,11 @@ if (roleContractsIndex < 0) {
   throw new Error('teacher-hub role-contracts command is required');
 }
 
+const todayMasterDetail = {
+  label: 'python-today-master-detail',
+  moduleName: 'tests.test_trainingos_today_master_detail_v1',
+};
+
 const permissionContracts = [
   {
     label: 'python-role-menu-content',
@@ -29,15 +34,21 @@ const permissionContracts = [
   },
 ];
 
-for (const { label } of permissionContracts) {
+for (const { label } of [todayMasterDetail, ...permissionContracts]) {
   if (teacherHubCommands.some((item) => item.label === label)) {
-    throw new Error(`duplicate teacher-hub permission label: ${label}`);
+    throw new Error(`duplicate teacher-hub contract label: ${label}`);
   }
 }
 
 teacherHubCommands.splice(
   roleContractsIndex,
   0,
+  {
+    label: todayMasterDetail.label,
+    executable: 'python',
+    args: ['-m', 'unittest', '-v', todayMasterDetail.moduleName],
+    kind: 'python',
+  },
   ...permissionContracts.map(({ label, moduleName }) => ({
     label,
     executable: 'python',
