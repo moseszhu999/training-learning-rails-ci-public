@@ -67,13 +67,17 @@ test('database runner fixes migration counts, fresh replays, upgrade, rollback a
   assert.doesNotMatch(source, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
 });
 
-test('database failure exposes only a bounded SQLSTATE stage', async () => {
+test('database failure exposes only a bounded category, SQLSTATE, line and exit marker', async () => {
   const source = await read('../scripts/run-marketplace-participation-database.sh');
   for (const token of [
-    'sanitized_sqlstate',
+    'sanitized_failure_marker',
     'VERBOSITY=verbose',
-    "CURRENT_STAGE=\"${label}-sql-e2e-${sqlstate}\"",
-    "[[ \"$code\" =~ ^[a-z0-9]{5}$ ]] || code=\"unknown\"",
+    "trainingos_marketplace_participation_v1_e2e\\.sql:[0-9]+",
+    "category=\"fatal\"",
+    "category=\"error\"",
+    "category=\"client\"",
+    "printf '%s-%s-line%s-exit%s'",
+    "CURRENT_STAGE=\"${label}-sql-e2e-${marker}\"",
   ]) assert.ok(source.includes(token), token);
   assert.doesNotMatch(source, /cat\s+.*sql-e2e|tail\s+.*sql-e2e|echo\s+.*e2e_log/);
 });
