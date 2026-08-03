@@ -20,6 +20,25 @@ test('sanitizer emits only the allowlisted failed Teacher Hub case id', () => {
   assert.equal(teacherHubPlaywrightDiagnosticContract.privateSourcePublished, false);
 });
 
+test('sanitizer removes ANSI reporter control codes before matching', () => {
+  const log = [
+    '\u001b[31m  ✘  4 [chromium] › teacher-operations-hub-fixture.spec.ts:93:3 › resets selected occurrence and disclosure state when the authorized class changes\u001b[39m',
+    '\u001b[31m  1) [chromium] › teacher-operations-hub-fixture.spec.ts:93:3 › resets selected occurrence and disclosure state when the authorized class changes\u001b[39m',
+  ].join('\n');
+
+  assert.equal(sanitizeTeacherHubPlaywrightFailure(log), 'class-change-reset');
+  assert.equal(teacherHubPlaywrightDiagnosticContract.ansiControlCodesPublished, false);
+});
+
+test('sanitizer supports common cross-platform failure glyphs', () => {
+  const log = [
+    '  × 5 [chromium] › teacher-operations-hub-fixture.spec.ts:114:3 › keeps Teacher Queue items bound to canonical destination parameters',
+    '  ✗ 7 [chromium] › teacher-operations-hub-fixture.spec.ts:126:5 › visual acceptance tablet-768',
+  ].join('\n');
+
+  assert.equal(sanitizeTeacherHubPlaywrightFailure(log), 'queue-destinations+visual-tablet-768');
+});
+
 test('sanitizer reports multiple safe ids deterministically and unknown otherwise', () => {
   const log = [
     '  ✘  6 [chromium] › teacher-operations-hub-fixture.spec.ts:126:5 › visual acceptance tablet-1024',
