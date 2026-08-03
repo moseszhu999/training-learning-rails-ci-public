@@ -67,6 +67,17 @@ test('database runner fixes migration counts, fresh replays, upgrade, rollback a
   assert.doesNotMatch(source, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
 });
 
+test('database failure exposes only a bounded SQLSTATE stage', async () => {
+  const source = await read('../scripts/run-marketplace-participation-database.sh');
+  for (const token of [
+    'sanitized_sqlstate',
+    'VERBOSITY=verbose',
+    "CURRENT_STAGE=\"${label}-sql-e2e-${sqlstate}\"",
+    "[[ \"$code\" =~ ^[a-z0-9]{5}$ ]] || code=\"unknown\"",
+  ]) assert.ok(source.includes(token), token);
+  assert.doesNotMatch(source, /cat\s+.*sql-e2e|tail\s+.*sql-e2e|echo\s+.*e2e_log/);
+});
+
 test('private profile controller routes Marketplace Participation before generic fallback', async () => {
   const source = await read('../scripts/run-private-profile.mjs');
   assert.match(source, /maybeRunMarketplaceParticipationProfile/);
