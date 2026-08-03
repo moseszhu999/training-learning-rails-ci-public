@@ -92,6 +92,51 @@ sanitized_failure_marker(){
   printf '%s-%s-line%s-exit%s' "$category" "$sqlstate" "$line" "$exit_code"
 }
 
+sanitized_start_failure_marker(){
+  local log_path="$1" exit_code="$2" sqlstate category migration_scope
+  sqlstate="$(grep -Eo '(ERROR|FATAL|PANIC):[[:space:]]+[A-Z0-9]{5}:' "$log_path" 2>/dev/null \
+    | tail -n 1 \
+    | grep -Eo '[A-Z0-9]{5}' \
+    | tr '[:upper:]' '[:lower:]' \
+    || true)"
+  [[ "$sqlstate" =~ ^[a-z0-9]{5}$ ]] || sqlstate="unknown"
+
+  if grep -q "$migration_name" "$log_path" 2>/dev/null; then
+    migration_scope="marketplace"
+  elif grep -Eq '20[0-9]{12}_[a-z0-9_]+\.sql' "$log_path" 2>/dev/null; then
+    migration_scope="base_history"
+  else
+    migration_scope="none"
+  fi
+
+  if grep -q 'FATAL:' "$log_path" 2>/dev/null; then
+    category="fatal"
+  elif grep -q 'ERROR:' "$log_path" 2>/dev/null; then
+    category="error"
+  elif grep -Eqi '(supabase|docker|container|psql):.*(error|failed)' "$log_path" 2>/dev/null; then
+    category="client"
+  else
+    category="unknown"
+  fi
+
+  [[ "$exit_code" =~ ^[0-9]{1,3}$ ]] || exit_code="0"
+  printf '%s-%s-migration%s-exit%s' "$category" "$sqlstate" "$migration_scope" "$exit_code"
+}
+
+start_with_marker(){
+  local workdir="$1" label="$2" start_log start_code marker
+  start_log="$RUNNER_TEMP/trainingos-marketplace-participation-${label}.log"
+  set +e
+  supabase --workdir "$workdir" start >"$start_log" 2>&1
+  start_code=$?
+  set -e
+  if [[ "$start_code" != 0 ]]; then
+    marker="$(sanitized_start_failure_marker "$start_log" "$start_code")"
+    CURRENT_STAGE="${label}-${marker}"
+    return 1
+  fi
+}
+
 run_e2e(){
   local workdir="$1" label="$2" status_file db_url e2e_log residue_log catalog_log
   local elevated_role="service""_role"
@@ -207,8 +252,30 @@ sealed fresh-bootstrap python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh
 CURRENT_STAGE="fresh-migration-count"
 [[ "$(manifest_count "$fresh/supabase/trainingos-bootstrap-manifest.json")" == "$canonical_migration_count" ]]
 
+CURRENT_STAGE="baseline-base-worktree"
+sealed baseline-base-worktree git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_repo" "$expected_base_sha"
+
+CURRENT_STAGE="baseline-init"
+sealed baseline-init supabase --workdir "$upgrade" init --force --yes
+rm -rf "$upgrade/supabase/migrations"
+
+CURRENT_STAGE="baseline-bootstrap"
+sealed baseline-bootstrap python "$base_repo/scripts/build-trainingos-fresh-bootstrap.py" \
+  --repo-root "$base_repo" \
+  --output-dir "$upgrade/supabase/migrations" \
+  --commit-sha "$expected_base_sha"
+
+CURRENT_STAGE="baseline-migration-count"
+[[ "$(manifest_count "$upgrade/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
+
+CURRENT_STAGE="baseline-start"
+start_with_marker "$upgrade" baseline-start
+
+CURRENT_STAGE="baseline-stop"
+sealed baseline-stop supabase --workdir "$upgrade" stop --no-backup
+
 CURRENT_STAGE="fresh-start"
-sealed fresh-start supabase --workdir "$fresh" start
+start_with_marker "$fresh" fresh-start
 
 CURRENT_STAGE="fresh-reset"
 sealed fresh-reset supabase --workdir "$fresh" db reset --local --no-seed
@@ -218,24 +285,8 @@ run_e2e "$fresh" fresh-two
 CURRENT_STAGE="fresh-stop"
 sealed fresh-stop supabase --workdir "$fresh" stop --no-backup
 
-CURRENT_STAGE="upgrade-base-worktree"
-sealed upgrade-base-worktree git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_repo" "$expected_base_sha"
-
-CURRENT_STAGE="upgrade-init"
-sealed upgrade-init supabase --workdir "$upgrade" init --force --yes
-rm -rf "$upgrade/supabase/migrations"
-
-CURRENT_STAGE="upgrade-base-bootstrap"
-sealed upgrade-base-bootstrap python "$base_repo/scripts/build-trainingos-fresh-bootstrap.py" \
-  --repo-root "$base_repo" \
-  --output-dir "$upgrade/supabase/migrations" \
-  --commit-sha "$expected_base_sha"
-
-CURRENT_STAGE="upgrade-base-count"
-[[ "$(manifest_count "$upgrade/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
-
 CURRENT_STAGE="upgrade-start"
-sealed upgrade-start supabase --workdir "$upgrade" start
+start_with_marker "$upgrade" upgrade-start
 
 CURRENT_STAGE="upgrade-base-reset"
 sealed upgrade-base-reset supabase --workdir "$upgrade" db reset --local --no-seed
