@@ -1,0 +1,60 @@
+name: Update Marketplace Participation start classifier
+on:
+  push:
+    branches:
+      - ci/marketplace-participation-start-classifier-v1
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add bounded baseline and exact start diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          runner = Path('scripts/run-marketplace-participation-database.sh')
+          source = runner.read_text(encoding='utf-8')
+
+          function_anchor = """  printf '%s-%s-line%s-exit%s' \"$category\" \"$sqlstate\" \"$line\" \"$exit_code\"\n}\n\nrun_e2e(){\n"""
+          function_replacement = """  printf '%s-%s-line%s-exit%s' \"$category\" \"$sqlstate\" \"$line\" \"$exit_code\"\n}\n\nsanitized_start_failure_marker(){\n  local log_path=\"$1\" exit_code=\"$2\" sqlstate category migration_scope\n  sqlstate=\"$(grep -Eo '(ERROR|FATAL|PANIC):[[:space:]]+[A-Z0-9]{5}:' \"$log_path\" 2>/dev/null \\\n    | tail -n 1 \\\n    | grep -Eo '[A-Z0-9]{5}' \\\n    | tr '[:upper:]' '[:lower:]' \\\n    || true)\"\n  [[ \"$sqlstate\" =~ ^[a-z0-9]{5}$ ]] || sqlstate=\"unknown\"\n\n  if grep -q \"$migration_name\" \"$log_path\" 2>/dev/null; then\n    migration_scope=\"marketplace\"\n  elif grep -Eq '20[0-9]{12}_[a-z0-9_]+\\.sql' \"$log_path\" 2>/dev/null; then\n    migration_scope=\"base_history\"\n  else\n    migration_scope=\"none\"\n  fi\n\n  if grep -q 'FATAL:' \"$log_path\" 2>/dev/null; then\n    category=\"fatal\"\n  elif grep -q 'ERROR:' \"$log_path\" 2>/dev/null; then\n    category=\"error\"\n  elif grep -Eqi '(supabase|docker|container|psql):.*(error|failed)' \"$log_path\" 2>/dev/null; then\n    category=\"client\"\n  else\n    category=\"unknown\"\n  fi\n\n  [[ \"$exit_code\" =~ ^[0-9]{1,3}$ ]] || exit_code=\"0\"\n  printf '%s-%s-migration%s-exit%s' \"$category\" \"$sqlstate\" \"$migration_scope\" \"$exit_code\"\n}\n\nstart_with_marker(){\n  local workdir=\"$1\" label=\"$2\" start_log start_code marker\n  start_log=\"$RUNNER_TEMP/trainingos-marketplace-participation-${label}.log\"\n  set +e\n  supabase --workdir \"$workdir\" start >\"$start_log\" 2>&1\n  start_code=$?\n  set -e\n  if [[ \"$start_code\" != 0 ]]; then\n    marker=\"$(sanitized_start_failure_marker \"$start_log\" \"$start_code\")\"\n    CURRENT_STAGE=\"${label}-${marker}\"\n    return 1\n  fi\n}\n\nrun_e2e(){\n"""
+          if source.count(function_anchor) != 1:
+              raise SystemExit('function insertion anchor mismatch')
+          source = source.replace(function_anchor, function_replacement)
+
+          fresh_anchor = """CURRENT_STAGE=\"fresh-start\"\nsealed fresh-start supabase --workdir \"$fresh\" start\n"""
+          fresh_replacement = """CURRENT_STAGE=\"baseline-base-worktree\"\nsealed baseline-base-worktree git -C \"$PRIVATE_REPO_PATH\" worktree add --detach \"$base_repo\" \"$expected_base_sha\"\n\nCURRENT_STAGE=\"baseline-init\"\nsealed baseline-init supabase --workdir \"$upgrade\" init --force --yes\nrm -rf \"$upgrade/supabase/migrations\"\n\nCURRENT_STAGE=\"baseline-bootstrap\"\nsealed baseline-bootstrap python \"$base_repo/scripts/build-trainingos-fresh-bootstrap.py\" \\\n  --repo-root \"$base_repo\" \\\n  --output-dir \"$upgrade/supabase/migrations\" \\\n  --commit-sha \"$expected_base_sha\"\n\nCURRENT_STAGE=\"baseline-migration-count\"\n[[ \"$(manifest_count \"$upgrade/supabase/trainingos-bootstrap-manifest.json\")\" == \"$base_migration_count\" ]]\n\nCURRENT_STAGE=\"baseline-start\"\nstart_with_marker \"$upgrade\" baseline-start\n\nCURRENT_STAGE=\"baseline-stop\"\nsealed baseline-stop supabase --workdir \"$upgrade\" stop --no-backup\n\nCURRENT_STAGE=\"fresh-start\"\nstart_with_marker \"$fresh\" fresh-start\n"""
+          if source.count(fresh_anchor) != 1:
+              raise SystemExit('fresh start anchor mismatch')
+          source = source.replace(fresh_anchor, fresh_replacement)
+
+          upgrade_anchor = """CURRENT_STAGE=\"upgrade-base-worktree\"\nsealed upgrade-base-worktree git -C \"$PRIVATE_REPO_PATH\" worktree add --detach \"$base_repo\" \"$expected_base_sha\"\n\nCURRENT_STAGE=\"upgrade-init\"\nsealed upgrade-init supabase --workdir \"$upgrade\" init --force --yes\nrm -rf \"$upgrade/supabase/migrations\"\n\nCURRENT_STAGE=\"upgrade-base-bootstrap\"\nsealed upgrade-base-bootstrap python \"$base_repo/scripts/build-trainingos-fresh-bootstrap.py\" \\\n  --repo-root \"$base_repo\" \\\n  --output-dir \"$upgrade/supabase/migrations\" \\\n  --commit-sha \"$expected_base_sha\"\n\nCURRENT_STAGE=\"upgrade-base-count\"\n[[ \"$(manifest_count \"$upgrade/supabase/trainingos-bootstrap-manifest.json\")\" == \"$base_migration_count\" ]]\n\nCURRENT_STAGE=\"upgrade-start\"\nsealed upgrade-start supabase --workdir \"$upgrade\" start\n"""
+          upgrade_replacement = """CURRENT_STAGE=\"upgrade-start\"\nstart_with_marker \"$upgrade\" upgrade-start\n"""
+          if source.count(upgrade_anchor) != 1:
+              raise SystemExit('upgrade start anchor mismatch')
+          source = source.replace(upgrade_anchor, upgrade_replacement)
+          runner.write_text(source, encoding='utf-8')
+
+          test_file = Path('tests/public-marketplace-participation-profile.test.mjs')
+          test_source = test_file.read_text(encoding='utf-8')
+          test_anchor = """    \"CURRENT_STAGE=\\\"${label}-sql-e2e-${marker}\\\"\",\n  ]) assert.ok(source.includes(token), token);\n  assert.doesNotMatch(source, /cat\\s+.*sql-e2e|tail\\s+.*sql-e2e|echo\\s+.*e2e_log/);\n});\n"""
+          test_replacement = """    \"CURRENT_STAGE=\\\"${label}-sql-e2e-${marker}\\\"\",\n  ]) assert.ok(source.includes(token), token);\n  assert.doesNotMatch(source, /cat\\s+.*sql-e2e|tail\\s+.*sql-e2e|echo\\s+.*e2e_log/);\n});\n\ntest('start diagnosis compares base and exact migrations without exposing private output', async () => {\n  const source = await read('../scripts/run-marketplace-participation-database.sh');\n  for (const token of [\n    'sanitized_start_failure_marker',\n    'start_with_marker',\n    'baseline-migration-count',\n    'start_with_marker \"$upgrade\" baseline-start',\n    'start_with_marker \"$fresh\" fresh-start',\n    \"migration_scope=\\\"marketplace\\\"\",\n    \"migration_scope=\\\"base_history\\\"\",\n    \"migration_scope=\\\"none\\\"\",\n    \"printf '%s-%s-migration%s-exit%s'\",\n  ]) assert.ok(source.includes(token), token);\n  assert.doesNotMatch(source, /cat\\s+.*baseline-start|cat\\s+.*fresh-start|echo\\s+.*start_log/);\n  assert.doesNotMatch(source, /migration_scope=.*[0-9]{14}_/);\n});\n"""
+          if test_source.count(test_anchor) != 1:
+              raise SystemExit('public test insertion anchor mismatch')
+          test_source = test_source.replace(test_anchor, test_replacement)
+          test_file.write_text(test_source, encoding='utf-8')
+          PY
+          rm .github/workflows/update-marketplace-start-classifier.yml
+          bash -n scripts/run-marketplace-participation-database.sh
+          node --test tests/public-marketplace-participation-profile.test.mjs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/run-marketplace-participation-database.sh tests/public-marketplace-participation-profile.test.mjs .github/workflows/update-marketplace-start-classifier.yml
+          git commit -m "ci: classify Marketplace baseline and exact starts"
+          git push
