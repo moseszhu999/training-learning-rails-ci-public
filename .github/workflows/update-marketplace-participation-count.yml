@@ -1,0 +1,47 @@
+name: Update Marketplace Participation migration count
+on:
+  push:
+    branches:
+      - ci/marketplace-participation-count-364-v1
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update fixed migration counts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          replacements = {
+              Path('scripts/run-marketplace-participation-profile.mjs'): [
+                  ('const CANONICAL_MIGRATION_COUNT = 361;', 'const CANONICAL_MIGRATION_COUNT = 364;'),
+              ],
+              Path('scripts/run-marketplace-participation-database.sh'): [
+                  ('canonical_migration_count=361', 'canonical_migration_count=364'),
+                  ('base_migration_count=360', 'base_migration_count=363'),
+              ],
+              Path('tests/public-marketplace-participation-profile.test.mjs'): [
+                  ("'canonical_migration_count=361'", "'canonical_migration_count=364'"),
+                  ("'base_migration_count=360'", "'base_migration_count=363'"),
+              ],
+          }
+          for path, pairs in replacements.items():
+              text = path.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  if text.count(old) != 1:
+                      raise SystemExit(f'{path}: expected exactly one {old!r}')
+                  text = text.replace(old, new)
+              path.write_text(text, encoding='utf-8')
+          PY
+          rm .github/workflows/update-marketplace-participation-count.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/run-marketplace-participation-profile.mjs scripts/run-marketplace-participation-database.sh tests/public-marketplace-participation-profile.test.mjs .github/workflows/update-marketplace-participation-count.yml
+          git commit -m "ci: align Marketplace Participation migration count to 364"
+          git push
