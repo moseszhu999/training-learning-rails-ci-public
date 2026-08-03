@@ -33,14 +33,20 @@ const FAILURE_CASES = Object.freeze([
   },
 ]);
 
-const FAILURE_LINE = /^\s*(?:\d+\)|[✘×xX]\s+\d+|\[[^\]]+\]\s+›)/;
-const PASS_LINE = /^\s*[✓✔]/;
+const ANSI_ESCAPE = /(?:\u001B\[[0-?]*[ -/]*[@-~]|\u009B[0-?]*[ -/]*[@-~])/g;
+const FAILURE_LINE = /^\s*(?:\d+\)|(?:✘|×|✗|⨯|x|X)\s*(?:\d+)?(?:\s|\[)|\[[^\]]+\]\s+›)/;
+const PASS_LINE = /^\s*(?:✓|✔|√)/;
+
+function normalizeReporterLine(line) {
+  return String(line || '').replace(ANSI_ESCAPE, '');
+}
 
 export function sanitizeTeacherHubPlaywrightFailure(text) {
   const lines = String(text || '').split(/\r?\n/);
   const failed = new Set();
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = normalizeReporterLine(rawLine);
     if (PASS_LINE.test(line)) continue;
     if (!FAILURE_LINE.test(line) && !/\bfailed\b/i.test(line)) continue;
     for (const item of FAILURE_CASES) {
@@ -52,8 +58,9 @@ export function sanitizeTeacherHubPlaywrightFailure(text) {
 }
 
 export const teacherHubPlaywrightDiagnosticContract = Object.freeze({
-  version: 'teacher-hub-playwright-diagnostics-v1',
+  version: 'teacher-hub-playwright-diagnostics-v2-ansi-safe',
   allowedFailureIds: Object.freeze(FAILURE_CASES.map((item) => item.id)),
+  ansiControlCodesPublished: false,
   rawLogPublished: false,
   privateSourcePublished: false,
 });
