@@ -36,10 +36,7 @@ export const marketplaceReviewerAuthorityCommands = Object.freeze([
     'packages/training-marketplace-reviewer-authority/test/reviewer-authority.test.mjs',
   ], 'node'),
   command('python-static', 'python', [
-    '-m',
-    'unittest',
-    '-v',
-    'tests.test_trainingos_marketplace_reviewer_authority_owner_v1',
+    'tests/test_trainingos_marketplace_reviewer_authority_owner_v1.py',
   ], 'python'),
   command('database-replay', 'bash', [
     path.join(publicRoot, 'scripts/run-marketplace-reviewer-authority-database.sh'),
