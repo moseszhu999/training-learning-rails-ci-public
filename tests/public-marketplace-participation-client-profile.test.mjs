@@ -61,8 +61,8 @@ test('profile runs focused adapter, declaration, typecheck and build gates', () 
 
 test('router invokes client profile before database Participation owner profile', () => {
   assert.match(router, /maybeRunMarketplaceParticipationClientProfile/);
-  const clientIndex = router.indexOf('const marketplaceParticipationClient');
-  const databaseIndex = router.indexOf('const marketplaceParticipation');
+  const clientIndex = router.indexOf('const marketplaceParticipationClient = ');
+  const databaseIndex = router.indexOf('const marketplaceParticipation = ');
   assert.ok(clientIndex >= 0);
   assert.ok(databaseIndex > clientIndex);
 });
