@@ -27,12 +27,12 @@ test('reviewer authority runner is exact to nine private files', () => {
   ]) assert.match(profile, escaped(marker));
 });
 
-test('reviewer authority runner executes fixed node, python, database and build gates', () => {
+test('reviewer authority runner executes fixed node, direct Python, database and build gates', () => {
   for (const marker of [
     "command('node-adapter'",
     'reviewer-authority.test.mjs',
     "command('python-static'",
-    'tests.test_trainingos_marketplace_reviewer_authority_owner_v1',
+    "'tests/test_trainingos_marketplace_reviewer_authority_owner_v1.py'",
     "command('database-replay'",
     'run-marketplace-reviewer-authority-database.sh',
     "command('typecheck'",
@@ -43,6 +43,7 @@ test('reviewer authority runner executes fixed node, python, database and build 
     'CANONICAL_MIGRATION_COUNT = 365',
     "selectedSuite: 'marketplace-reviewer-authority'",
   ]) assert.match(profile, escaped(marker));
+  assert.doesNotMatch(profile, /tests\.test_trainingos_marketplace_reviewer_authority_owner_v1/);
 });
 
 test('database profile runs fresh, repeated and upgrade replay without production access', () => {
