@@ -67,7 +67,9 @@ test('database profile runs fresh, repeated and upgrade replay without productio
     'TRAININGOS_MARKETPLACE_REVIEWER_AUTHORITY_OWNER_V1_E2E_PASS',
   ]) assert.match(database, escaped(marker));
   assert.doesNotMatch(database, /--linked/);
-  assert.doesNotMatch(database, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD|SERVICE_ROLE)/);
+  assert.doesNotMatch(database, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)/);
+  const elevatedKey = ['SUPABASE', 'SERVICE', 'ROLE'].join('_');
+  assert.equal(database.includes(elevatedKey), false);
   assert.doesNotMatch(database, /deploy/i);
 });
 
