@@ -1,3 +1,4 @@
+export * from './run-marketplace-authenticated-submission-ui-profile.mjs';
 export * from './run-marketplace-onboarding-intake-profile.mjs';
 
 import { closeSync, openSync } from 'node:fs';
@@ -5,6 +6,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { maybeRunMarketplaceAuthenticatedSubmissionUiProfile } from './run-marketplace-authenticated-submission-ui-profile.mjs';
 import { maybeRunMarketplaceOnboardingIntakeProfile } from './run-marketplace-onboarding-intake-profile.mjs';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -102,6 +104,9 @@ function failedContractResult() {
 }
 
 export async function maybeRunMarketplaceParticipationProfile(input) {
+  const authenticatedSubmissionUi = await maybeRunMarketplaceAuthenticatedSubmissionUiProfile(input);
+  if (authenticatedSubmissionUi) return authenticatedSubmissionUi;
+
   const onboardingIntake = await maybeRunMarketplaceOnboardingIntakeProfile(input);
   if (onboardingIntake) return onboardingIntake;
 
