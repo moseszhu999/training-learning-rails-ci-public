@@ -154,10 +154,8 @@ select 'claim_decisions=' || count(*)
 from public.trainingos_marketplace_claim_review_decisions;
 select 'fixture_claims=' || count(*)
 from public.trainingos_marketplace_claim_requests
-where id in (
-  'a3100000-0000-4000-8000-000000000001',
-  'a3100000-0000-4000-8000-000000000002',
-  'a3100000-0000-4000-8000-000000000003'
+where display_name in (
+  'Example Provider A', 'Example Provider B', 'Other Provider'
 );
 SQL
   grep -qx 'fixtures=0' "$residue_log"
