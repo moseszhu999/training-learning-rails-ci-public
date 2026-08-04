@@ -1,7 +1,7 @@
 {
-  "requestId": "marketplace-reviewer-authority-b986557c-v1",
+  "requestId": "marketplace-reviewer-authority-8c522b22-v2",
   "reportIssueNumber": 452,
-  "privateExactSha": "b986557c8a84aa942f64c6968ade04bafb7f2593",
+  "privateExactSha": "8c522b2238d37d6c0cadbc044a1fa80a7cadb912",
   "expectedBaseSha": "d0e028c1f229be4574400ca42c8939f6123bbea9",
   "expectedMainSha": "",
   "validationProfile": "generic-owned",
