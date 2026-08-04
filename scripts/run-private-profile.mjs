@@ -8,6 +8,7 @@ export * from './run-workspace-ia-density-profile.mjs';
 export * from './run-marketplace-reviewer-authority-profile.mjs';
 export * from './run-marketplace-claim-review-lifecycle-profile.mjs';
 export * from './run-marketplace-public-object-profile.mjs';
+export * from './run-marketplace-participation-client-profile.mjs';
 export * from './run-learning-content-resolution-db-profile.mjs';
 export * from './run-challenge-preparation-recipe-profile.mjs';
 export * from './run-learning-workspace-contract-fix-profile.mjs';
@@ -31,6 +32,7 @@ import { maybeRunWorkspaceIaDensityProfile } from './run-workspace-ia-density-pr
 import { maybeRunMarketplaceReviewerAuthorityProfile } from './run-marketplace-reviewer-authority-profile.mjs';
 import { maybeRunMarketplaceClaimReviewProfile } from './run-marketplace-claim-review-lifecycle-profile.mjs';
 import { maybeRunMarketplacePublicObjectProfile } from './run-marketplace-public-object-profile.mjs';
+import { maybeRunMarketplaceParticipationClientProfile } from './run-marketplace-participation-client-profile.mjs';
 import { maybeRunLearningContentResolutionDbProfile } from './run-learning-content-resolution-db-profile.mjs';
 import { maybeRunChallengePreparationRecipeProfile } from './run-challenge-preparation-recipe-profile.mjs';
 import { maybeRunLearningWorkspaceContractFixProfile } from './run-learning-workspace-contract-fix-profile.mjs';
@@ -112,6 +114,9 @@ export async function runProfile(input) {
 
   const marketplacePublicObject = await maybeRunMarketplacePublicObjectProfile(input);
   if (marketplacePublicObject) return marketplacePublicObject;
+
+  const marketplaceParticipationClient = await maybeRunMarketplaceParticipationClientProfile(input);
+  if (marketplaceParticipationClient) return marketplaceParticipationClient;
 
   const marketplaceParticipation = await maybeRunMarketplaceParticipationProfile(input);
   if (marketplaceParticipation) return marketplaceParticipation;
