@@ -34,7 +34,7 @@ bin_dir="$RUNNER_TEMP/trainingos-marketplace-matching-context-bin"
 mkdir -p "$bin_dir"
 cat >"$bin_dir/supabase" <<'WRAPPER'
 #!/usr/bin/env bash
-exec npx --yes supabase@latest "$@"
+exec npx --yes supabase@2.101.0 "$@"
 WRAPPER
 chmod 700 "$bin_dir/supabase"
 export PATH="$bin_dir:$PATH"
