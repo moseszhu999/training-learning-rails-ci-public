@@ -65,10 +65,62 @@ print(manifest.get('migrationCount', -1))
 PY
 }
 
-start_local(){
-  local workdir="$1" label="$2"
-  CURRENT_STAGE="$label"
-  sealed "$label" supabase --workdir "$workdir" start
+sanitized_start_failure_marker(){
+  local log_path="$1" exit_code="$2" sqlstate category migration_scope resource
+  sqlstate="$(grep -Eo '(ERROR|FATAL|PANIC):[[:space:]]+[A-Z0-9]{5}:' "$log_path" 2>/dev/null \
+    | tail -n 1 \
+    | grep -Eo '[A-Z0-9]{5}' \
+    | tr '[:upper:]' '[:lower:]' \
+    || true)"
+  [[ "$sqlstate" =~ ^[a-z0-9]{5}$ ]] || sqlstate="unknown"
+
+  if grep -q "$migration_name" "$log_path" 2>/dev/null; then
+    migration_scope="matching_context"
+  elif grep -Eq '20[0-9]{12}_[a-z0-9_]+\.sql' "$log_path" 2>/dev/null; then
+    migration_scope="base_history"
+  else
+    migration_scope="none"
+  fi
+
+  if grep -Eqi '(address already in use|port is already allocated|bind:.*failed)' "$log_path" 2>/dev/null; then
+    resource="port"
+  elif grep -Eqi '(pull access denied|manifest unknown|failed to pull|image.*not found)' "$log_path" 2>/dev/null; then
+    resource="image"
+  elif grep -Eqi '(container.*(unhealthy|failed|exited)|docker daemon|cannot connect to docker)' "$log_path" 2>/dev/null; then
+    resource="container"
+  elif grep -Eqi '(config.*(invalid|error)|toml.*(invalid|error))' "$log_path" 2>/dev/null; then
+    resource="config"
+  else
+    resource="none"
+  fi
+
+  if grep -q 'FATAL:' "$log_path" 2>/dev/null; then
+    category="fatal"
+  elif grep -q 'ERROR:' "$log_path" 2>/dev/null; then
+    category="error"
+  elif grep -Eqi '(docker|container|supabase):.*(error|failed|unhealthy)' "$log_path" 2>/dev/null; then
+    category="client"
+  else
+    category="unknown"
+  fi
+
+  [[ "$exit_code" =~ ^[0-9]{1,3}$ ]] || exit_code="0"
+  printf '%s-%s-migration%s-resource%s-exit%s' \
+    "$category" "$sqlstate" "$migration_scope" "$resource" "$exit_code"
+}
+
+start_with_marker(){
+  local workdir="$1" label="$2" start_log start_code marker
+  start_log="$RUNNER_TEMP/trainingos-marketplace-matching-context-${label}.log"
+  set +e
+  supabase --workdir "$workdir" start >"$start_log" 2>&1
+  start_code=$?
+  set -e
+  if [[ "$start_code" != 0 ]]; then
+    marker="$(sanitized_start_failure_marker "$start_log" "$start_code")"
+    CURRENT_STAGE="${label}-${marker}"
+    return 1
+  fi
 }
 
 run_e2e(){
@@ -168,38 +220,52 @@ sealed fresh-bootstrap python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh
 CURRENT_STAGE="fresh-migration-count"
 [[ "$(manifest_count "$fresh/supabase/trainingos-bootstrap-manifest.json")" == "$canonical_migration_count" ]]
 
-CURRENT_STAGE="baseline-worktree"
-sealed baseline-worktree git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_repo" "$expected_base_sha"
+CURRENT_STAGE="baseline-base-worktree"
+sealed baseline-base-worktree git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_repo" "$expected_base_sha"
 
-CURRENT_STAGE="upgrade-init"
-sealed upgrade-init supabase --workdir "$upgrade" init --force --yes
+CURRENT_STAGE="baseline-init"
+sealed baseline-init supabase --workdir "$upgrade" init --force --yes
 rm -rf "$upgrade/supabase/migrations"
 
-CURRENT_STAGE="upgrade-base-bootstrap"
-sealed upgrade-base-bootstrap python "$base_repo/scripts/build-trainingos-fresh-bootstrap.py" \
+CURRENT_STAGE="baseline-bootstrap"
+sealed baseline-bootstrap python "$base_repo/scripts/build-trainingos-fresh-bootstrap.py" \
   --repo-root "$base_repo" \
   --output-dir "$upgrade/supabase/migrations" \
   --commit-sha "$expected_base_sha"
 
-CURRENT_STAGE="base-migration-count"
+CURRENT_STAGE="baseline-migration-count"
 [[ "$(manifest_count "$upgrade/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
 
-start_local "$fresh" fresh-start
+CURRENT_STAGE="baseline-start"
+start_with_marker "$upgrade" baseline-start
+
+CURRENT_STAGE="baseline-stop"
+sealed baseline-stop supabase --workdir "$upgrade" stop --no-backup
+
+CURRENT_STAGE="fresh-start"
+start_with_marker "$fresh" fresh-start
+
 CURRENT_STAGE="fresh-reset"
 sealed fresh-reset supabase --workdir "$fresh" db reset --local --no-seed
 run_e2e "$fresh" fresh-one
 run_e2e "$fresh" fresh-two
+
 CURRENT_STAGE="fresh-stop"
 sealed fresh-stop supabase --workdir "$fresh" stop --no-backup
 
-start_local "$upgrade" upgrade-start
+CURRENT_STAGE="upgrade-start"
+start_with_marker "$upgrade" upgrade-start
+
 CURRENT_STAGE="upgrade-base-reset"
 sealed upgrade-base-reset supabase --workdir "$upgrade" db reset --local --no-seed
+
 CURRENT_STAGE="upgrade-copy-forward-migration"
 cp "$PRIVATE_REPO_PATH/supabase/migrations/$migration_name" "$upgrade/supabase/migrations/"
+
 CURRENT_STAGE="upgrade-apply"
 sealed upgrade-apply supabase --workdir "$upgrade" migration up --local --include-all
 run_e2e "$upgrade" upgrade
+
 CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
