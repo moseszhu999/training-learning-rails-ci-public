@@ -124,7 +124,7 @@ start_with_marker(){
   local workdir="$1" label="$2" start_log start_code marker
   start_log="$RUNNER_TEMP/trainingos-marketplace-matching-context-${label}.log"
   set +e
-  supabase --workdir "$workdir" start >"$start_log" 2>&1
+  supabase --workdir "$workdir" db start >"$start_log" 2>&1
   start_code=$?
   set -e
   if [[ "$start_code" != 0 ]]; then
@@ -284,4 +284,4 @@ CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version workdirs=PASS fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
+echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version workdirs=PASS database_only=PASS fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
