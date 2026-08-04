@@ -219,7 +219,7 @@ SQL
 rm -rf "$fresh" "$upgrade" "$base_repo"
 
 CURRENT_STAGE="fresh-init"
-sealed fresh-init supabase --workdir "$fresh" init --force --yes
+sealed fresh-init supabase --workdir "$fresh" init --force
 rm -rf "$fresh/supabase/migrations"
 
 CURRENT_STAGE="fresh-bootstrap"
@@ -235,7 +235,7 @@ CURRENT_STAGE="baseline-base-worktree"
 sealed baseline-base-worktree git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_repo" "$expected_base_sha"
 
 CURRENT_STAGE="baseline-init"
-sealed baseline-init supabase --workdir "$upgrade" init --force --yes
+sealed baseline-init supabase --workdir "$upgrade" init --force
 rm -rf "$upgrade/supabase/migrations"
 
 CURRENT_STAGE="baseline-bootstrap"
