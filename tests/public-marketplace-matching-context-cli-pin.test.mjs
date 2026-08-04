@@ -24,6 +24,15 @@ test('Supabase 2.101 init uses force without unsupported yes flag', () => {
   assert.doesNotMatch(database, /init --force --yes/);
 });
 
+test('runner recreates isolated workdirs before Supabase init', () => {
+  assert.match(database, /CURRENT_STAGE="workdir-create"\nmkdir -p "\$fresh" "\$upgrade"/);
+  const workdirIndex = database.indexOf('CURRENT_STAGE="workdir-create"');
+  const freshInitIndex = database.indexOf('CURRENT_STAGE="fresh-init"');
+  assert.ok(workdirIndex >= 0);
+  assert.ok(freshInitIndex > workdirIndex);
+  assert.match(database, /workdirs=PASS/);
+});
+
 test('release binary install keeps download output sealed and cleans temporary files', () => {
   assert.match(database, /supabase-download\.log/);
   assert.match(database, /supabase-extract\.log/);

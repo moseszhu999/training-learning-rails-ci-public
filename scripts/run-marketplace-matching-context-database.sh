@@ -218,6 +218,9 @@ SQL
 
 rm -rf "$fresh" "$upgrade" "$base_repo"
 
+CURRENT_STAGE="workdir-create"
+mkdir -p "$fresh" "$upgrade"
+
 CURRENT_STAGE="fresh-init"
 sealed fresh-init supabase --workdir "$fresh" init --force
 rm -rf "$fresh/supabase/migrations"
@@ -281,4 +284,4 @@ CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
+echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version workdirs=PASS fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
