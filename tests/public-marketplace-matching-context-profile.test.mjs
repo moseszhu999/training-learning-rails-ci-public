@@ -70,13 +70,40 @@ test('profile runs application, database, typecheck, build and bundle gates', ()
   ]) assert.ok(profile.includes(marker), marker);
 });
 
-test('database runner performs fresh, second fresh, upgrade and zero-residue checks', () => {
+test('database runner separates baseline, fresh and upgrade starts', () => {
   for (const marker of [
     'canonical_migration_count=367',
     'base_migration_count=366',
+    'CURRENT_STAGE="baseline-start"',
+    'start_with_marker "$upgrade" baseline-start',
+    'CURRENT_STAGE="baseline-stop"',
+    'start_with_marker "$fresh" fresh-start',
+    'start_with_marker "$upgrade" upgrade-start',
     'run_e2e "$fresh" fresh-one',
     'run_e2e "$fresh" fresh-two',
     'run_e2e "$upgrade" upgrade',
+  ]) assert.ok(database.includes(marker), marker);
+});
+
+test('start failures expose bounded category, migration scope and resource only', () => {
+  for (const marker of [
+    'sanitized_start_failure_marker()',
+    'migration_scope="matching_context"',
+    'migration_scope="base_history"',
+    'resource="port"',
+    'resource="image"',
+    'resource="container"',
+    'resource="config"',
+    "printf '%s-%s-migration%s-resource%s-exit%s'",
+    'CURRENT_STAGE="${label}-${marker}"',
+  ]) assert.ok(database.includes(marker), marker);
+  assert.doesNotMatch(database, /cat .*\.log/);
+  assert.doesNotMatch(database, /tail .*\.log/);
+  assert.doesNotMatch(database, /echo .*start_log/);
+});
+
+test('database runner enforces E2E, ACL and zero-residue checks', () => {
+  for (const marker of [
     'TRAININGOS_MARKETPLACE_MATCHING_CONTEXT_PROJECTION_V1_E2E_PASS',
     "grep -qx 'fixtures=0'",
     "grep -qx 'supply=0'",
