@@ -18,6 +18,12 @@ test('matching context database replay installs the fixed official Supabase rele
   assert.doesNotMatch(database, /npx --yes supabase@/);
 });
 
+test('Supabase 2.101 init uses force without unsupported yes flag', () => {
+  const compatibleInit = database.match(/supabase --workdir "\$(?:fresh|upgrade)" init --force/g) ?? [];
+  assert.equal(compatibleInit.length, 2);
+  assert.doesNotMatch(database, /init --force --yes/);
+});
+
 test('release binary install keeps download output sealed and cleans temporary files', () => {
   assert.match(database, /supabase-download\.log/);
   assert.match(database, /supabase-extract\.log/);
