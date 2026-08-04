@@ -21,6 +21,18 @@ export const MARKETPLACE_CLAIM_REVIEW_EXACT_FILES = new Set([
 const CANONICAL_MIGRATION_COUNT = 366;
 const EXPECTED_NODE_COUNT = 7;
 const EXPECTED_PYTHON_COUNT = 12;
+const PYTHON_TOP_LEVEL_RUNNER = [
+  'import importlib.util, pathlib',
+  "path=pathlib.Path('tests/test_trainingos_marketplace_claim_review_lifecycle_v1.py')",
+  "spec=importlib.util.spec_from_file_location('claim_review_contracts', path)",
+  'module=importlib.util.module_from_spec(spec)',
+  'spec.loader.exec_module(module)',
+  "tests=sorted((name, value) for name, value in vars(module).items() if name.startswith('test_') and callable(value))",
+  "assert len(tests) == 12, f'expected 12 tests, got {len(tests)}'",
+  '[test() for _, test in tests]',
+  "print('Ran 12 tests')",
+  "print('OK')",
+].join(';');
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -35,9 +47,7 @@ export const marketplaceClaimReviewCommands = Object.freeze([
     '--test',
     'packages/training-marketplace-claim-review/test/claim-review.test.mjs',
   ], 'node'),
-  command('python-static', 'python', [
-    'tests/test_trainingos_marketplace_claim_review_lifecycle_v1.py',
-  ], 'python'),
+  command('python-static', 'python', ['-c', PYTHON_TOP_LEVEL_RUNNER], 'python'),
   command('database-replay', 'bash', [
     path.join(publicRoot, 'scripts/run-marketplace-claim-review-database.sh'),
   ], 'database'),
