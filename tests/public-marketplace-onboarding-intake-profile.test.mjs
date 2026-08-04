@@ -34,10 +34,10 @@ test('onboarding intake profile runs fixed focused and build gates', () => {
   assert.doesNotMatch(profile, /deploy/i);
 });
 
-test('router invokes onboarding intake before participation database fallback', () => {
-  const router = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
-  const intakeIndex = router.indexOf('const marketplaceOnboardingIntake');
-  const dbIndex = router.indexOf('const marketplaceParticipation =');
+test('participation router delegates onboarding intake before database fallback', () => {
+  const router = readFileSync(new URL('../scripts/run-marketplace-participation-profile.mjs', import.meta.url), 'utf8');
+  const intakeIndex = router.indexOf('const onboardingIntake');
+  const dbIndex = router.indexOf("if (input.profile !== 'generic-owned')");
   assert.ok(intakeIndex >= 0);
   assert.ok(dbIndex > intakeIndex);
 });
