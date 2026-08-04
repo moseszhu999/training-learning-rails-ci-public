@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { validateInputs } from '../scripts/exact-head-inputs.mjs';
+import { parseMarketplaceReviewerAuthorityPythonFailure } from '../scripts/run-marketplace-reviewer-authority-profile.mjs';
 
 const profile = readFileSync(new URL('../scripts/run-marketplace-reviewer-authority-profile.mjs', import.meta.url), 'utf8');
 const database = readFileSync(new URL('../scripts/run-marketplace-reviewer-authority-database.sh', import.meta.url), 'utf8');
@@ -44,6 +45,23 @@ test('reviewer authority runner executes fixed node, direct Python, database and
     "selectedSuite: 'marketplace-reviewer-authority'",
   ]) assert.match(profile, escaped(marker));
   assert.doesNotMatch(profile, /tests\.test_trainingos_marketplace_reviewer_authority_owner_v1/);
+});
+
+test('Python failures publish only an allowlisted test category and stop before database replay', () => {
+  assert.equal(
+    parseMarketplaceReviewerAuthorityPythonFailure(
+      'Traceback\n  File "sealed", line 1, in test_public_rpc_has_no_identity_or_role_selector_and_performs_no_decision\nAssertionError',
+    ),
+    'public-rpc-boundary',
+  );
+  assert.equal(
+    parseMarketplaceReviewerAuthorityPythonFailure(
+      'Traceback\n  File "sealed", line 1, in test_unapproved_private_name\nAssertionError',
+    ),
+    'unknown',
+  );
+  assert.match(profile, /python-static-\$\{parseMarketplaceReviewerAuthorityPythonFailure\(output\)\}/);
+  assert.match(profile, /if \(item\.kind === 'python'\) break;/);
 });
 
 test('database profile runs fresh, repeated and upgrade replay without production access', () => {
