@@ -21,6 +21,17 @@ export const MARKETPLACE_REVIEWER_AUTHORITY_EXACT_FILES = new Set([
 const CANONICAL_MIGRATION_COUNT = 365;
 const EXPECTED_NODE_COUNT = 5;
 const EXPECTED_PYTHON_COUNT = 9;
+const PYTHON_FAILURE_LABELS = new Map([
+  ['test_append_only_canonical_authority_owner', 'append-only-owner'],
+  ['test_claim_review_lifecycle_is_deliberately_absent', 'claim-lifecycle-exclusion'],
+  ['test_docs_lock_bootstrap_and_handoff_truth', 'docs-handoff-truth'],
+  ['test_exact_owned_file_scope_and_single_reserved_migration', 'exact-owned-scope'],
+  ['test_human_identity_and_scope_are_database_derived', 'human-scope-derivation'],
+  ['test_operator_grant_and_revoke_are_not_product_network_paths', 'operator-network-boundary'],
+  ['test_package_adapter_contract_and_runtime_tests', 'package-adapter-contract'],
+  ['test_public_rpc_has_no_identity_or_role_selector_and_performs_no_decision', 'public-rpc-boundary'],
+  ['test_sql_e2e_covers_security_and_history_boundaries', 'sql-e2e-markers'],
+]);
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -56,6 +67,16 @@ function parseNode(text) {
 function parsePython(text) {
   return [...text.matchAll(/Ran\s+(\d+)\s+tests?/g)]
     .reduce((sum, match) => sum + Number(match[1]), 0);
+}
+
+export function parseMarketplaceReviewerAuthorityPythonFailure(text) {
+  const names = [...String(text).matchAll(/\bin (test_[a-z0-9_]+)\b/g)]
+    .map((match) => match[1]);
+  for (const name of names.reverse()) {
+    const label = PYTHON_FAILURE_LABELS.get(name);
+    if (label) return label;
+  }
+  return 'unknown';
 }
 
 async function exactChangedFiles(input) {
@@ -159,8 +180,15 @@ export async function maybeRunMarketplaceReviewerAuthorityProfile(input) {
       if (item.kind === 'database') {
         databaseStage = result.status === 0 ? 'complete' : parseDatabaseStage(output);
       }
-      if (result.status === 0) passedStepCount += 1;
-      else failedLabels.push(item.label);
+      if (result.status === 0) {
+        passedStepCount += 1;
+      } else {
+        const label = item.kind === 'python'
+          ? `python-static-${parseMarketplaceReviewerAuthorityPythonFailure(output)}`
+          : item.label;
+        failedLabels.push(label);
+        if (item.kind === 'python') break;
+      }
     }
   } finally {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
