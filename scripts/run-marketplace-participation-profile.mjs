@@ -1,8 +1,11 @@
+export * from './run-marketplace-onboarding-intake-profile.mjs';
+
 import { closeSync, openSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { maybeRunMarketplaceOnboardingIntakeProfile } from './run-marketplace-onboarding-intake-profile.mjs';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -99,6 +102,9 @@ function failedContractResult() {
 }
 
 export async function maybeRunMarketplaceParticipationProfile(input) {
+  const onboardingIntake = await maybeRunMarketplaceOnboardingIntakeProfile(input);
+  if (onboardingIntake) return onboardingIntake;
+
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
   if (!isMarketplaceParticipationScope(files)) return null;
