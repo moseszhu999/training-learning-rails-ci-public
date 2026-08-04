@@ -34,10 +34,10 @@ test('participation client profile runs fixed focused and build gates', () => {
   assert.doesNotMatch(profile, /deploy/i);
 });
 
-test('router invokes participation client before participation database fallback', () => {
-  const router = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
-  const clientIndex = router.indexOf('const marketplaceParticipationClient');
-  const dbIndex = router.indexOf('const marketplaceParticipation =');
+test('participation router delegates client profile before database fallback', () => {
+  const router = readFileSync(new URL('../scripts/run-marketplace-participation-profile.mjs', import.meta.url), 'utf8');
+  const clientIndex = router.indexOf('const participationClient');
+  const dbIndex = router.indexOf("if (input.profile !== 'generic-owned')");
   assert.ok(clientIndex >= 0);
   assert.ok(dbIndex > clientIndex);
 });
