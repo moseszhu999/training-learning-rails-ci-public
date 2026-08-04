@@ -13,6 +13,7 @@ done
 
 canonical_migration_count=367
 base_migration_count=366
+supabase_cli_version="2.101.0"
 migration_name="20260805063000_trainingos_marketplace_matching_context_projection_v1.sql"
 e2e_name="trainingos_marketplace_matching_context_projection_v1_e2e.sql"
 pass_marker="TRAININGOS_MARKETPLACE_MATCHING_CONTEXT_PROJECTION_V1_E2E_PASS"
@@ -29,15 +30,25 @@ expected_base_sha="$(read_scope expected_base_sha)"
 [[ "$(read_scope migration_start)" == "20260805063000" ]]
 [[ "$(read_scope migration_end)" == "20260805063000" ]]
 
-CURRENT_STAGE="supabase-wrapper"
+CURRENT_STAGE="supabase-release-download"
 bin_dir="$RUNNER_TEMP/trainingos-marketplace-matching-context-bin"
+archive="$RUNNER_TEMP/supabase_linux_amd64-${supabase_cli_version}.tar.gz"
 mkdir -p "$bin_dir"
-cat >"$bin_dir/supabase" <<'WRAPPER'
-#!/usr/bin/env bash
-exec npx --yes supabase@2.101.0 "$@"
-WRAPPER
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+  "https://github.com/supabase/cli/releases/download/v${supabase_cli_version}/supabase_linux_amd64.tar.gz" \
+  --output "$archive" \
+  >"$RUNNER_TEMP/trainingos-marketplace-matching-context-supabase-download.log" 2>&1
+
+CURRENT_STAGE="supabase-release-extract"
+tar -xzf "$archive" -C "$bin_dir" \
+  >"$RUNNER_TEMP/trainingos-marketplace-matching-context-supabase-extract.log" 2>&1
+rm -f "$archive"
 chmod 700 "$bin_dir/supabase"
 export PATH="$bin_dir:$PATH"
+
+CURRENT_STAGE="supabase-release-version"
+actual_supabase_version="$(supabase --version | tr -d '\r' | awk 'NF { print $NF; exit }')"
+[[ "$actual_supabase_version" == "$supabase_cli_version" ]]
 
 fresh="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh"
 upgrade="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade"
@@ -48,7 +59,7 @@ cleanup(){
   supabase --workdir "$upgrade" stop --no-backup >/dev/null 2>&1 || true
   git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_repo" >/dev/null 2>&1 || true
   rm -rf "$fresh" "$upgrade" "$base_repo" "$bin_dir"
-  rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-*.env
+  rm -f "$archive" "$RUNNER_TEMP"/trainingos-marketplace-matching-context-*.env
 }
 trap cleanup EXIT
 
@@ -270,4 +281,4 @@ CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
+echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
