@@ -33,6 +33,12 @@ test('runner recreates isolated workdirs before Supabase init', () => {
   assert.match(database, /workdirs=PASS/);
 });
 
+test('database replay starts only Postgres instead of the full local stack', () => {
+  assert.match(database, /supabase --workdir "\$workdir" db start/);
+  assert.doesNotMatch(database, /supabase --workdir "\$workdir" start/);
+  assert.match(database, /database_only=PASS/);
+});
+
 test('release binary install keeps download output sealed and cleans temporary files', () => {
   assert.match(database, /supabase-download\.log/);
   assert.match(database, /supabase-extract\.log/);
