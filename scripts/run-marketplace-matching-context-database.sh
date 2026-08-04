@@ -128,10 +128,17 @@ select 'anon_execute=' || has_function_privilege(
   'public.get_trainingos_marketplace_matching_context_v1(integer)',
   'EXECUTE'
 );
-select 'public_execute=' || has_function_privilege(
-  'public',
-  'public.get_trainingos_marketplace_matching_context_v1(integer)',
-  'EXECUTE'
+select 'public_execute=' || exists (
+  select 1
+  from pg_catalog.pg_proc proc
+  join pg_catalog.pg_namespace namespace on namespace.oid = proc.pronamespace
+  cross join lateral pg_catalog.aclexplode(
+    coalesce(proc.proacl, pg_catalog.acldefault('f', proc.proowner))
+  ) privilege
+  where namespace.nspname = 'public'
+    and proc.proname = 'get_trainingos_marketplace_matching_context_v1'
+    and privilege.grantee = 0
+    and privilege.privilege_type = 'EXECUTE'
 );
 select 'new_tables=' || count(*)
 from pg_catalog.pg_class relation
