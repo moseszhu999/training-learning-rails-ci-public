@@ -69,12 +69,12 @@ test('sealed debug classifier emits bounded resource and service families', () =
   for (const resource of [
     'port', 'image', 'dbhealth', 'dbconnect', 'migrationservice',
     'container', 'permission', 'disk', 'network', 'config', 'none',
-  ]) assert.ok(wrapper.includes(`resource=\"${resource}\"`), resource);
+  ]) assert.ok(wrapper.includes(`resource="${resource}"`), resource);
 
   for (const service of ['auth', 'realtime', 'storage', 'postgres', 'none']) {
-    assert.ok(wrapper.includes(`service=\"${service}\"`), service);
+    assert.ok(wrapper.includes(`service="${service}"`), service);
   }
-  assert.ok(wrapper.includes("resource%s-service%s-exit%s"));
+  assert.ok(wrapper.includes('resource%s-service%s-exit%s'));
   assert.match(wrapper, /failure marker format contract changed/);
   assert.match(wrapper, /resource classifier contract changed/);
 });
