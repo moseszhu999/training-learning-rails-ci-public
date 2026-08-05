@@ -5,6 +5,7 @@ import { validateInputs } from '../scripts/exact-head-inputs.mjs';
 import {
   isMarketplacePublicObjectScope,
   MARKETPLACE_PUBLIC_OBJECT_EXACT_FILES,
+  marketplacePublicObjectCommands,
 } from '../scripts/run-marketplace-public-object-profile.mjs';
 
 const profile = readFileSync(new URL('../scripts/run-marketplace-public-object-profile.mjs', import.meta.url), 'utf8');
@@ -31,26 +32,38 @@ test('public object profile owns exactly eleven non-migration files', () => {
   assert.equal(isMarketplacePublicObjectScope(exactFiles.slice(1)), false);
 });
 
-test('public object profile runs focused, syntax, declaration, typecheck and build gates', () => {
+test('public object profile runs the canonical ten fixed gates', () => {
+  assert.deepEqual(
+    marketplacePublicObjectCommands.map((item) => item.label),
+    [
+      'install',
+      'python-contract',
+      'package-syntax',
+      'object-app-syntax',
+      'object-read-model-syntax',
+      'object-fixture-syntax',
+      'declaration-typecheck',
+      'typecheck',
+      'production-build',
+      'bundle-verification',
+    ],
+  );
   for (const marker of [
-    'EXPECTED_PYTHON_COUNT = 18',
-    'EXPECTED_MIGRATION_COUNT = 364',
-    'test_trainingos_marketplace_public_object_routes_v1.py',
-    "command('package-syntax'",
-    "command('object-app-syntax'",
-    "command('object-read-model-syntax'",
-    "command('object-fixture-syntax'",
+    'EXPECTED_PYTHON_COUNT = 16',
+    'EXPECTED_MIGRATION_COUNT = 368',
+    'test_trainingos_marketplace_public_object_routes_v1',
     "command('declaration-typecheck'",
     "command('typecheck'",
     "command('production-build'",
     "command('bundle-verification'",
     "selectedSuite: 'marketplace-public-object'",
   ]) assert.ok(profile.includes(marker), marker);
-  assert.doesNotMatch(profile, /deploy/i);
+  assert.doesNotMatch(profile, /database-replay/);
+  assert.doesNotMatch(profile, /deploy-site|--prod/);
   assert.doesNotMatch(profile, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)/);
 });
 
-test('public object profile is routed before generic fallbacks', () => {
+test('public object profile remains the unique top-level route before participation profiles', () => {
   assert.match(router, /maybeRunMarketplacePublicObjectProfile/);
   const publicObjectIndex = router.indexOf('const marketplacePublicObject');
   const participationIndex = router.indexOf('const marketplaceParticipation');
@@ -58,7 +71,7 @@ test('public object profile is routed before generic fallbacks', () => {
   assert.ok(participationIndex > publicObjectIndex);
 });
 
-test('generic-owned request accepts the public object contract', () => {
+test('generic-owned request accepts the current public object contract', () => {
   const result = validateInputs({
     privateExactSha: 'a'.repeat(40),
     expectedBaseSha: 'b'.repeat(40),
@@ -66,8 +79,8 @@ test('generic-owned request accepts the public object contract', () => {
     validationProfile: 'generic-owned',
     expectedChangedFileCount: '11',
     expectedMigrationRange: 'none',
-    expectedFocusedTestCounts: 'node=0;python=18',
-    expectedMigrationCount: '364',
+    expectedFocusedTestCounts: 'node=0;python=16',
+    expectedMigrationCount: '368',
     runFreshReplay: 'false',
     runUpgradeReplay: 'false',
     runApplicationContracts: 'true',
