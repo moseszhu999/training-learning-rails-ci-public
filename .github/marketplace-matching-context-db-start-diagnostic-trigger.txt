@@ -1,0 +1,3 @@
+TrainingOS Marketplace matching-context database-start image diagnostic trigger.
+
+No private source, SQL, migration, fixture, credential, artifact, deployment, or business write is included.
