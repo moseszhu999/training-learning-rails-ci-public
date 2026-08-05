@@ -1,0 +1,119 @@
+name: Marketplace matching-context db-start image diagnostic
+
+on:
+  push:
+    branches:
+      - diagnostic/trainingos-matching-context-db-start-images-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/marketplace-matching-context-db-start-image-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-matching-context-db-start-image-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install fixed Supabase CLI release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version='2.101.0'
+          archive="$RUNNER_TEMP/supabase_linux_amd64-${version}.tar.gz"
+          bin_dir="$RUNNER_TEMP/matching-context-diagnostic-bin"
+          mkdir -p "$bin_dir"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+            "https://github.com/supabase/cli/releases/download/v${version}/supabase_linux_amd64.tar.gz" \
+            --output "$archive" \
+            >"$RUNNER_TEMP/matching-context-cli-download.log" 2>&1
+          tar -xzf "$archive" -C "$bin_dir" \
+            >"$RUNNER_TEMP/matching-context-cli-extract.log" 2>&1
+          chmod 700 "$bin_dir/supabase"
+          echo "$bin_dir" >> "$GITHUB_PATH"
+          actual="$($bin_dir/supabase --version | tr -d '\r' | awk 'NF {print $NF; exit}')"
+          [[ "$actual" == "$version" ]]
+          echo 'MATCHING_CONTEXT_DB_START_DIAGNOSTIC cli=PASS version=2.101.0'
+
+      - name: Diagnose database-start image dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          primary='supabase/postgres:17.6.1.106'
+          workdir="$RUNNER_TEMP/matching-context-db-start-diagnostic"
+          start_log="$RUNNER_TEMP/matching-context-db-start.log"
+          pull_log="$RUNNER_TEMP/matching-context-db-start-primary.log"
+          mkdir -p "$workdir"
+
+          : >"$pull_log"
+          pulled='false'
+          for attempt in 1 2 3; do
+            if docker pull "$primary" >>"$pull_log" 2>&1; then
+              pulled='true'
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          [[ "$pulled" == 'true' ]]
+          docker image inspect "$primary" --format '{{.Id}}' >/dev/null
+
+          supabase --workdir "$workdir" init --force \
+            >"$RUNNER_TEMP/matching-context-db-start-init.log" 2>&1
+
+          set +e
+          supabase --workdir "$workdir" db start >"$start_log" 2>&1
+          start_code=$?
+          set -e
+
+          refs="$(python - "$start_log" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
+patterns = [
+    r'(?:(?:docker\.io/)?supabase|public\.ecr\.aws/supabase|ghcr\.io/supabase)/[a-z0-9._/-]+:[a-z0-9._-]+',
+    r'supabase/[a-z0-9._/-]+:[a-z0-9._-]+',
+]
+refs = set()
+for pattern in patterns:
+    refs.update(re.findall(pattern, text.lower()))
+print(','.join(sorted(refs)) if refs else 'none')
+PY
+)"
+
+          image_resource='false'
+          if grep -Eqi '(pull access denied|manifest unknown|failed to pull|image.*not found|unable to find image)' "$start_log"; then
+            image_resource='true'
+          fi
+
+          if [[ "$start_code" == 0 ]]; then
+            echo "MATCHING_CONTEXT_DB_START_DIAGNOSTIC status=PASS exit=0 refs=$refs image_resource=false"
+          else
+            [[ "$image_resource" == 'true' ]]
+            [[ "$refs" != 'none' ]]
+            echo "MATCHING_CONTEXT_DB_START_DIAGNOSTIC status=CAPTURED_FAILURE exit=$start_code refs=$refs image_resource=true"
+          fi
+
+      - name: Remove diagnostic resources
+        if: always()
+        shell: bash
+        run: |
+          workdir="$RUNNER_TEMP/matching-context-db-start-diagnostic"
+          if command -v supabase >/dev/null 2>&1; then
+            supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
+          fi
+          docker image rm \
+            'supabase/postgres:17.6.1.106' \
+            >/dev/null 2>&1 || true
+          rm -rf "$workdir" "$RUNNER_TEMP/matching-context-diagnostic-bin"
+          rm -f "$RUNNER_TEMP"/matching-context-*.log \
+            "$RUNNER_TEMP"/supabase_linux_amd64-*.tar.gz
