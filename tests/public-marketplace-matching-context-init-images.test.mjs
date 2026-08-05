@@ -19,23 +19,36 @@ test('matching-context profile invokes the fixed init-image wrapper', () => {
   );
 });
 
-test('wrapper pins the four Supabase CLI v2.101.0 database-init images', () => {
+test('wrapper pins the stable Supabase CLI 2.109.1 database-init stack', () => {
+  assert.match(wrapper, /readonly candidate_cli_version="2\.109\.1"/);
   for (const image of [
-    'supabase/postgres:17.6.1.106',
-    'supabase/gotrue:v2.188.1',
-    'supabase/realtime:v2.86.3',
-    'supabase/storage-api:v1.54.1',
+    'supabase/postgres:17.6.1.143',
+    'supabase/gotrue:v2.192.0',
+    'supabase/realtime:v2.112.6',
+    'supabase/storage-api:v1.62.5',
   ]) assert.ok(wrapper.includes(image), image);
 
   for (const mirror of [
-    'public.ecr.aws/supabase/postgres:17.6.1.106',
-    'public.ecr.aws/supabase/gotrue:v2.188.1',
-    'public.ecr.aws/supabase/realtime:v2.86.3',
-    'public.ecr.aws/supabase/storage-api:v1.54.1',
+    'public.ecr.aws/supabase/postgres:17.6.1.143',
+    'public.ecr.aws/supabase/gotrue:v2.192.0',
+    'public.ecr.aws/supabase/realtime:v2.112.6',
+    'public.ecr.aws/supabase/storage-api:v1.62.5',
   ]) assert.ok(wrapper.includes(mirror), mirror);
 });
 
-test('each image uses bounded retries, mirror retag, inspect and cleanup', () => {
+test('candidate runner transformation is exact, temporary and fail closed', () => {
+  assert.match(wrapper, /readonly source_runner_script=/);
+  assert.match(wrapper, /readonly candidate_runner_script="\$RUNNER_TEMP\/run-marketplace-matching-context-database-v11\.sh"/);
+  assert.match(wrapper, /prepare_candidate_runner/);
+  assert.match(wrapper, /if text\.count\(old\) != 1:/);
+  assert.match(wrapper, /legacy stack marker remains/);
+  assert.match(wrapper, /chmod 700 "\$candidate_runner_script"/);
+  assert.match(wrapper, /rm -f "\$candidate_runner_script"/);
+  assert.match(wrapper, /bash "\$candidate_runner_script" &/);
+  assert.doesNotMatch(wrapper, /bash "\$source_runner_script" &/);
+});
+
+test('each stable image uses bounded retries, mirror retag, inspect and cleanup', () => {
   assert.match(wrapper, /for attempt in 1 2 3; do/);
   assert.match(wrapper, /docker pull "\$image"/);
   assert.match(wrapper, /docker tag "\$mirror" "\$primary"/);
@@ -44,7 +57,7 @@ test('each image uses bounded retries, mirror retag, inspect and cleanup', () =>
   assert.match(wrapper, /trap cleanup_wrapper EXIT/);
 });
 
-test('wrapper patches both generated Supabase configs to a five-minute health timeout', () => {
+test('wrapper preserves five-minute health timeout for both isolated configs', () => {
   assert.match(wrapper, /readonly health_timeout="5m"/);
   assert.match(wrapper, /trainingos-marketplace-matching-context-fresh\/supabase\/config\.toml/);
   assert.match(wrapper, /trainingos-marketplace-matching-context-upgrade\/supabase\/config\.toml/);
@@ -54,8 +67,8 @@ test('wrapper patches both generated Supabase configs to a five-minute health ti
   assert.match(wrapper, /MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config/);
 });
 
-test('health-timeout watchers run before waiting for the sealed replay', () => {
-  const runnerIndex = wrapper.indexOf('bash "$runner_script" &');
+test('health-timeout watchers run before waiting for the sealed candidate replay', () => {
+  const runnerIndex = wrapper.indexOf('bash "$candidate_runner_script" &');
   const freshWatcherIndex = wrapper.indexOf('patch_health_timeout_when_ready "$fresh_config" fresh &');
   const upgradeWatcherIndex = wrapper.indexOf('patch_health_timeout_when_ready "$upgrade_config" upgrade &');
   const runnerWaitIndex = wrapper.indexOf('wait "$runner_pid"');
@@ -65,8 +78,8 @@ test('health-timeout watchers run before waiting for the sealed replay', () => {
   assert.ok(runnerWaitIndex > upgradeWatcherIndex);
 });
 
-test('wrapper preserves the original sealed replay and publishes no logs', () => {
-  assert.match(wrapper, /bash "\$runner_script"/);
+test('wrapper preserves the original sealed replay contract and publishes no logs', () => {
+  assert.match(wrapper, /run-marketplace-matching-context-database\.sh/);
   assert.match(wrapper, /MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=init-image-prefetch-/);
   assert.doesNotMatch(wrapper, /cat .*\.log/);
   assert.doesNotMatch(wrapper, /tail .*\.log/);
