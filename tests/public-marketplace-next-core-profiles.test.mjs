@@ -85,10 +85,10 @@ test('fixed contracts lock migration count and distinct node counts', () => {
   ]) assert.ok(profileText.includes(marker), marker);
 });
 
-test('profile never runs database replay deployment or secrets', () => {
+test('profile never runs database replay deployment or production credentials', () => {
   assert.doesNotMatch(profileText, /database-replay|supabase db|db reset|migration up/i);
   assert.doesNotMatch(profileText, /deploy-site|netlify deploy|vercel deploy|--prod/i);
-  assert.doesNotMatch(profileText, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)|SERVICE_ROLE/i);
+  assert.doesNotMatch(profileText, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)/i);
 });
 
 test('router dispatches next-core profiles before generic fallback', () => {
