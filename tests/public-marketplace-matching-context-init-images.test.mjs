@@ -54,6 +54,31 @@ test('wrapper patches both generated Supabase configs to a five-minute health ti
   assert.match(wrapper, /MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config/);
 });
 
+test('wrapper creates a temporary debug runner without modifying the source runner', () => {
+  assert.match(wrapper, /readonly source_runner=/);
+  assert.match(wrapper, /readonly runner_script="\$RUNNER_TEMP\/trainingos-marketplace-matching-context-debug-runner\.sh"/);
+  assert.match(wrapper, /prepare_debug_runner/);
+  assert.ok(wrapper.includes('supabase --debug --workdir "$workdir" db start'));
+  assert.match(wrapper, /text\.count\(start_old\) != 1/);
+  assert.match(wrapper, /target\.write_text\(text, encoding='utf-8'\)/);
+  assert.match(wrapper, /chmod 700 "\$runner_script"/);
+  assert.match(wrapper, /rm -f "\$runner_script"/);
+});
+
+test('sealed debug classifier emits bounded resource and service families', () => {
+  for (const resource of [
+    'port', 'image', 'dbhealth', 'dbconnect', 'migrationservice',
+    'container', 'permission', 'disk', 'network', 'config', 'none',
+  ]) assert.ok(wrapper.includes(`resource=\"${resource}\"`), resource);
+
+  for (const service of ['auth', 'realtime', 'storage', 'postgres', 'none']) {
+    assert.ok(wrapper.includes(`service=\"${service}\"`), service);
+  }
+  assert.ok(wrapper.includes("resource%s-service%s-exit%s"));
+  assert.match(wrapper, /failure marker format contract changed/);
+  assert.match(wrapper, /resource classifier contract changed/);
+});
+
 test('health-timeout watchers run before waiting for the sealed replay', () => {
   const runnerIndex = wrapper.indexOf('bash "$runner_script" &');
   const freshWatcherIndex = wrapper.indexOf('patch_health_timeout_when_ready "$fresh_config" fresh &');
@@ -72,4 +97,5 @@ test('wrapper preserves the original sealed replay and publishes no logs', () =>
   assert.doesNotMatch(wrapper, /tail .*\.log/);
   assert.doesNotMatch(wrapper, /upload-artifact/);
   assert.doesNotMatch(wrapper, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)/);
+  assert.doesNotMatch(wrapper, /echo .*start_log/);
 });
