@@ -5,7 +5,7 @@ umask 077
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 
 readonly source_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-marketplace-matching-context-database.sh"
-readonly runner_script="$RUNNER_TEMP/trainingos-marketplace-matching-context-debug-runner.sh"
+readonly runner_script="$RUNNER_TEMP/mc-v16-runner.sh"
 readonly candidate_cli_version="2.109.1"
 readonly candidate_health_timeout="5m"
 readonly -a primary_images=(
@@ -60,7 +60,7 @@ prefetch_one() {
   docker image inspect "$primary" --format '{{.Id}}' >/dev/null
 }
 
-prepare_debug_runner() {
+prepare_runner() {
   python - "$source_runner" "$runner_script" "$candidate_cli_version" "$candidate_health_timeout" <<'PY'
 from pathlib import Path
 import sys
@@ -91,12 +91,130 @@ for old, new in stack_replacements:
     text = text.replace(old, new, 1)
 if '2.101.0' in text or '17.6.1.106' in text:
     raise SystemExit('legacy stack marker remains in candidate runner')
+if 'supabase --debug --workdir' in text:
+    raise SystemExit('debug start must not be present')
 
-start_old = '  supabase --workdir "$workdir" db start >"$start_log" 2>&1'
-start_new = '  supabase --debug --workdir "$workdir" db start >"$start_log" 2>&1'
-if text.count(start_old) != 1:
-    raise SystemExit('database start command contract changed')
-text = text.replace(start_old, start_new, 1)
+workdir_replacements = (
+    (
+        'fresh="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh"',
+        'fresh="$RUNNER_TEMP/mc-f1"',
+    ),
+    (
+        'fresh_two="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh-two"',
+        'fresh_two="$RUNNER_TEMP/mc-f2"',
+    ),
+    (
+        'upgrade="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade"',
+        'upgrade="$RUNNER_TEMP/mc-up"',
+    ),
+)
+for old, new in workdir_replacements:
+    if text.count(old) != 1:
+        raise SystemExit(f'workdir replacement contract changed: {old}')
+    text = text.replace(old, new, 1)
+
+sequence_old = '''CURRENT_STAGE="workdir-initialization"
+initialize_empty_workdir "$fresh" fresh-one
+initialize_empty_workdir "$fresh_two" fresh-two
+initialize_empty_workdir "$upgrade" upgrade
+
+CURRENT_STAGE="fresh-one-empty-start"
+'''
+sequence_new = '''CURRENT_STAGE="fresh-one-initialization"
+initialize_empty_workdir "$fresh" fresh-one
+
+CURRENT_STAGE="fresh-one-empty-start"
+'''
+if text.count(sequence_old) != 1:
+    raise SystemExit('initialization sequence contract changed')
+text = text.replace(sequence_old, sequence_new, 1)
+
+fresh_two_old = 'CURRENT_STAGE="fresh-two-empty-start"\nstart_with_marker "$fresh_two" fresh-two-empty-start\n'
+fresh_two_new = '''CURRENT_STAGE="fresh-two-initialization"
+initialize_empty_workdir "$fresh_two" fresh-two
+
+CURRENT_STAGE="fresh-two-empty-start"
+start_with_marker "$fresh_two" fresh-two-empty-start
+'''
+if text.count(fresh_two_old) != 1:
+    raise SystemExit('fresh-two sequencing contract changed')
+text = text.replace(fresh_two_old, fresh_two_new, 1)
+
+upgrade_old = 'CURRENT_STAGE="upgrade-empty-start"\nstart_with_marker "$upgrade" upgrade-empty-start\n'
+upgrade_new = '''CURRENT_STAGE="upgrade-initialization"
+initialize_empty_workdir "$upgrade" upgrade
+
+CURRENT_STAGE="upgrade-empty-start"
+start_with_marker "$upgrade" upgrade-empty-start
+'''
+if text.count(upgrade_old) != 1:
+    raise SystemExit('upgrade sequencing contract changed')
+text = text.replace(upgrade_old, upgrade_new, 1)
+
+health_old = '''wait_for_health_timeout(){
+  local workdir="$1" label="$2" config attempt
+  config="$workdir/supabase/config.toml"
+  for attempt in $(seq 1 1800); do
+    if [[ -f "$config" ]] && grep -Eq '^health_timeout = "5m"$' "$config"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  CURRENT_STAGE="${label}-health-timeout-not-ready"
+  return 1
+}
+
+initialize_empty_workdir(){
+  local workdir="$1" label="$2"
+  mkdir -p "$workdir"
+  sealed "${label}-init" supabase --workdir "$workdir" init --force
+  rm -rf "$workdir/supabase/migrations"
+  mkdir -p "$workdir/supabase/migrations"
+  wait_for_health_timeout "$workdir" "$label"
+}
+'''
+health_new = f'''patch_health_timeout(){{
+  local workdir="$1" label="$2" config
+  config="$workdir/supabase/config.toml"
+  CURRENT_STAGE="${{label}}-health-timeout-config"
+  python - "$config" "{candidate_health_timeout}" <<'PY_HEALTH'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+value = sys.argv[2]
+text = path.read_text(encoding='utf-8')
+section = re.search(r'(?m)^\\[db\\]\\s*$', text)
+if section is None:
+    raise SystemExit('db section missing')
+next_section = re.search(r'(?m)^\\[[^\\]]+\\]\\s*$', text[section.end():])
+end = section.end() + (next_section.start() if next_section else len(text) - section.end())
+block = text[section.end():end]
+replacement = f'health_timeout = "{{value}}"'
+if re.search(r'(?m)^\\s*health_timeout\\s*=', block):
+    block = re.sub(r'(?m)^\\s*health_timeout\\s*=.*$', replacement, block, count=1)
+else:
+    block = '\\n' + replacement + block
+path.write_text(text[:section.end()] + block + text[end:], encoding='utf-8')
+PY_HEALTH
+  grep -Eq '^health_timeout = "{candidate_health_timeout}"$' "$config"
+}}
+
+initialize_empty_workdir(){{
+  local workdir="$1" label="$2"
+  mkdir -p "$workdir"
+  sealed "${{label}}-init" supabase --workdir "$workdir" init --force
+  patch_health_timeout "$workdir" "$label"
+  rm -rf "$workdir/supabase/migrations"
+  mkdir -p "$workdir/supabase/migrations"
+}}
+'''
+if text.count(health_old) != 1:
+    raise SystemExit('health timeout sequencing contract changed')
+text = text.replace(health_old, health_new, 1)
+if 'wait_for_health_timeout' in text:
+    raise SystemExit('legacy health timeout waiter remains')
 
 declaration_old = '  local log_path="$1" exit_code="$2" sqlstate category migration_scope resource'
 declaration_new = '  local log_path="$1" exit_code="$2" sqlstate category migration_scope resource service'
@@ -172,85 +290,33 @@ if text.count(printf_old) != 1:
     raise SystemExit('failure marker format contract changed')
 text = text.replace(printf_old, printf_new, 1)
 
-health_old = '''wait_for_health_timeout(){
-  local workdir="$1" label="$2" config attempt
-  config="$workdir/supabase/config.toml"
-  for attempt in $(seq 1 1800); do
-    if [[ -f "$config" ]] && grep -Eq '^health_timeout = "5m"$' "$config"; then
-      return 0
-    fi
-    sleep 0.1
-  done
-  CURRENT_STAGE="${label}-health-timeout-not-ready"
-  return 1
-}
-
-initialize_empty_workdir(){
-  local workdir="$1" label="$2"
-  mkdir -p "$workdir"
-  sealed "${label}-init" supabase --workdir "$workdir" init --force
-  rm -rf "$workdir/supabase/migrations"
-  mkdir -p "$workdir/supabase/migrations"
-  wait_for_health_timeout "$workdir" "$label"
-}
-'''
-health_new = f'''patch_health_timeout(){{
-  local workdir="$1" label="$2" config
-  config="$workdir/supabase/config.toml"
-  CURRENT_STAGE="${{label}}-health-timeout-config"
-  python - "$config" "{candidate_health_timeout}" <<'PY_HEALTH'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-value = sys.argv[2]
-text = path.read_text(encoding='utf-8')
-section = re.search(r'(?m)^\\[db\\]\\s*$', text)
-if section is None:
-    raise SystemExit('db section missing')
-next_section = re.search(r'(?m)^\\[[^\\]]+\\]\\s*$', text[section.end():])
-end = section.end() + (next_section.start() if next_section else len(text) - section.end())
-block = text[section.end():end]
-replacement = f'health_timeout = "{{value}}"'
-if re.search(r'(?m)^\\s*health_timeout\\s*=', block):
-    block = re.sub(r'(?m)^\\s*health_timeout\\s*=.*$', replacement, block, count=1)
-else:
-    block = '\\n' + replacement + block
-path.write_text(text[:section.end()] + block + text[end:], encoding='utf-8')
-PY_HEALTH
-  grep -Eq '^health_timeout = "{candidate_health_timeout}"$' "$config"
-}}
-
-initialize_empty_workdir(){{
-  local workdir="$1" label="$2"
-  mkdir -p "$workdir"
-  sealed "${{label}}-init" supabase --workdir "$workdir" init --force
-  patch_health_timeout "$workdir" "$label"
-  rm -rf "$workdir/supabase/migrations"
-  mkdir -p "$workdir/supabase/migrations"
-}}
-'''
-if text.count(health_old) != 1:
-    raise SystemExit('health timeout sequencing contract changed')
-text = text.replace(health_old, health_new, 1)
-if 'wait_for_health_timeout' in text:
-    raise SystemExit('legacy health timeout waiter remains')
+for forbidden in (
+    'supabase --debug --workdir',
+    'trainingos-marketplace-matching-context-fresh"',
+    'trainingos-marketplace-matching-context-fresh-two"',
+    'trainingos-marketplace-matching-context-upgrade"',
+    'CURRENT_STAGE="workdir-initialization"',
+):
+    if forbidden in text:
+        raise SystemExit(f'forbidden legacy marker remains: {forbidden}')
 
 target.write_text(text, encoding='utf-8')
 PY
   chmod 700 "$runner_script"
   grep -q 'supabase_cli_version="2.109.1"' "$runner_script"
-  grep -q 'supabase/postgres:17.6.1.143' "$runner_script"
-  grep -q 'public.ecr.aws/supabase/postgres:17.6.1.143' "$runner_script"
+  grep -q 'fresh="$RUNNER_TEMP/mc-f1"' "$runner_script"
+  grep -q 'fresh_two="$RUNNER_TEMP/mc-f2"' "$runner_script"
+  grep -q 'upgrade="$RUNNER_TEMP/mc-up"' "$runner_script"
+  grep -q 'CURRENT_STAGE="fresh-one-initialization"' "$runner_script"
+  grep -q 'CURRENT_STAGE="fresh-two-initialization"' "$runner_script"
+  grep -q 'CURRENT_STAGE="upgrade-initialization"' "$runner_script"
   grep -q 'patch_health_timeout(){' "$runner_script"
-  grep -q 'CURRENT_STAGE="${label}-health-timeout-config"' "$runner_script"
-  grep -Fq '  grep -Eq '\''^health_timeout = "5m"$'\'' "$config"' "$runner_script"
+  ! grep -q 'supabase --debug --workdir' "$runner_script"
   ! grep -q 'wait_for_health_timeout' "$runner_script"
 }
 
 for index in "${!primary_images[@]}"; do
   prefetch_one "$index"
 done
-prepare_debug_runner
+prepare_runner
 bash "$runner_script"
