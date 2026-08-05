@@ -75,7 +75,7 @@ test('both profiles run the same seven fixed non-production gates', () => {
 test('fixed contracts lock migration count and distinct node counts', () => {
   for (const marker of [
     'const EXPECTED_MIGRATION_COUNT = 368',
-    'expectedNodeCount: 9',
+    'expectedNodeCount: 10',
     'expectedNodeCount: 11',
     "suite: 'marketplace-public-source-observation-core'",
     "suite: 'marketplace-funnel-analytics-core'",
