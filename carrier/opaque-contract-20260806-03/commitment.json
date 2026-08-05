@@ -1,0 +1,11 @@
+{
+  "schema": "opaque.private.exact_head.v1",
+  "source_head_sha256": "ccd8f191169118b76a5b3d26fdeda1eb2479d19eb416c81e9f06ab47343997ca",
+  "artifact_commitments": {
+    "artifact_1": "9eeb1dbf48ab5ec3fa6e109542908c91a544b89f2d32c7a5a5f47a0bb29d3edc",
+    "artifact_2": "6ead1811455d347d16182fa98d75613031297ea24fa75c71af18bec2caca34d6",
+    "artifact_3": "da7f739f627198465eeab537a6f7a435dc4a0c332f9e4a8462293eb3f4ab7ee0"
+  },
+  "local_validation": {"unit_tests_passed": 4, "unit_tests_failed": 0},
+  "disclosure": "opaque_hashes_only"
+}
