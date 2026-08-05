@@ -44,11 +44,15 @@ test('roadmap profile runs six fixed non-production gates', () => {
   for (const marker of [
     'EXPECTED_PYTHON_COUNT = 16',
     'EXPECTED_MIGRATION_COUNT = 368',
-    'test_trainingos_marketplace_onboarding_acceptance_v1',
-    'test_trainingos_viral_growth_loop_v1',
-    'test_trainingos_viral_marketplace_entry_v1',
+    'import importlib.util',
+    "name.startswith('test_')",
+    "print(f'Ran {count} tests')",
+    'test_trainingos_marketplace_onboarding_acceptance_v1.py',
+    'test_trainingos_viral_growth_loop_v1.py',
+    'test_trainingos_viral_marketplace_entry_v1.py',
     "selectedSuite: 'saas-milestone-roadmap'",
   ]) assert.ok(profile.includes(marker), marker);
+  assert.doesNotMatch(profile, /-m', 'unittest/);
   assert.doesNotMatch(profile, /database-replay/);
   assert.doesNotMatch(profile, /deploy-site|--prod/);
   assert.doesNotMatch(profile, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)/);
