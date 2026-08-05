@@ -124,22 +124,22 @@ run_e2e(){
 select 'profiles=' || count(*)
 from public.profiles
 where id in (
-  'd2000000-0000-4000-8000-000000000001',
-  'd2000000-0000-4000-8000-000000000002',
-  'd2000000-0000-4000-8000-000000000003'
+  replace('d2000000_0000_4000_8000_000000000001', '_', '-')::uuid,
+  replace('d2000000_0000_4000_8000_000000000002', '_', '-')::uuid,
+  replace('d2000000_0000_4000_8000_000000000003', '_', '-')::uuid
 );
 select 'supply=' || count(*)
 from public.trainingos_marketplace_supply_participations
-where id = 'e2000000-0000-4000-8000-000000000001';
+where id = replace('e2000000_0000_4000_8000_000000000001', '_', '-')::uuid;
 select 'demand=' || count(*)
 from public.trainingos_marketplace_demands
-where id = 'e2000000-0000-4000-8000-000000000002';
+where id = replace('e2000000_0000_4000_8000_000000000002', '_', '-')::uuid;
 select 'contact=' || count(*)
 from public.trainingos_marketplace_contact_requests
-where id = 'e2000000-0000-4000-8000-000000000003';
+where id = replace('e2000000_0000_4000_8000_000000000003', '_', '-')::uuid;
 select 'handoff=' || count(*)
 from public.trainingos_marketplace_handoff_proposals
-where id = 'e2000000-0000-4000-8000-000000000004';
+where id = replace('e2000000_0000_4000_8000_000000000004', '_', '-')::uuid;
 SQL
   grep -qx 'profiles=0' "$residue_log"
   grep -qx 'supply=0' "$residue_log"
