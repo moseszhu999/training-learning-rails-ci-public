@@ -39,16 +39,39 @@ test('database replay starts only Postgres instead of the full local stack', () 
   assert.match(database, /database_only=PASS/);
 });
 
-test('release binary install keeps download output sealed and cleans temporary files', () => {
+test('runner prefetches the exact Supabase Postgres image with bounded mirror fallback', () => {
+  assert.match(database, /postgres_image_primary="supabase\/postgres:17\.6\.1\.106"/);
+  assert.match(database, /postgres_image_mirror="public\.ecr\.aws\/supabase\/postgres:17\.6\.1\.106"/);
+  assert.match(database, /for attempt in 1 2 3; do/);
+  assert.match(database, /docker pull "\$image"/);
+  assert.match(database, /docker tag "\$postgres_image_mirror" "\$postgres_image_primary"/);
+  assert.match(database, /docker image inspect "\$postgres_image_primary"/);
+  assert.match(database, /image_prefetch=PASS/);
+  assert.match(database, /image_source=\$image_prefetch_source/);
+});
+
+test('image prefetch runs before the first database start and remains sealed', () => {
+  const prefetchIndex = database.indexOf('CURRENT_STAGE="postgres-image-prefetch"');
+  const baselineStartIndex = database.indexOf('CURRENT_STAGE="baseline-start"');
+  assert.ok(prefetchIndex >= 0);
+  assert.ok(baselineStartIndex > prefetchIndex);
+  assert.match(database, /postgres-primary\.log/);
+  assert.match(database, /postgres-mirror\.log/);
+  assert.doesNotMatch(database, /cat .*postgres-(?:primary|mirror)\.log/);
+});
+
+test('release binary install and image prefetch clean temporary resources', () => {
   assert.match(database, /supabase-download\.log/);
   assert.match(database, /supabase-extract\.log/);
   assert.match(database, /rm -f "\$archive"/);
+  assert.match(database, /docker image rm "\$postgres_image_primary" "\$postgres_image_mirror"/);
   assert.match(database, /rm -rf "\$fresh" "\$upgrade" "\$base_repo" "\$bin_dir"/);
   assert.doesNotMatch(database, /cat .*supabase-(?:download|extract)\.log/);
 });
 
 test('CLI installation does not weaken exact base, replay, E2E, ACL or cleanup gates', () => {
   for (const marker of [
+    'prefetch_supabase_postgres_image',
     'start_with_marker "$upgrade" baseline-start',
     'start_with_marker "$fresh" fresh-start',
     'run_e2e "$fresh" fresh-one',
