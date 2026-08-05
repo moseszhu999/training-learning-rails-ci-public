@@ -4,6 +4,7 @@ export * from './run-marketplace-authenticated-contact-ui-profile.mjs';
 export * from './run-marketplace-supplier-contact-response-ui-profile.mjs';
 export * from './run-marketplace-authenticated-submission-ui-profile.mjs';
 export * from './run-marketplace-onboarding-intake-profile.mjs';
+export * from './run-marketplace-onboarding-handoff-projection-profile.mjs';
 
 import { closeSync, openSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
@@ -16,6 +17,7 @@ import { maybeRunMarketplaceAuthenticatedContactUiProfile } from './run-marketpl
 import { maybeRunMarketplaceSupplierContactResponseUiProfile } from './run-marketplace-supplier-contact-response-ui-profile.mjs';
 import { maybeRunMarketplaceAuthenticatedSubmissionUiProfile } from './run-marketplace-authenticated-submission-ui-profile.mjs';
 import { maybeRunMarketplaceOnboardingIntakeProfile } from './run-marketplace-onboarding-intake-profile.mjs';
+import { maybeRunMarketplaceOnboardingHandoffProjectionProfile } from './run-marketplace-onboarding-handoff-projection-profile.mjs';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -123,6 +125,9 @@ export async function maybeRunMarketplaceParticipationProfile(input) {
 
   const supplierContactResponseUi = await maybeRunMarketplaceSupplierContactResponseUiProfile(input);
   if (supplierContactResponseUi) return supplierContactResponseUi;
+
+  const onboardingHandoffProjection = await maybeRunMarketplaceOnboardingHandoffProjectionProfile(input);
+  if (onboardingHandoffProjection) return onboardingHandoffProjection;
 
   const authenticatedSubmissionUi = await maybeRunMarketplaceAuthenticatedSubmissionUiProfile(input);
   if (authenticatedSubmissionUi) return authenticatedSubmissionUi;
