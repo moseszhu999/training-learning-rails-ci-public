@@ -1,4 +1,5 @@
 export * from './run-marketplace-matching-context-profile.mjs';
+export * from './run-marketplace-selection-intent-profile.mjs';
 export * from './run-marketplace-authenticated-submission-ui-profile.mjs';
 export * from './run-marketplace-onboarding-intake-profile.mjs';
 
@@ -8,6 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { maybeRunMarketplaceMatchingContextProfile } from './run-marketplace-matching-context-profile.mjs';
+import { maybeRunMarketplaceSelectionIntentProfile } from './run-marketplace-selection-intent-profile.mjs';
 import { maybeRunMarketplaceAuthenticatedSubmissionUiProfile } from './run-marketplace-authenticated-submission-ui-profile.mjs';
 import { maybeRunMarketplaceOnboardingIntakeProfile } from './run-marketplace-onboarding-intake-profile.mjs';
 
@@ -108,6 +110,9 @@ function failedContractResult() {
 export async function maybeRunMarketplaceParticipationProfile(input) {
   const matchingContext = await maybeRunMarketplaceMatchingContextProfile(input);
   if (matchingContext) return matchingContext;
+
+  const selectionIntent = await maybeRunMarketplaceSelectionIntentProfile(input);
+  if (selectionIntent) return selectionIntent;
 
   const authenticatedSubmissionUi = await maybeRunMarketplaceAuthenticatedSubmissionUiProfile(input);
   if (authenticatedSubmissionUi) return authenticatedSubmissionUi;
