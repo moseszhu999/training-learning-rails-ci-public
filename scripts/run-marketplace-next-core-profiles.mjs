@@ -25,7 +25,7 @@ const PROFILES = Object.freeze([
   Object.freeze({
     suite: 'marketplace-public-source-observation-core',
     files: MARKETPLACE_PUBLIC_SOURCE_EXACT_FILES,
-    expectedNodeCount: 9,
+    expectedNodeCount: 10,
     sourcePath: 'packages/training-marketplace-public-source/src/index.mjs',
     declarationPath: 'packages/training-marketplace-public-source/src/index.d.ts',
     testPath: 'tests/training-marketplace-public-source-observation-core-v1.test.mjs',
