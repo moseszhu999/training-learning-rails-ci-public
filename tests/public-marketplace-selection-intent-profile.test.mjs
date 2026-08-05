@@ -49,7 +49,7 @@ test('profile runs focused selection, declaration, typecheck and build gates', (
     ],
   );
   for (const marker of [
-    'CANONICAL_MIGRATION_COUNT = 366',
+    'CANONICAL_MIGRATION_COUNT = 367',
     'EXPECTED_NODE_COUNT = 6',
     'EXPECTED_PYTHON_COUNT = 5',
     'selection-intent.test.mjs',
