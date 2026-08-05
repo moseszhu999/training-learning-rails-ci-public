@@ -21,6 +21,7 @@ test('matching-context profile invokes the fixed init-image wrapper', () => {
 
 test('wrapper pins the stable Supabase CLI 2.109.1 database-init stack', () => {
   assert.match(wrapper, /readonly candidate_cli_version="2\.109\.1"/);
+  assert.match(wrapper, /readonly candidate_health_timeout="5m"/);
   for (const image of [
     'supabase/postgres:17.6.1.143',
     'supabase/gotrue:v2.192.0',
@@ -45,14 +46,36 @@ test('each image uses bounded retries, mirror retag, inspect and cleanup', () =>
   assert.match(wrapper, /trap cleanup_wrapper EXIT/);
 });
 
-test('wrapper patches both generated Supabase configs to a five-minute health timeout', () => {
-  assert.match(wrapper, /readonly health_timeout="5m"/);
-  assert.match(wrapper, /trainingos-marketplace-matching-context-fresh\/supabase\/config\.toml/);
-  assert.match(wrapper, /trainingos-marketplace-matching-context-upgrade\/supabase\/config\.toml/);
-  assert.match(wrapper, /patch_health_timeout_when_ready/);
-  assert.ok(wrapper.includes('health_timeout = "{health_timeout}"'));
-  assert.match(wrapper, /grep -Eq '\^health_timeout = "5m"\$'/);
-  assert.match(wrapper, /MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config/);
+test('temporary runner synchronously patches health timeout after init', () => {
+  assert.match(wrapper, /health_old = '''wait_for_health_timeout\(\)\{/);
+  assert.match(wrapper, /health_new = f'''patch_health_timeout\(\)\{/);
+  assert.match(wrapper, /health timeout sequencing contract changed/);
+  assert.match(wrapper, /legacy health timeout waiter remains/);
+  assert.ok(wrapper.includes('CURRENT_STAGE="${label}-health-timeout-config"'));
+  assert.ok(wrapper.includes('python - "$config" "{candidate_health_timeout}"'));
+  assert.ok(wrapper.includes('health_timeout = "{value}"'));
+  assert.ok(wrapper.includes('grep -Eq \'^health_timeout = "{candidate_health_timeout}"$\''));
+
+  const initIndex = wrapper.indexOf('sealed "${label}-init" supabase --workdir "$workdir" init --force');
+  const patchIndex = wrapper.indexOf('patch_health_timeout "$workdir" "$label"');
+  const clearIndex = wrapper.indexOf('rm -rf "$workdir/supabase/migrations"');
+  assert.ok(initIndex >= 0);
+  assert.ok(patchIndex > initIndex);
+  assert.ok(clearIndex > patchIndex);
+});
+
+test('wrapper removes all asynchronous watcher and runner races', () => {
+  for (const forbidden of [
+    'patch_health_timeout_when_ready',
+    'fresh_watcher_pid',
+    'fresh_two_watcher_pid',
+    'upgrade_watcher_pid',
+    'runner_pid',
+    'wait "$fresh_watcher_pid"',
+    'wait "$upgrade_watcher_pid"',
+    'bash "$runner_script" &',
+  ]) assert.ok(!wrapper.includes(forbidden), forbidden);
+  assert.match(wrapper, /prepare_debug_runner\nbash "\$runner_script"/);
 });
 
 test('wrapper creates a temporary stable-stack debug runner without modifying the source runner', () => {
@@ -81,17 +104,6 @@ test('sealed debug classifier emits bounded resource and service families', () =
   assert.ok(wrapper.includes('resource%s-service%s-exit%s'));
   assert.match(wrapper, /failure marker format contract changed/);
   assert.match(wrapper, /resource classifier contract changed/);
-});
-
-test('health-timeout watchers run before waiting for the sealed replay', () => {
-  const runnerIndex = wrapper.indexOf('bash "$runner_script" &');
-  const freshWatcherIndex = wrapper.indexOf('patch_health_timeout_when_ready "$fresh_config" fresh &');
-  const upgradeWatcherIndex = wrapper.indexOf('patch_health_timeout_when_ready "$upgrade_config" upgrade &');
-  const runnerWaitIndex = wrapper.indexOf('wait "$runner_pid"');
-  assert.ok(runnerIndex >= 0);
-  assert.ok(freshWatcherIndex > runnerIndex);
-  assert.ok(upgradeWatcherIndex > freshWatcherIndex);
-  assert.ok(runnerWaitIndex > upgradeWatcherIndex);
 });
 
 test('wrapper preserves the original sealed replay and publishes no logs', () => {
