@@ -1,0 +1,145 @@
+name: Marketplace matching-context service-init diagnostic
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/marketplace-matching-context-service-init-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-matching-context-service-init-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Run bounded Supabase database-start diagnostic
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+
+          cli_version='2.101.0'
+          workdir="$RUNNER_TEMP/matching-context-service-init"
+          bin_dir="$RUNNER_TEMP/matching-context-service-init-bin"
+          archive="$RUNNER_TEMP/supabase_linux_amd64-${cli_version}.tar.gz"
+          start_log="$RUNNER_TEMP/matching-context-service-init-start.log"
+          health_timeout='5m'
+          primary_images=(
+            'supabase/postgres:17.6.1.106'
+            'supabase/gotrue:v2.188.1'
+            'supabase/realtime:v2.86.3'
+            'supabase/storage-api:v1.54.1'
+          )
+          mirror_images=(
+            'public.ecr.aws/supabase/postgres:17.6.1.106'
+            'public.ecr.aws/supabase/gotrue:v2.188.1'
+            'public.ecr.aws/supabase/realtime:v2.86.3'
+            'public.ecr.aws/supabase/storage-api:v1.54.1'
+          )
+
+          cleanup() {
+            supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
+            docker image rm "${primary_images[@]}" "${mirror_images[@]}" >/dev/null 2>&1 || true
+            rm -rf "$workdir" "$bin_dir"
+            rm -f "$archive" "$start_log" "$RUNNER_TEMP"/matching-context-service-init-image-*.log
+          }
+          trap cleanup EXIT
+
+          pull_with_retries() {
+            local image="$1" log_path="$2" attempt
+            : >"$log_path"
+            for attempt in 1 2 3; do
+              if docker pull "$image" >>"$log_path" 2>&1; then
+                return 0
+              fi
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
+
+          mkdir -p "$bin_dir" "$workdir"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+            "https://github.com/supabase/cli/releases/download/v${cli_version}/supabase_linux_amd64.tar.gz" \
+            --output "$archive"
+          tar -xzf "$archive" -C "$bin_dir"
+          chmod 700 "$bin_dir/supabase"
+          export PATH="$bin_dir:$PATH"
+          [[ "$(supabase --version | tr -d '\r' | awk 'NF { print $NF; exit }')" == "$cli_version" ]]
+
+          for index in "${!primary_images[@]}"; do
+            primary="${primary_images[$index]}"
+            mirror="${mirror_images[$index]}"
+            log_path="$RUNNER_TEMP/matching-context-service-init-image-${index}.log"
+            if pull_with_retries "$primary" "$log_path"; then
+              :
+            elif pull_with_retries "$mirror" "$log_path"; then
+              docker tag "$mirror" "$primary" >/dev/null 2>&1
+            else
+              echo "MATCHING_CONTEXT_SERVICE_INIT status=CAPTURED_FAILURE stage=image-prefetch image_index=$index"
+              exit 0
+            fi
+            docker image inspect "$primary" --format '{{.Id}}' >/dev/null
+          done
+
+          supabase --workdir "$workdir" init --force >/dev/null 2>&1
+          python - "$workdir/supabase/config.toml" "$health_timeout" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          path = Path(sys.argv[1])
+          value = sys.argv[2]
+          text = path.read_text(encoding='utf-8')
+          section = re.search(r'(?m)^\[db\]\s*$', text)
+          if section is None:
+              raise SystemExit('db section missing')
+          next_section = re.search(r'(?m)^\[[^\]]+\]\s*$', text[section.end():])
+          end = section.end() + (next_section.start() if next_section else len(text) - section.end())
+          block = text[section.end():end]
+          replacement = f'health_timeout = "{value}"'
+          if re.search(r'(?m)^\s*health_timeout\s*=', block):
+              block = re.sub(r'(?m)^\s*health_timeout\s*=.*$', replacement, block, count=1)
+          else:
+              block = '\n' + replacement + block
+          path.write_text(text[:section.end()] + block + text[end:], encoding='utf-8')
+          PY
+          grep -Eq '^health_timeout = "5m"$' "$workdir/supabase/config.toml"
+
+          started_at=$(date +%s)
+          set +e
+          supabase --workdir "$workdir" db start >"$start_log" 2>&1
+          start_code=$?
+          set -e
+          elapsed=$(( $(date +%s) - started_at ))
+
+          bool_marker() {
+            local pattern="$1"
+            if grep -Eqi "$pattern" "$start_log" 2>/dev/null; then printf true; else printf false; fi
+          }
+
+          postgres_health=$(bool_marker 'database is not healthy|container.*unhealthy|pg_isready|health check')
+          auth_init=$(bool_marker 'gotrue|supabase_auth_admin|auth.*migrat')
+          realtime_init=$(bool_marker 'realtime|_realtime')
+          storage_init=$(bool_marker 'storage-api|supabase_storage_admin|storage.*migrat')
+          image_error=$(bool_marker 'pull access denied|manifest unknown|failed to pull|image.*not found')
+          port_error=$(bool_marker 'address already in use|port is already allocated|bind:.*failed')
+          docker_error=$(bool_marker 'cannot connect to docker|docker daemon|container.*failed|container.*exited')
+          config_error=$(bool_marker 'config.*invalid|toml.*invalid|failed to parse config')
+
+          if [[ "$start_code" == 0 ]]; then
+            status='PASS'
+          else
+            status='CAPTURED_FAILURE'
+          fi
+
+          echo "MATCHING_CONTEXT_SERVICE_INIT status=$status exit=$start_code elapsed_seconds=$elapsed postgres_health=$postgres_health auth_init=$auth_init realtime_init=$realtime_init storage_init=$storage_init image_error=$image_error port_error=$port_error docker_error=$docker_error config_error=$config_error"
+
+      - name: Enforce diagnostic completion
+        shell: bash
+        run: echo 'diagnostic-complete'
