@@ -19,8 +19,8 @@ class OpaqueCommitmentTest(unittest.TestCase):
     def test_commitments_are_well_formed_and_unique(self):
         self.assertTrue(HEX64.fullmatch(self.data["source_head_sha256"]))
         artifacts = self.data["artifact_commitments"]
-        self.assertEqual(list(artifacts), ["artifact_1", "artifact_2", "artifact_3", "artifact_4"])
-        self.assertEqual(len(set(artifacts.values())), 4)
+        self.assertEqual(list(artifacts), ["artifact_1", "artifact_2", "artifact_3"])
+        self.assertEqual(len(set(artifacts.values())), 3)
         for digest in artifacts.values():
             self.assertTrue(HEX64.fullmatch(digest))
 
@@ -34,8 +34,8 @@ class OpaqueCommitmentTest(unittest.TestCase):
     def test_local_validation_receipt_is_bounded(self):
         receipt = self.data["local_exact_content_validation"]
         self.assertEqual(receipt, {
-            "json_parse": "pass",
-            "unit_tests_passed": 6,
+            "json_parse": "not_applicable",
+            "unit_tests_passed": 3,
             "unit_tests_failed": 0,
         })
 
@@ -47,10 +47,9 @@ class OpaqueCommitmentTest(unittest.TestCase):
                 self.assertFalse(value)
         forbidden = (
             "newonly2",
-            "moseszhu999/newonly2",
             "production/",
             "research/market_data_hf",
-            "b2784c41bbb08466c05f9daa4288ee070aee0fef",
+            "0e61e05c2a2898863d43d1933fd6d6df039ab8e8",
             "hf_token",
             "aws_access_key",
             "private_key",

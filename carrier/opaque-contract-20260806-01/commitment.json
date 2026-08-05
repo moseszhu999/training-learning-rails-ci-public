@@ -1,17 +1,16 @@
 {
   "schema": "public_carrier.opaque_private_exact_head_commitment.v1",
-  "profile_id": "opaque-contract-20260806-01",
-  "source_head_sha256": "2a4ff5f65ebd089e0b321296ce9586f8c2d7f0fdc006e7e57ad6a3b80fa009ce",
+  "profile_id": "opaque-contract-20260806-02",
+  "source_head_sha256": "01f14edd7405e83c4ef1074642ef92cdf78fd4a17c4777081ad8e5299735db31",
   "artifact_commitments": {
-    "artifact_1": "ef3f8d819a935f79229f4918fc2be13d3062dd77dd15f5bc5b7a2ede97365ddd",
-    "artifact_2": "660625595b1d4713164809082fb459a8c822a650b7c56e5883912ebe0afea302",
-    "artifact_3": "81af707927ffe2be4a4a7a42645488c150971207f38631d8bd4cb2848ca418ce",
-    "artifact_4": "da6cb91a8d603d30a4866facb5f6d6ca8eb322105bc9ff97ab00031444bdf5a5"
+    "artifact_1": "c2803aae4c543e87c4a790a8310ca45f69367b450f0e806a61a17da752160ad5",
+    "artifact_2": "e42369f8e9851095d4e764f80eb5f18a252af537e3f1208fa48a7a9d514ca3fd",
+    "artifact_3": "a91e5c1734738f3df844c4740bf43f0b97e81cb46ba8af1b20cd05d6d33bed36"
   },
-  "bundle_sha256": "79d529f681e22491333ee30f0569d209e7f02e995682ae305040bddaeea187b2",
+  "bundle_sha256": "a8a8c493ae6bd6eb798755519d31c00c24b8a1336ff5b3804134f138073f39bc",
   "local_exact_content_validation": {
-    "json_parse": "pass",
-    "unit_tests_passed": 6,
+    "json_parse": "not_applicable",
+    "unit_tests_passed": 3,
     "unit_tests_failed": 0
   },
   "disclosure": {
