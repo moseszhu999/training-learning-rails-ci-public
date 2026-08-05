@@ -1,4 +1,3 @@
-export * from './run-marketplace-public-object-routes-profile.mjs';
 export * from './run-marketplace-matching-context-profile.mjs';
 export * from './run-marketplace-selection-intent-profile.mjs';
 export * from './run-marketplace-authenticated-contact-ui-profile.mjs';
@@ -12,7 +11,6 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { maybeRunMarketplacePublicObjectRoutesProfile } from './run-marketplace-public-object-routes-profile.mjs';
 import { maybeRunMarketplaceMatchingContextProfile } from './run-marketplace-matching-context-profile.mjs';
 import { maybeRunMarketplaceSelectionIntentProfile } from './run-marketplace-selection-intent-profile.mjs';
 import { maybeRunMarketplaceAuthenticatedContactUiProfile } from './run-marketplace-authenticated-contact-ui-profile.mjs';
@@ -116,9 +114,6 @@ function failedContractResult() {
 }
 
 export async function maybeRunMarketplaceParticipationProfile(input) {
-  const publicObjectRoutes = await maybeRunMarketplacePublicObjectRoutesProfile(input);
-  if (publicObjectRoutes) return publicObjectRoutes;
-
   const matchingContext = await maybeRunMarketplaceMatchingContextProfile(input);
   if (matchingContext) return matchingContext;
 
