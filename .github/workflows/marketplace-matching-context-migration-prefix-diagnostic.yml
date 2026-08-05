@@ -51,7 +51,9 @@ jobs:
           readonly cli_version='2.109.1'
           readonly health_timeout='5m'
           readonly private_repo="$GITHUB_WORKSPACE/private-base"
-          readonly bootstrap_dir="$RUNNER_TEMP/matching-context-prefix-bootstrap"
+          readonly bootstrap_root="$RUNNER_TEMP/matching-context-prefix-bootstrap"
+          readonly bootstrap_migrations="$bootstrap_root/migrations"
+          readonly workdir="$RUNNER_TEMP/matching-context-prefix-workdir"
           readonly bin_dir="$RUNNER_TEMP/matching-context-prefix-bin"
           readonly archive="$RUNNER_TEMP/supabase_linux_amd64-${cli_version}.tar.gz"
           readonly -a primary_images=(
@@ -67,19 +69,12 @@ jobs:
             'public.ecr.aws/supabase/storage-api:v1.62.5'
           )
           declare -a migrations=()
-          last_sqlstate='unknown'
-          last_category='unknown'
 
           cleanup() {
-            local directory
-            for directory in "$RUNNER_TEMP"/matching-context-prefix-trial-*; do
-              [[ -d "$directory" ]] || continue
-              supabase --workdir "$directory" stop --no-backup >/dev/null 2>&1 || true
-            done
+            supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
             docker image rm "${primary_images[@]}" "${mirror_images[@]}" >/dev/null 2>&1 || true
-            rm -rf "$bootstrap_dir" "$bin_dir" "$RUNNER_TEMP"/matching-context-prefix-trial-*
+            rm -rf "$bootstrap_root" "$workdir" "$bin_dir" "$private_repo"
             rm -f "$archive" "$RUNNER_TEMP"/matching-context-prefix-*.log
-            rm -rf "$private_repo"
           }
           trap cleanup EXIT
 
@@ -163,57 +158,10 @@ jobs:
                 fi
                 ;;
             esac
-            last_sqlstate="$sqlstate"
-            last_category="$category"
+            printf '%s %s' "$sqlstate" "$category"
           }
 
-          run_prefix() {
-            local count="$1" label="trial-${1}" workdir config start_log migration_log index
-            workdir="$RUNNER_TEMP/matching-context-prefix-trial-${count}"
-            config="$workdir/supabase/config.toml"
-            start_log="$RUNNER_TEMP/matching-context-prefix-${label}-start.log"
-            migration_log="$RUNNER_TEMP/matching-context-prefix-${label}-migration.log"
-            rm -rf "$workdir"
-            mkdir -p "$workdir"
-            supabase --workdir "$workdir" init --force >"$RUNNER_TEMP/matching-context-prefix-${label}-init.log" 2>&1
-            patch_health_timeout "$config"
-            rm -rf "$workdir/supabase/migrations"
-            mkdir -p "$workdir/supabase/migrations"
-
-            set +e
-            supabase --workdir "$workdir" db start >"$start_log" 2>&1
-            start_code=$?
-            set -e
-            if [[ "$start_code" != 0 ]]; then
-              classify_failure "$start_log"
-              supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
-              rm -rf "$workdir"
-              return 2
-            fi
-
-            for ((index=0; index<count; index++)); do
-              cp "${migrations[$index]}" "$workdir/supabase/migrations/"
-            done
-
-            set +e
-            supabase --workdir "$workdir" migration up --local --include-all >"$migration_log" 2>&1
-            migration_code=$?
-            set -e
-            if [[ "$migration_code" != 0 ]]; then
-              classify_failure "$migration_log"
-              supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
-              rm -rf "$workdir"
-              return 1
-            fi
-
-            supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
-            rm -rf "$workdir"
-            last_sqlstate='none'
-            last_category='none'
-            return 0
-          }
-
-          mkdir -p "$bin_dir" "$bootstrap_dir"
+          mkdir -p "$bin_dir" "$bootstrap_migrations" "$workdir"
           curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
             "https://github.com/supabase/cli/releases/download/v${cli_version}/supabase_linux_amd64.tar.gz" \
             --output "$archive"
@@ -225,11 +173,11 @@ jobs:
 
           python "$private_repo/scripts/build-trainingos-fresh-bootstrap.py" \
             --repo-root "$private_repo" \
-            --output-dir "$bootstrap_dir" \
+            --output-dir "$bootstrap_migrations" \
             --commit-sha "$exact_base" \
             >"$RUNNER_TEMP/matching-context-prefix-bootstrap.log" 2>&1
 
-          manifest_count="$(python - "$bootstrap_dir/trainingos-bootstrap-manifest.json" <<'PY'
+          manifest_count="$(python - "$bootstrap_root/trainingos-bootstrap-manifest.json" <<'PY'
           import json
           from pathlib import Path
           import sys
@@ -237,39 +185,43 @@ jobs:
           PY
           )"
           [[ "$manifest_count" == "$expected_count" ]]
-          mapfile -t migrations < <(find "$bootstrap_dir" -maxdepth 1 -type f -name '*.sql' -print | sort)
+          mapfile -t migrations < <(find "$bootstrap_migrations" -maxdepth 1 -type f -name '*.sql' -print | sort)
           [[ "${#migrations[@]}" == "$expected_count" ]]
 
-          low=1
-          high=$expected_count
-          first_failure=0
-          first_sqlstate='unknown'
-          first_category='unknown'
-          infrastructure_failure=0
+          supabase --workdir "$workdir" init --force >"$RUNNER_TEMP/matching-context-prefix-init.log" 2>&1
+          patch_health_timeout "$workdir/supabase/config.toml"
+          rm -rf "$workdir/supabase/migrations"
+          mkdir -p "$workdir/supabase/migrations"
 
-          while (( low <= high )); do
-            mid=$(( (low + high) / 2 ))
-            if run_prefix "$mid"; then
-              low=$((mid + 1))
-            else
-              code=$?
-              if [[ "$code" == 2 ]]; then
-                infrastructure_failure=1
-                first_failure=$mid
-                first_sqlstate="$last_sqlstate"
-                first_category="$last_category"
-                break
-              fi
-              first_failure=$mid
-              first_sqlstate="$last_sqlstate"
-              first_category="$last_category"
-              high=$((mid - 1))
+          set +e
+          supabase --workdir "$workdir" db start >"$RUNNER_TEMP/matching-context-prefix-empty-start.log" 2>&1
+          start_code=$?
+          set -e
+          if [[ "$start_code" != 0 ]]; then
+            read -r sqlstate category <<<"$(classify_failure "$RUNNER_TEMP/matching-context-prefix-empty-start.log")"
+            echo "MATCHING_CONTEXT_PREFIX status=INFRA_FAILURE stage=empty-start ordinal=0 total=$expected_count sqlstate=$sqlstate category=$category"
+            exit 0
+          fi
+
+          first_failure=0
+          first_sqlstate='none'
+          first_category='none'
+          for ((index=0; index<expected_count; index++)); do
+            ordinal=$((index + 1))
+            cp "${migrations[$index]}" "$workdir/supabase/migrations/"
+            migration_log="$RUNNER_TEMP/matching-context-prefix-migration-${ordinal}.log"
+            set +e
+            supabase --workdir "$workdir" migration up --local --include-all >"$migration_log" 2>&1
+            migration_code=$?
+            set -e
+            if [[ "$migration_code" != 0 ]]; then
+              first_failure=$ordinal
+              read -r first_sqlstate first_category <<<"$(classify_failure "$migration_log")"
+              break
             fi
           done
 
-          if [[ "$infrastructure_failure" == 1 ]]; then
-            echo "MATCHING_CONTEXT_PREFIX status=INFRA_FAILURE stage=empty-start ordinal=$first_failure total=$expected_count sqlstate=$first_sqlstate category=$first_category"
-          elif [[ "$first_failure" == 0 ]]; then
+          if [[ "$first_failure" == 0 ]]; then
             echo "MATCHING_CONTEXT_PREFIX status=ALL_PREFIXES_PASS stage=migration-up ordinal=0 total=$expected_count sqlstate=none category=none"
           else
             echo "MATCHING_CONTEXT_PREFIX status=FIRST_FAILURE stage=migration-up ordinal=$first_failure total=$expected_count sqlstate=$first_sqlstate category=$first_category"
