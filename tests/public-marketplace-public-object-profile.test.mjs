@@ -49,7 +49,7 @@ test('public object profile runs the canonical ten fixed gates', () => {
     ],
   );
   for (const marker of [
-    'EXPECTED_PYTHON_COUNT = 16',
+    'EXPECTED_PYTHON_COUNT = 18',
     'EXPECTED_MIGRATION_COUNT = 368',
     'test_trainingos_marketplace_public_object_routes_v1',
     "command('declaration-typecheck'",
@@ -79,7 +79,7 @@ test('generic-owned request accepts the current public object contract', () => {
     validationProfile: 'generic-owned',
     expectedChangedFileCount: '11',
     expectedMigrationRange: 'none',
-    expectedFocusedTestCounts: 'node=0;python=16',
+    expectedFocusedTestCounts: 'node=0;python=18',
     expectedMigrationCount: '368',
     runFreshReplay: 'false',
     runUpgradeReplay: 'false',
