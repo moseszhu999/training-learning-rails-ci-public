@@ -54,15 +54,19 @@ actual_supabase_version="$(supabase --version | tr -d '\r' | awk 'NF { print $NF
 [[ "$actual_supabase_version" == "$supabase_cli_version" ]]
 
 fresh="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh"
+fresh_two="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh-two"
 upgrade="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade"
+exact_bootstrap="$RUNNER_TEMP/trainingos-marketplace-matching-context-exact-bootstrap"
+base_bootstrap="$RUNNER_TEMP/trainingos-marketplace-matching-context-base-bootstrap"
 base_repo="$RUNNER_TEMP/trainingos-marketplace-matching-context-base-repo"
 
 cleanup(){
   supabase --workdir "$fresh" stop --no-backup >/dev/null 2>&1 || true
+  supabase --workdir "$fresh_two" stop --no-backup >/dev/null 2>&1 || true
   supabase --workdir "$upgrade" stop --no-backup >/dev/null 2>&1 || true
   git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_repo" >/dev/null 2>&1 || true
   docker image rm "$postgres_image_primary" "$postgres_image_mirror" >/dev/null 2>&1 || true
-  rm -rf "$fresh" "$upgrade" "$base_repo" "$bin_dir"
+  rm -rf "$fresh" "$fresh_two" "$upgrade" "$exact_bootstrap" "$base_bootstrap" "$base_repo" "$bin_dir"
   rm -f "$archive" "$RUNNER_TEMP"/trainingos-marketplace-matching-context-*.env
   rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-*.log
 }
@@ -169,6 +173,56 @@ start_with_marker(){
   fi
 }
 
+wait_for_health_timeout(){
+  local workdir="$1" label="$2" config attempt
+  config="$workdir/supabase/config.toml"
+  for attempt in $(seq 1 1800); do
+    if [[ -f "$config" ]] && grep -Eq '^health_timeout = "5m"$' "$config"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  CURRENT_STAGE="${label}-health-timeout-not-ready"
+  return 1
+}
+
+initialize_empty_workdir(){
+  local workdir="$1" label="$2"
+  mkdir -p "$workdir"
+  sealed "${label}-init" supabase --workdir "$workdir" init --force
+  rm -rf "$workdir/supabase/migrations"
+  mkdir -p "$workdir/supabase/migrations"
+  wait_for_health_timeout "$workdir" "$label"
+}
+
+copy_migrations(){
+  local source_dir="$1" workdir="$2" label="$3"
+  find "$source_dir" -maxdepth 1 -type f -name '*.sql' -print0 \
+    | sort -z \
+    | xargs -0 -I{} cp "{}" "$workdir/supabase/migrations/"
+  [[ -n "$(find "$workdir/supabase/migrations" -maxdepth 1 -type f -name '*.sql' -print -quit)" ]]
+  CURRENT_STAGE="${label}-migrations-copied"
+}
+
+apply_migrations(){
+  local workdir="$1" label="$2"
+  CURRENT_STAGE="${label}-migration-up"
+  sealed "${label}-migration-up" supabase --workdir "$workdir" migration up --local --include-all
+}
+
+assert_applied_migration_count(){
+  local workdir="$1" label="$2" expected="$3" status_file db_url count_file
+  CURRENT_STAGE="${label}-migration-count"
+  status_file="$RUNNER_TEMP/trainingos-marketplace-matching-context-${label}-count.env"
+  count_file="$RUNNER_TEMP/trainingos-marketplace-matching-context-${label}-count.log"
+  supabase --workdir "$workdir" status -o env >"$status_file" 2>&1
+  db_url="$(grep '^DB_URL=' "$status_file" | sed 's/^DB_URL=//' | tr -d '"')"
+  [[ -n "$db_url" ]]
+  psql "$db_url" -X -v ON_ERROR_STOP=1 -At \
+    -c 'select count(*) from supabase_migrations.schema_migrations;' >"$count_file" 2>&1
+  grep -qx "$expected" "$count_file"
+}
+
 run_e2e(){
   local workdir="$1" label="$2" status_file db_url e2e_log residue_log catalog_log
 
@@ -251,75 +305,67 @@ SQL
   grep -qx 'new_tables=0' "$catalog_log"
 }
 
-rm -rf "$fresh" "$upgrade" "$base_repo"
+rm -rf "$fresh" "$fresh_two" "$upgrade" "$exact_bootstrap" "$base_bootstrap" "$base_repo"
 
 CURRENT_STAGE="postgres-image-prefetch"
 prefetch_supabase_postgres_image
 
-CURRENT_STAGE="workdir-create"
-mkdir -p "$fresh" "$upgrade"
+CURRENT_STAGE="bootstrap-directories"
+mkdir -p "$exact_bootstrap/migrations" "$base_bootstrap/migrations"
 
-CURRENT_STAGE="fresh-init"
-sealed fresh-init supabase --workdir "$fresh" init --force
-rm -rf "$fresh/supabase/migrations"
-
-CURRENT_STAGE="fresh-bootstrap"
-sealed fresh-bootstrap python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
+CURRENT_STAGE="exact-bootstrap"
+sealed exact-bootstrap python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh-bootstrap.py" \
   --repo-root "$PRIVATE_REPO_PATH" \
-  --output-dir "$fresh/supabase/migrations" \
+  --output-dir "$exact_bootstrap/migrations" \
   --commit-sha "$PRIVATE_EXACT_SHA"
-
-CURRENT_STAGE="fresh-migration-count"
-[[ "$(manifest_count "$fresh/supabase/trainingos-bootstrap-manifest.json")" == "$canonical_migration_count" ]]
+[[ "$(manifest_count "$exact_bootstrap/trainingos-bootstrap-manifest.json")" == "$canonical_migration_count" ]]
 
 CURRENT_STAGE="baseline-base-worktree"
 sealed baseline-base-worktree git -C "$PRIVATE_REPO_PATH" worktree add --detach "$base_repo" "$expected_base_sha"
 
-CURRENT_STAGE="baseline-init"
-sealed baseline-init supabase --workdir "$upgrade" init --force
-rm -rf "$upgrade/supabase/migrations"
-
-CURRENT_STAGE="baseline-bootstrap"
-sealed baseline-bootstrap python "$base_repo/scripts/build-trainingos-fresh-bootstrap.py" \
+CURRENT_STAGE="base-bootstrap"
+sealed base-bootstrap python "$base_repo/scripts/build-trainingos-fresh-bootstrap.py" \
   --repo-root "$base_repo" \
-  --output-dir "$upgrade/supabase/migrations" \
+  --output-dir "$base_bootstrap/migrations" \
   --commit-sha "$expected_base_sha"
+[[ "$(manifest_count "$base_bootstrap/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
 
-CURRENT_STAGE="baseline-migration-count"
-[[ "$(manifest_count "$upgrade/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
+CURRENT_STAGE="workdir-initialization"
+initialize_empty_workdir "$fresh" fresh-one
+initialize_empty_workdir "$fresh_two" fresh-two
+initialize_empty_workdir "$upgrade" upgrade
 
-CURRENT_STAGE="baseline-start"
-start_with_marker "$upgrade" baseline-start
-
-CURRENT_STAGE="baseline-stop"
-sealed baseline-stop supabase --workdir "$upgrade" stop --no-backup
-
-CURRENT_STAGE="fresh-start"
-start_with_marker "$fresh" fresh-start
-
-CURRENT_STAGE="fresh-reset"
-sealed fresh-reset supabase --workdir "$fresh" db reset --local --no-seed
+CURRENT_STAGE="fresh-one-empty-start"
+start_with_marker "$fresh" fresh-one-empty-start
+copy_migrations "$exact_bootstrap/migrations" "$fresh" fresh-one
+apply_migrations "$fresh" fresh-one
+assert_applied_migration_count "$fresh" fresh-one "$canonical_migration_count"
 run_e2e "$fresh" fresh-one
-run_e2e "$fresh" fresh-two
+CURRENT_STAGE="fresh-one-stop"
+sealed fresh-one-stop supabase --workdir "$fresh" stop --no-backup
 
-CURRENT_STAGE="fresh-stop"
-sealed fresh-stop supabase --workdir "$fresh" stop --no-backup
+CURRENT_STAGE="fresh-two-empty-start"
+start_with_marker "$fresh_two" fresh-two-empty-start
+copy_migrations "$exact_bootstrap/migrations" "$fresh_two" fresh-two
+apply_migrations "$fresh_two" fresh-two
+assert_applied_migration_count "$fresh_two" fresh-two "$canonical_migration_count"
+run_e2e "$fresh_two" fresh-two
+CURRENT_STAGE="fresh-two-stop"
+sealed fresh-two-stop supabase --workdir "$fresh_two" stop --no-backup
 
-CURRENT_STAGE="upgrade-start"
-start_with_marker "$upgrade" upgrade-start
-
-CURRENT_STAGE="upgrade-base-reset"
-sealed upgrade-base-reset supabase --workdir "$upgrade" db reset --local --no-seed
+CURRENT_STAGE="upgrade-empty-start"
+start_with_marker "$upgrade" upgrade-empty-start
+copy_migrations "$base_bootstrap/migrations" "$upgrade" baseline
+apply_migrations "$upgrade" baseline
+assert_applied_migration_count "$upgrade" baseline "$base_migration_count"
 
 CURRENT_STAGE="upgrade-copy-forward-migration"
 cp "$PRIVATE_REPO_PATH/supabase/migrations/$migration_name" "$upgrade/supabase/migrations/"
-
-CURRENT_STAGE="upgrade-apply"
-sealed upgrade-apply supabase --workdir "$upgrade" migration up --local --include-all
+apply_migrations "$upgrade" upgrade
+assert_applied_migration_count "$upgrade" upgrade "$canonical_migration_count"
 run_e2e "$upgrade" upgrade
-
 CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version image_prefetch=PASS image_source=$image_prefetch_source workdirs=PASS database_only=PASS fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
+echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version image_prefetch=PASS image_source=$image_prefetch_source workdirs=PASS empty_start=PASS explicit_migration_up=PASS baseline_replay=PASS fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
