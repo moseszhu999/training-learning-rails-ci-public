@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - fix/trainingos-marketplace-matching-context-image-prefetch-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/marketplace-matching-context-image-probe.yml
   workflow_dispatch:
 
 permissions:
