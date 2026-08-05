@@ -245,7 +245,7 @@ PY
   grep -q 'public.ecr.aws/supabase/postgres:17.6.1.143' "$runner_script"
   grep -q 'patch_health_timeout(){' "$runner_script"
   grep -q 'CURRENT_STAGE="${label}-health-timeout-config"' "$runner_script"
-  grep -Eq '^  grep -Eq '\''\^health_timeout = "5m"\\\$'\'' "\$config"$' "$runner_script"
+  grep -Fq '  grep -Eq '\''^health_timeout = "5m"$'\'' "$config"' "$runner_script"
   ! grep -q 'wait_for_health_timeout' "$runner_script"
 }
 
