@@ -14,6 +14,9 @@ done
 canonical_migration_count=367
 base_migration_count=366
 supabase_cli_version="2.101.0"
+postgres_image_primary="supabase/postgres:17.6.1.106"
+postgres_image_mirror="public.ecr.aws/supabase/postgres:17.6.1.106"
+image_prefetch_source="none"
 migration_name="20260805063000_trainingos_marketplace_matching_context_projection_v1.sql"
 e2e_name="trainingos_marketplace_matching_context_projection_v1_e2e.sql"
 pass_marker="TRAININGOS_MARKETPLACE_MATCHING_CONTEXT_PROJECTION_V1_E2E_PASS"
@@ -58,14 +61,46 @@ cleanup(){
   supabase --workdir "$fresh" stop --no-backup >/dev/null 2>&1 || true
   supabase --workdir "$upgrade" stop --no-backup >/dev/null 2>&1 || true
   git -C "$PRIVATE_REPO_PATH" worktree remove --force "$base_repo" >/dev/null 2>&1 || true
+  docker image rm "$postgres_image_primary" "$postgres_image_mirror" >/dev/null 2>&1 || true
   rm -rf "$fresh" "$upgrade" "$base_repo" "$bin_dir"
   rm -f "$archive" "$RUNNER_TEMP"/trainingos-marketplace-matching-context-*.env
+  rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-*.log
 }
 trap cleanup EXIT
 
 sealed(){
   local label="$1"; shift
   "$@" >"$RUNNER_TEMP/trainingos-marketplace-matching-context-${label}.log" 2>&1
+}
+
+pull_image_with_retries(){
+  local image="$1" log_path="$2" attempt
+  : >"$log_path"
+  for attempt in 1 2 3; do
+    if docker pull "$image" >>"$log_path" 2>&1; then
+      return 0
+    fi
+    sleep $((attempt * 5))
+  done
+  return 1
+}
+
+prefetch_supabase_postgres_image(){
+  local primary_log mirror_log
+  primary_log="$RUNNER_TEMP/trainingos-marketplace-matching-context-postgres-primary.log"
+  mirror_log="$RUNNER_TEMP/trainingos-marketplace-matching-context-postgres-mirror.log"
+
+  if pull_image_with_retries "$postgres_image_primary" "$primary_log"; then
+    image_prefetch_source="dockerhub"
+  elif pull_image_with_retries "$postgres_image_mirror" "$mirror_log"; then
+    docker tag "$postgres_image_mirror" "$postgres_image_primary" >/dev/null 2>&1
+    image_prefetch_source="ecr-mirror"
+  else
+    CURRENT_STAGE="postgres-image-prefetch-unavailable"
+    return 1
+  fi
+
+  docker image inspect "$postgres_image_primary" --format '{{.Id}}' >/dev/null
 }
 
 manifest_count(){
@@ -218,6 +253,9 @@ SQL
 
 rm -rf "$fresh" "$upgrade" "$base_repo"
 
+CURRENT_STAGE="postgres-image-prefetch"
+prefetch_supabase_postgres_image
+
 CURRENT_STAGE="workdir-create"
 mkdir -p "$fresh" "$upgrade"
 
@@ -284,4 +322,4 @@ CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
-echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version workdirs=PASS database_only=PASS fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
+echo "MARKETPLACE_MATCHING_CONTEXT_DB status=PASS exact_head=$PRIVATE_EXACT_SHA canonical_migrations=$canonical_migration_count supabase_cli=$supabase_cli_version image_prefetch=PASS image_source=$image_prefetch_source workdirs=PASS database_only=PASS fresh_replay=PASS second_replay=PASS upgrade_replay=PASS sql_e2e=PASS rollback=PASS catalog=PASS zero_residue=PASS cleanup=PASS"
