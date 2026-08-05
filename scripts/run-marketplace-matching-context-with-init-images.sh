@@ -4,21 +4,23 @@ umask 077
 
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 
-readonly runner_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-marketplace-matching-context-database.sh"
+readonly source_runner_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-marketplace-matching-context-database.sh"
+readonly candidate_runner_script="$RUNNER_TEMP/run-marketplace-matching-context-database-v11.sh"
+readonly candidate_cli_version="2.109.1"
 readonly health_timeout="5m"
 readonly fresh_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh/supabase/config.toml"
 readonly upgrade_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade/supabase/config.toml"
 readonly -a primary_images=(
-  "supabase/postgres:17.6.1.106"
-  "supabase/gotrue:v2.188.1"
-  "supabase/realtime:v2.86.3"
-  "supabase/storage-api:v1.54.1"
+  "supabase/postgres:17.6.1.143"
+  "supabase/gotrue:v2.192.0"
+  "supabase/realtime:v2.112.6"
+  "supabase/storage-api:v1.62.5"
 )
 readonly -a mirror_images=(
-  "public.ecr.aws/supabase/postgres:17.6.1.106"
-  "public.ecr.aws/supabase/gotrue:v2.188.1"
-  "public.ecr.aws/supabase/realtime:v2.86.3"
-  "public.ecr.aws/supabase/storage-api:v1.54.1"
+  "public.ecr.aws/supabase/postgres:17.6.1.143"
+  "public.ecr.aws/supabase/gotrue:v2.192.0"
+  "public.ecr.aws/supabase/realtime:v2.112.6"
+  "public.ecr.aws/supabase/storage-api:v1.62.5"
 )
 runner_pid=""
 fresh_watcher_pid=""
@@ -32,6 +34,7 @@ cleanup_wrapper() {
     fi
   done
   docker image rm "${primary_images[@]}" "${mirror_images[@]}" >/dev/null 2>&1 || true
+  rm -f "$candidate_runner_script"
   rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-init-image-*.log
   rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-health-timeout-*.log
 }
@@ -67,6 +70,34 @@ prefetch_one() {
   fi
 
   docker image inspect "$primary" --format '{{.Id}}' >/dev/null
+}
+
+prepare_candidate_runner() {
+  python - "$source_runner_script" "$candidate_runner_script" "$candidate_cli_version" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+version = sys.argv[3]
+text = source.read_text(encoding='utf-8')
+replacements = (
+    ('supabase_cli_version="2.101.0"', f'supabase_cli_version="{version}"'),
+    ('supabase/postgres:17.6.1.106', 'supabase/postgres:17.6.1.143'),
+    ('public.ecr.aws/supabase/postgres:17.6.1.106', 'public.ecr.aws/supabase/postgres:17.6.1.143'),
+)
+for old, new in replacements:
+    if text.count(old) != 1:
+        raise SystemExit(f'exact replacement contract failed: {old}')
+    text = text.replace(old, new, 1)
+if '2.101.0' in text or '17.6.1.106' in text:
+    raise SystemExit('legacy stack marker remains')
+target.write_text(text, encoding='utf-8')
+PY
+  chmod 700 "$candidate_runner_script"
+  grep -q 'supabase_cli_version="2.109.1"' "$candidate_runner_script"
+  grep -q 'supabase/postgres:17.6.1.143' "$candidate_runner_script"
+  grep -q 'public.ecr.aws/supabase/postgres:17.6.1.143' "$candidate_runner_script"
 }
 
 patch_health_timeout_when_ready() {
@@ -120,11 +151,12 @@ PY
   return 1
 }
 
+prepare_candidate_runner
 for index in "${!primary_images[@]}"; do
   prefetch_one "$index"
 done
 
-bash "$runner_script" &
+bash "$candidate_runner_script" &
 runner_pid=$!
 patch_health_timeout_when_ready "$fresh_config" fresh &
 fresh_watcher_pid=$!
