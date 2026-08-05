@@ -1,7 +1,10 @@
+export * from './run-marketplace-onboarding-presenter-profile.mjs';
+
 import { closeSync, openSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunMarketplaceOnboardingPresenterProfile } from './run-marketplace-onboarding-presenter-profile.mjs';
 
 export const MARKETPLACE_ONBOARDING_INTAKE_EXACT_FILES = new Set([
   'docs/architecture/trainingos-marketplace-draft-onboarding-intake-adapter-v1.md',
@@ -112,6 +115,9 @@ function failedContractResult() {
 }
 
 export async function maybeRunMarketplaceOnboardingIntakeProfile(input) {
+  const onboardingPresenter = await maybeRunMarketplaceOnboardingPresenterProfile(input);
+  if (onboardingPresenter) return onboardingPresenter;
+
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
   if (!isMarketplaceOnboardingIntakeScope(files)) return null;
