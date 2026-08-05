@@ -49,7 +49,7 @@ test('wrapper patches both generated Supabase configs to a five-minute health ti
   assert.match(wrapper, /trainingos-marketplace-matching-context-fresh\/supabase\/config\.toml/);
   assert.match(wrapper, /trainingos-marketplace-matching-context-upgrade\/supabase\/config\.toml/);
   assert.match(wrapper, /patch_health_timeout_when_ready/);
-  assert.match(wrapper, /health_timeout = \\"\{health_timeout\}\\"/);
+  assert.ok(wrapper.includes('health_timeout = "{health_timeout}"'));
   assert.match(wrapper, /grep -Eq '\^health_timeout = "5m"\$'/);
   assert.match(wrapper, /MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config/);
 });
