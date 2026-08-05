@@ -7,10 +7,7 @@ umask 077
 readonly source_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-marketplace-matching-context-database.sh"
 readonly runner_script="$RUNNER_TEMP/trainingos-marketplace-matching-context-debug-runner.sh"
 readonly candidate_cli_version="2.109.1"
-readonly health_timeout="5m"
-readonly fresh_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh/supabase/config.toml"
-readonly fresh_two_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh-two/supabase/config.toml"
-readonly upgrade_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade/supabase/config.toml"
+readonly candidate_health_timeout="5m"
 readonly -a primary_images=(
   "supabase/postgres:17.6.1.143"
   "supabase/gotrue:v2.192.0"
@@ -23,22 +20,11 @@ readonly -a mirror_images=(
   "public.ecr.aws/supabase/realtime:v2.112.6"
   "public.ecr.aws/supabase/storage-api:v1.62.5"
 )
-runner_pid=""
-fresh_watcher_pid=""
-fresh_two_watcher_pid=""
-upgrade_watcher_pid=""
 
 cleanup_wrapper() {
-  for pid in "$fresh_watcher_pid" "$fresh_two_watcher_pid" "$upgrade_watcher_pid" "$runner_pid"; do
-    if [[ -n "$pid" ]]; then
-      kill "$pid" >/dev/null 2>&1 || true
-      wait "$pid" >/dev/null 2>&1 || true
-    fi
-  done
   docker image rm "${primary_images[@]}" "${mirror_images[@]}" >/dev/null 2>&1 || true
   rm -f "$runner_script"
   rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-init-image-*.log
-  rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-health-timeout-*.log
 }
 trap cleanup_wrapper EXIT
 
@@ -75,13 +61,14 @@ prefetch_one() {
 }
 
 prepare_debug_runner() {
-  python - "$source_runner" "$runner_script" "$candidate_cli_version" <<'PY'
+  python - "$source_runner" "$runner_script" "$candidate_cli_version" "$candidate_health_timeout" <<'PY'
 from pathlib import Path
 import sys
 
 source = Path(sys.argv[1])
 target = Path(sys.argv[2])
 candidate_cli_version = sys.argv[3]
+candidate_health_timeout = sys.argv[4]
 text = source.read_text(encoding='utf-8')
 
 stack_replacements = (
@@ -185,100 +172,85 @@ if text.count(printf_old) != 1:
     raise SystemExit('failure marker format contract changed')
 text = text.replace(printf_old, printf_new, 1)
 
+health_old = '''wait_for_health_timeout(){
+  local workdir="$1" label="$2" config attempt
+  config="$workdir/supabase/config.toml"
+  for attempt in $(seq 1 1800); do
+    if [[ -f "$config" ]] && grep -Eq '^health_timeout = "5m"$' "$config"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  CURRENT_STAGE="${label}-health-timeout-not-ready"
+  return 1
+}
+
+initialize_empty_workdir(){
+  local workdir="$1" label="$2"
+  mkdir -p "$workdir"
+  sealed "${label}-init" supabase --workdir "$workdir" init --force
+  rm -rf "$workdir/supabase/migrations"
+  mkdir -p "$workdir/supabase/migrations"
+  wait_for_health_timeout "$workdir" "$label"
+}
+'''
+health_new = f'''patch_health_timeout(){{
+  local workdir="$1" label="$2" config
+  config="$workdir/supabase/config.toml"
+  CURRENT_STAGE="${{label}}-health-timeout-config"
+  python - "$config" "{candidate_health_timeout}" <<'PY_HEALTH'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+value = sys.argv[2]
+text = path.read_text(encoding='utf-8')
+section = re.search(r'(?m)^\\[db\\]\\s*$', text)
+if section is None:
+    raise SystemExit('db section missing')
+next_section = re.search(r'(?m)^\\[[^\\]]+\\]\\s*$', text[section.end():])
+end = section.end() + (next_section.start() if next_section else len(text) - section.end())
+block = text[section.end():end]
+replacement = f'health_timeout = "{{value}}"'
+if re.search(r'(?m)^\\s*health_timeout\\s*=', block):
+    block = re.sub(r'(?m)^\\s*health_timeout\\s*=.*$', replacement, block, count=1)
+else:
+    block = '\\n' + replacement + block
+path.write_text(text[:section.end()] + block + text[end:], encoding='utf-8')
+PY_HEALTH
+  grep -Eq '^health_timeout = "{candidate_health_timeout}"$' "$config"
+}}
+
+initialize_empty_workdir(){{
+  local workdir="$1" label="$2"
+  mkdir -p "$workdir"
+  sealed "${{label}}-init" supabase --workdir "$workdir" init --force
+  patch_health_timeout "$workdir" "$label"
+  rm -rf "$workdir/supabase/migrations"
+  mkdir -p "$workdir/supabase/migrations"
+}}
+'''
+if text.count(health_old) != 1:
+    raise SystemExit('health timeout sequencing contract changed')
+text = text.replace(health_old, health_new, 1)
+if 'wait_for_health_timeout' in text:
+    raise SystemExit('legacy health timeout waiter remains')
+
 target.write_text(text, encoding='utf-8')
 PY
   chmod 700 "$runner_script"
   grep -q 'supabase_cli_version="2.109.1"' "$runner_script"
   grep -q 'supabase/postgres:17.6.1.143' "$runner_script"
   grep -q 'public.ecr.aws/supabase/postgres:17.6.1.143' "$runner_script"
-}
-
-patch_health_timeout_when_ready() {
-  local config_path="$1" label="$2" log_path attempt
-  log_path="$RUNNER_TEMP/trainingos-marketplace-matching-context-health-timeout-${label}.log"
-  : >"$log_path"
-
-  for attempt in $(seq 1 1800); do
-    if [[ -f "$config_path" ]]; then
-      if python - "$config_path" "$health_timeout" >>"$log_path" 2>&1 <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-health_timeout = sys.argv[2]
-text = path.read_text(encoding='utf-8')
-section = re.search(r'(?m)^\[db\]\s*$', text)
-if section is None:
-    raise SystemExit('db section missing')
-next_section = re.search(r'(?m)^\[[^\]]+\]\s*$', text[section.end():])
-end = section.end() + (next_section.start() if next_section else len(text) - section.end())
-block = text[section.end():end]
-replacement = f'\nhealth_timeout = "{health_timeout}"'
-if re.search(r'(?m)^\s*health_timeout\s*=', block):
-    block = re.sub(
-        r'(?m)^\s*health_timeout\s*=.*$',
-        replacement.strip(),
-        block,
-        count=1,
-    )
-else:
-    block = replacement + block
-updated = text[:section.end()] + block + text[end:]
-path.write_text(updated, encoding='utf-8')
-PY
-      then
-        if grep -Eq '^health_timeout = "5m"$' "$config_path"; then
-          return 0
-        fi
-      fi
-    fi
-    if [[ -n "$runner_pid" ]] && ! kill -0 "$runner_pid" >/dev/null 2>&1; then
-      echo "runner exited before ${label} config" >>"$log_path"
-      return 1
-    fi
-    sleep 0.1
-  done
-
-  echo "timed out waiting for ${label} config" >>"$log_path"
-  return 1
+  grep -q 'patch_health_timeout(){' "$runner_script"
+  grep -q 'CURRENT_STAGE="${label}-health-timeout-config"' "$runner_script"
+  grep -Eq '^  grep -Eq '\''\^health_timeout = "5m"\\\$'\'' "\$config"$' "$runner_script"
+  ! grep -q 'wait_for_health_timeout' "$runner_script"
 }
 
 for index in "${!primary_images[@]}"; do
   prefetch_one "$index"
 done
 prepare_debug_runner
-
-bash "$runner_script" &
-runner_pid=$!
-patch_health_timeout_when_ready "$fresh_config" fresh &
-fresh_watcher_pid=$!
-patch_health_timeout_when_ready "$fresh_two_config" fresh-two &
-fresh_two_watcher_pid=$!
-patch_health_timeout_when_ready "$upgrade_config" upgrade &
-upgrade_watcher_pid=$!
-
-set +e
-wait "$fresh_watcher_pid"
-fresh_watcher_status=$?
-fresh_watcher_pid=""
-wait "$fresh_two_watcher_pid"
-fresh_two_watcher_status=$?
-fresh_two_watcher_pid=""
-wait "$upgrade_watcher_pid"
-upgrade_watcher_status=$?
-upgrade_watcher_pid=""
-
-if [[ "$fresh_watcher_status" != 0 || "$fresh_two_watcher_status" != 0 || "$upgrade_watcher_status" != 0 ]]; then
-  kill "$runner_pid" >/dev/null 2>&1 || true
-  wait "$runner_pid" >/dev/null 2>&1 || true
-  runner_pid=""
-  echo "MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config"
-  exit 1
-fi
-
-wait "$runner_pid"
-runner_status=$?
-runner_pid=""
-set -e
-exit "$runner_status"
+bash "$runner_script"
