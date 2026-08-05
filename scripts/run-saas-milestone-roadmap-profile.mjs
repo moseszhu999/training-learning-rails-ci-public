@@ -25,14 +25,40 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
+const PYTHON_FUNCTION_RUNNER = String.raw`
+import importlib.util
+import pathlib
+import traceback
+
+paths = [
+    pathlib.Path('tests/test_trainingos_marketplace_onboarding_acceptance_v1.py'),
+    pathlib.Path('tests/test_trainingos_viral_growth_loop_v1.py'),
+    pathlib.Path('tests/test_trainingos_viral_marketplace_entry_v1.py'),
+]
+count = 0
+failures = 0
+for index, test_path in enumerate(paths):
+    spec = importlib.util.spec_from_file_location(f'trainingos_roadmap_contract_{index}', test_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'cannot load fixed test file: {test_path}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for name in sorted(vars(module)):
+        candidate = getattr(module, name)
+        if name.startswith('test_') and callable(candidate):
+            count += 1
+            try:
+                candidate()
+            except Exception:
+                failures += 1
+                traceback.print_exc()
+print(f'Ran {count} tests')
+raise SystemExit(1 if failures else 0)
+`;
+
 export const saasMilestoneRoadmapCommands = Object.freeze([
   command('install', 'npm', ['ci']),
-  command('python-contracts', 'python', [
-    '-m', 'unittest', '-v',
-    'tests.test_trainingos_marketplace_onboarding_acceptance_v1',
-    'tests.test_trainingos_viral_growth_loop_v1',
-    'tests.test_trainingos_viral_marketplace_entry_v1',
-  ], 'python'),
+  command('python-contracts', 'python', ['-c', PYTHON_FUNCTION_RUNNER], 'python'),
   command('svg-well-formed', 'python', [
     '-c',
     "import xml.etree.ElementTree as ET; ET.parse('docs/product/assets/trainingos-saas-milestone-roadmap-v1.svg')",
