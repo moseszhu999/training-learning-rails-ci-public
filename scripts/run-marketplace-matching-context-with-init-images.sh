@@ -25,7 +25,7 @@ fresh_watcher_pid=""
 upgrade_watcher_pid=""
 
 cleanup_wrapper() {
-  for pid in "$fresh_watcher_pid" "$upgrade_watcher_pid"; do
+  for pid in "$fresh_watcher_pid" "$upgrade_watcher_pid" "$runner_pid"; do
     if [[ -n "$pid" ]]; then
       kill "$pid" >/dev/null 2>&1 || true
       wait "$pid" >/dev/null 2>&1 || true
@@ -76,7 +76,7 @@ patch_health_timeout_when_ready() {
 
   for attempt in $(seq 1 1800); do
     if [[ -f "$config_path" ]]; then
-      python - "$config_path" "$health_timeout" >>"$log_path" 2>&1 <<'PY'
+      if python - "$config_path" "$health_timeout" >>"$log_path" 2>&1 <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -103,8 +103,11 @@ else:
 updated = text[:section.end()] + block + text[end:]
 path.write_text(updated, encoding='utf-8')
 PY
-      grep -Eq '^health_timeout = "5m"$' "$config_path"
-      return 0
+      then
+        if grep -Eq '^health_timeout = "5m"$' "$config_path"; then
+          return 0
+        fi
+      fi
     fi
     if [[ -n "$runner_pid" ]] && ! kill -0 "$runner_pid" >/dev/null 2>&1; then
       echo "runner exited before ${label} config" >>"$log_path"
@@ -121,7 +124,6 @@ for index in "${!primary_images[@]}"; do
   prefetch_one "$index"
 done
 
-set +e
 bash "$runner_script" &
 runner_pid=$!
 patch_health_timeout_when_ready "$fresh_config" fresh &
@@ -129,6 +131,7 @@ fresh_watcher_pid=$!
 patch_health_timeout_when_ready "$upgrade_config" upgrade &
 upgrade_watcher_pid=$!
 
+set +e
 wait "$fresh_watcher_pid"
 fresh_watcher_status=$?
 fresh_watcher_pid=""
@@ -139,6 +142,7 @@ upgrade_watcher_pid=""
 if [[ "$fresh_watcher_status" != 0 || "$upgrade_watcher_status" != 0 ]]; then
   kill "$runner_pid" >/dev/null 2>&1 || true
   wait "$runner_pid" >/dev/null 2>&1 || true
+  runner_pid=""
   echo "MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config"
   exit 1
 fi
