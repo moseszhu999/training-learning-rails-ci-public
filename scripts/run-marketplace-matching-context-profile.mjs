@@ -51,7 +51,7 @@ export const marketplaceMatchingContextCommands = Object.freeze([
     'packages/training-marketplace-participation-client/src/matching-context.d.ts',
   ]),
   command('database-replay', 'bash', [
-    path.join(publicRoot, 'scripts/run-marketplace-matching-context-database.sh'),
+    path.join(publicRoot, 'scripts/run-marketplace-matching-context-with-init-images.sh'),
   ], 'database'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
