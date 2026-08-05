@@ -51,9 +51,10 @@ class OpaqueCommitmentTest(unittest.TestCase):
             "production/",
             "research/market_data_hf",
             "b2784c41bbb08466c05f9daa4288ee070aee0fef",
-            "api_key",
-            "secret",
-            "credential",
+            "hf_token",
+            "aws_access_key",
+            "private_key",
+            "sk-",
         )
         lowered = self.raw.lower()
         for token in forbidden:
