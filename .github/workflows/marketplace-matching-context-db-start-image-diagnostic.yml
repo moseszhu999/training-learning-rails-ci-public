@@ -1,5 +1,5 @@
 name: Marketplace matching-context db-start image diagnostic
-# Second branch push intentionally triggers this newly introduced diagnostic workflow.
+# Branch pushes execute the diagnostic; the workflow posts only a sanitized marker to evidence issue #478.
 
 on:
   push:
@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: marketplace-matching-context-db-start-image-diagnostic-${{ github.ref }}
@@ -52,6 +53,7 @@ jobs:
           workdir="$RUNNER_TEMP/matching-context-db-start-diagnostic"
           start_log="$RUNNER_TEMP/matching-context-db-start.log"
           pull_log="$RUNNER_TEMP/matching-context-db-start-primary.log"
+          result_file="$RUNNER_TEMP/matching-context-db-start-result.txt"
           mkdir -p "$workdir"
 
           : >"$pull_log"
@@ -97,12 +99,42 @@ PY
           fi
 
           if [[ "$start_code" == 0 ]]; then
-            echo "MATCHING_CONTEXT_DB_START_DIAGNOSTIC status=PASS exit=0 refs=$refs image_resource=false"
+            marker="MATCHING_CONTEXT_DB_START_DIAGNOSTIC status=PASS exit=0 refs=$refs image_resource=false"
           else
+            marker="MATCHING_CONTEXT_DB_START_DIAGNOSTIC status=CAPTURED_FAILURE exit=$start_code refs=$refs image_resource=$image_resource"
+          fi
+          printf '%s\n' "$marker" | tee "$result_file"
+
+          if [[ "$start_code" != 0 ]]; then
             [[ "$image_resource" == 'true' ]]
             [[ "$refs" != 'none' ]]
-            echo "MATCHING_CONTEXT_DB_START_DIAGNOSTIC status=CAPTURED_FAILURE exit=$start_code refs=$refs image_resource=true"
           fi
+
+      - name: Publish sanitized diagnostic evidence
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          result_file="$RUNNER_TEMP/matching-context-db-start-result.txt"
+          marker='MATCHING_CONTEXT_DB_START_DIAGNOSTIC status=STEP_FAILED exit=unknown refs=none image_resource=unknown'
+          if [[ -f "$result_file" ]]; then
+            marker="$(cat "$result_file")"
+          fi
+          report="$RUNNER_TEMP/matching-context-db-start-report.md"
+          {
+            echo '## Matching-context database-start image diagnostic'
+            echo
+            echo "- Exact public head: \`$GITHUB_SHA\`"
+            echo "- Workflow run: \`$GITHUB_RUN_ID\`"
+            echo "- Event: \`$GITHUB_EVENT_NAME\`"
+            echo "- Result: \`$marker\`"
+            echo
+            echo 'Only public image references and sanitized status are reported. No raw log, private source, SQL, migration, fixture, credential or artifact is published.'
+          } >"$report"
+          gh issue comment 478 --repo "$GITHUB_REPOSITORY" --body-file "$report" \
+            >"$RUNNER_TEMP/matching-context-db-start-comment.log" 2>&1
 
       - name: Remove diagnostic resources
         if: always()
@@ -117,4 +149,6 @@ PY
             >/dev/null 2>&1 || true
           rm -rf "$workdir" "$RUNNER_TEMP/matching-context-diagnostic-bin"
           rm -f "$RUNNER_TEMP"/matching-context-*.log \
+            "$RUNNER_TEMP"/matching-context-db-start-result.txt \
+            "$RUNNER_TEMP"/matching-context-db-start-report.md \
             "$RUNNER_TEMP"/supabase_linux_amd64-*.tar.gz
