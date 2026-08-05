@@ -6,20 +6,21 @@ umask 077
 
 readonly source_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-marketplace-matching-context-database.sh"
 readonly runner_script="$RUNNER_TEMP/trainingos-marketplace-matching-context-debug-runner.sh"
+readonly candidate_cli_version="2.109.1"
 readonly health_timeout="5m"
 readonly fresh_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh/supabase/config.toml"
 readonly upgrade_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade/supabase/config.toml"
 readonly -a primary_images=(
-  "supabase/postgres:17.6.1.106"
-  "supabase/gotrue:v2.188.1"
-  "supabase/realtime:v2.86.3"
-  "supabase/storage-api:v1.54.1"
+  "supabase/postgres:17.6.1.143"
+  "supabase/gotrue:v2.192.0"
+  "supabase/realtime:v2.112.6"
+  "supabase/storage-api:v1.62.5"
 )
 readonly -a mirror_images=(
-  "public.ecr.aws/supabase/postgres:17.6.1.106"
-  "public.ecr.aws/supabase/gotrue:v2.188.1"
-  "public.ecr.aws/supabase/realtime:v2.86.3"
-  "public.ecr.aws/supabase/storage-api:v1.54.1"
+  "public.ecr.aws/supabase/postgres:17.6.1.143"
+  "public.ecr.aws/supabase/gotrue:v2.192.0"
+  "public.ecr.aws/supabase/realtime:v2.112.6"
+  "public.ecr.aws/supabase/storage-api:v1.62.5"
 )
 runner_pid=""
 fresh_watcher_pid=""
@@ -72,13 +73,35 @@ prefetch_one() {
 }
 
 prepare_debug_runner() {
-  python - "$source_runner" "$runner_script" <<'PY'
+  python - "$source_runner" "$runner_script" "$candidate_cli_version" <<'PY'
 from pathlib import Path
 import sys
 
 source = Path(sys.argv[1])
 target = Path(sys.argv[2])
+candidate_cli_version = sys.argv[3]
 text = source.read_text(encoding='utf-8')
+
+stack_replacements = (
+    (
+        'public.ecr.aws/supabase/postgres:17.6.1.106',
+        'public.ecr.aws/supabase/postgres:17.6.1.143',
+    ),
+    (
+        'supabase/postgres:17.6.1.106',
+        'supabase/postgres:17.6.1.143',
+    ),
+    (
+        'supabase_cli_version="2.101.0"',
+        f'supabase_cli_version="{candidate_cli_version}"',
+    ),
+)
+for old, new in stack_replacements:
+    if text.count(old) != 1:
+        raise SystemExit(f'stable stack replacement contract changed: {old}')
+    text = text.replace(old, new, 1)
+if '2.101.0' in text or '17.6.1.106' in text:
+    raise SystemExit('legacy stack marker remains in candidate runner')
 
 start_old = '  supabase --workdir "$workdir" db start >"$start_log" 2>&1'
 start_new = '  supabase --debug --workdir "$workdir" db start >"$start_log" 2>&1'
@@ -163,6 +186,9 @@ text = text.replace(printf_old, printf_new, 1)
 target.write_text(text, encoding='utf-8')
 PY
   chmod 700 "$runner_script"
+  grep -q 'supabase_cli_version="2.109.1"' "$runner_script"
+  grep -q 'supabase/postgres:17.6.1.143' "$runner_script"
+  grep -q 'public.ecr.aws/supabase/postgres:17.6.1.143' "$runner_script"
 }
 
 patch_health_timeout_when_ready() {
