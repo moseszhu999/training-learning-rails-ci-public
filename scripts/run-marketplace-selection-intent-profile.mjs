@@ -12,7 +12,7 @@ export const MARKETPLACE_SELECTION_INTENT_EXACT_FILES = new Set([
   'tests/test_trainingos_marketplace_selection_intent_core_v1.py',
 ]);
 
-const CANONICAL_MIGRATION_COUNT = 366;
+const CANONICAL_MIGRATION_COUNT = 367;
 const EXPECTED_NODE_COUNT = 6;
 const EXPECTED_PYTHON_COUNT = 5;
 
