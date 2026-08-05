@@ -1,0 +1,283 @@
+name: Marketplace matching-context migration-prefix diagnostic
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/marketplace-matching-context-migration-prefix-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-matching-context-migration-prefix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out public diagnostic
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: test -n "$PRIVATE_TOKEN"
+
+      - name: Check out exact private base
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: edc58b7b20f44c5517209dc6b4372238d819c1ef
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-base
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Locate first incompatible migration ordinal
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+
+          readonly exact_base='edc58b7b20f44c5517209dc6b4372238d819c1ef'
+          readonly expected_count=366
+          readonly cli_version='2.109.1'
+          readonly health_timeout='5m'
+          readonly private_repo="$GITHUB_WORKSPACE/private-base"
+          readonly bootstrap_dir="$RUNNER_TEMP/matching-context-prefix-bootstrap"
+          readonly bin_dir="$RUNNER_TEMP/matching-context-prefix-bin"
+          readonly archive="$RUNNER_TEMP/supabase_linux_amd64-${cli_version}.tar.gz"
+          readonly -a primary_images=(
+            'supabase/postgres:17.6.1.143'
+            'supabase/gotrue:v2.192.0'
+            'supabase/realtime:v2.112.6'
+            'supabase/storage-api:v1.62.5'
+          )
+          readonly -a mirror_images=(
+            'public.ecr.aws/supabase/postgres:17.6.1.143'
+            'public.ecr.aws/supabase/gotrue:v2.192.0'
+            'public.ecr.aws/supabase/realtime:v2.112.6'
+            'public.ecr.aws/supabase/storage-api:v1.62.5'
+          )
+          declare -a migrations=()
+          last_sqlstate='unknown'
+          last_category='unknown'
+
+          cleanup() {
+            local directory
+            for directory in "$RUNNER_TEMP"/matching-context-prefix-trial-*; do
+              [[ -d "$directory" ]] || continue
+              supabase --workdir "$directory" stop --no-backup >/dev/null 2>&1 || true
+            done
+            docker image rm "${primary_images[@]}" "${mirror_images[@]}" >/dev/null 2>&1 || true
+            rm -rf "$bootstrap_dir" "$bin_dir" "$RUNNER_TEMP"/matching-context-prefix-trial-*
+            rm -f "$archive" "$RUNNER_TEMP"/matching-context-prefix-*.log
+            rm -rf "$private_repo"
+          }
+          trap cleanup EXIT
+
+          pull_with_retries() {
+            local image="$1" log_path="$2" attempt
+            : >"$log_path"
+            for attempt in 1 2 3; do
+              if docker pull "$image" >>"$log_path" 2>&1; then
+                return 0
+              fi
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
+
+          prefetch_images() {
+            local index primary mirror log_path
+            for index in "${!primary_images[@]}"; do
+              primary="${primary_images[$index]}"
+              mirror="${mirror_images[$index]}"
+              log_path="$RUNNER_TEMP/matching-context-prefix-image-${index}.log"
+              if pull_with_retries "$primary" "$log_path"; then
+                :
+              elif pull_with_retries "$mirror" "$log_path"; then
+                docker tag "$mirror" "$primary" >/dev/null 2>&1
+              else
+                echo "MATCHING_CONTEXT_PREFIX status=INFRA_FAILURE stage=image-prefetch ordinal=0 total=$expected_count sqlstate=unknown category=image"
+                exit 0
+              fi
+              docker image inspect "$primary" --format '{{.Id}}' >/dev/null
+            done
+          }
+
+          patch_health_timeout() {
+            python - "$1" "$health_timeout" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          path = Path(sys.argv[1])
+          value = sys.argv[2]
+          text = path.read_text(encoding='utf-8')
+          section = re.search(r'(?m)^\[db\]\s*$', text)
+          if section is None:
+              raise SystemExit('db section missing')
+          next_section = re.search(r'(?m)^\[[^\]]+\]\s*$', text[section.end():])
+          end = section.end() + (next_section.start() if next_section else len(text) - section.end())
+          block = text[section.end():end]
+          replacement = f'health_timeout = "{value}"'
+          if re.search(r'(?m)^\s*health_timeout\s*=', block):
+              block = re.sub(r'(?m)^\s*health_timeout\s*=.*$', replacement, block, count=1)
+          else:
+              block = '\n' + replacement + block
+          path.write_text(text[:section.end()] + block + text[end:], encoding='utf-8')
+          PY
+            grep -Eq '^health_timeout = "5m"$' "$1"
+          }
+
+          classify_failure() {
+            local log_path="$1" sqlstate category
+            sqlstate="$(grep -Eo '(ERROR|FATAL|PANIC):[[:space:]]+[A-Z0-9]{5}:' "$log_path" 2>/dev/null \
+              | tail -n 1 | grep -Eo '[A-Z0-9]{5}' | tr '[:upper:]' '[:lower:]' || true)"
+            [[ "$sqlstate" =~ ^[a-z0-9]{5}$ ]] || sqlstate='unknown'
+            case "$sqlstate" in
+              42p01|42704|42883) category='undefined-object' ;;
+              42501) category='permission' ;;
+              23505|42p07|42710) category='duplicate-object' ;;
+              22p02|23502|23503|23514) category='data-contract' ;;
+              42601) category='syntax' ;;
+              *)
+                if grep -Eqi 'permission denied|must be owner|not allowed' "$log_path"; then
+                  category='permission'
+                elif grep -Eqi 'does not exist|undefined' "$log_path"; then
+                  category='undefined-object'
+                elif grep -Eqi 'already exists|duplicate' "$log_path"; then
+                  category='duplicate-object'
+                elif grep -Eqi 'connection refused|database is not healthy|container.*unhealthy' "$log_path"; then
+                  category='infrastructure'
+                else
+                  category='unknown'
+                fi
+                ;;
+            esac
+            last_sqlstate="$sqlstate"
+            last_category="$category"
+          }
+
+          run_prefix() {
+            local count="$1" label="trial-${1}" workdir config start_log migration_log index
+            workdir="$RUNNER_TEMP/matching-context-prefix-trial-${count}"
+            config="$workdir/supabase/config.toml"
+            start_log="$RUNNER_TEMP/matching-context-prefix-${label}-start.log"
+            migration_log="$RUNNER_TEMP/matching-context-prefix-${label}-migration.log"
+            rm -rf "$workdir"
+            mkdir -p "$workdir"
+            supabase --workdir "$workdir" init --force >"$RUNNER_TEMP/matching-context-prefix-${label}-init.log" 2>&1
+            patch_health_timeout "$config"
+            rm -rf "$workdir/supabase/migrations"
+            mkdir -p "$workdir/supabase/migrations"
+
+            set +e
+            supabase --workdir "$workdir" db start >"$start_log" 2>&1
+            start_code=$?
+            set -e
+            if [[ "$start_code" != 0 ]]; then
+              classify_failure "$start_log"
+              supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
+              rm -rf "$workdir"
+              return 2
+            fi
+
+            for ((index=0; index<count; index++)); do
+              cp "${migrations[$index]}" "$workdir/supabase/migrations/"
+            done
+
+            set +e
+            supabase --workdir "$workdir" migration up --local --include-all >"$migration_log" 2>&1
+            migration_code=$?
+            set -e
+            if [[ "$migration_code" != 0 ]]; then
+              classify_failure "$migration_log"
+              supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
+              rm -rf "$workdir"
+              return 1
+            fi
+
+            supabase --workdir "$workdir" stop --no-backup >/dev/null 2>&1 || true
+            rm -rf "$workdir"
+            last_sqlstate='none'
+            last_category='none'
+            return 0
+          }
+
+          mkdir -p "$bin_dir" "$bootstrap_dir"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+            "https://github.com/supabase/cli/releases/download/v${cli_version}/supabase_linux_amd64.tar.gz" \
+            --output "$archive"
+          tar -xzf "$archive" -C "$bin_dir"
+          chmod 700 "$bin_dir/supabase"
+          export PATH="$bin_dir:$PATH"
+          [[ "$(supabase --version | tr -d '\r' | awk 'NF { print $NF; exit }')" == "$cli_version" ]]
+          prefetch_images
+
+          python "$private_repo/scripts/build-trainingos-fresh-bootstrap.py" \
+            --repo-root "$private_repo" \
+            --output-dir "$bootstrap_dir" \
+            --commit-sha "$exact_base" \
+            >"$RUNNER_TEMP/matching-context-prefix-bootstrap.log" 2>&1
+
+          manifest_count="$(python - "$bootstrap_dir/trainingos-bootstrap-manifest.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          print(json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))['migrationCount'])
+          PY
+          )"
+          [[ "$manifest_count" == "$expected_count" ]]
+          mapfile -t migrations < <(find "$bootstrap_dir" -maxdepth 1 -type f -name '*.sql' -print | sort)
+          [[ "${#migrations[@]}" == "$expected_count" ]]
+
+          low=1
+          high=$expected_count
+          first_failure=0
+          first_sqlstate='unknown'
+          first_category='unknown'
+          infrastructure_failure=0
+
+          while (( low <= high )); do
+            mid=$(( (low + high) / 2 ))
+            if run_prefix "$mid"; then
+              low=$((mid + 1))
+            else
+              code=$?
+              if [[ "$code" == 2 ]]; then
+                infrastructure_failure=1
+                first_failure=$mid
+                first_sqlstate="$last_sqlstate"
+                first_category="$last_category"
+                break
+              fi
+              first_failure=$mid
+              first_sqlstate="$last_sqlstate"
+              first_category="$last_category"
+              high=$((mid - 1))
+            fi
+          done
+
+          if [[ "$infrastructure_failure" == 1 ]]; then
+            echo "MATCHING_CONTEXT_PREFIX status=INFRA_FAILURE stage=empty-start ordinal=$first_failure total=$expected_count sqlstate=$first_sqlstate category=$first_category"
+          elif [[ "$first_failure" == 0 ]]; then
+            echo "MATCHING_CONTEXT_PREFIX status=ALL_PREFIXES_PASS stage=migration-up ordinal=0 total=$expected_count sqlstate=none category=none"
+          else
+            echo "MATCHING_CONTEXT_PREFIX status=FIRST_FAILURE stage=migration-up ordinal=$first_failure total=$expected_count sqlstate=$first_sqlstate category=$first_category"
+          fi
+
+      - name: Remove exact private checkout and sealed logs
+        if: always()
+        shell: bash
+        run: |
+          rm -rf private-base
+          rm -rf "$RUNNER_TEMP"/matching-context-prefix-*
