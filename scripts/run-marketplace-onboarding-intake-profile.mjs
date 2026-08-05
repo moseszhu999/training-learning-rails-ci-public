@@ -15,9 +15,27 @@ export const MARKETPLACE_ONBOARDING_INTAKE_EXACT_FILES = new Set([
   'tests/test_trainingos_marketplace_draft_onboarding_intake_adapter_v1.py',
 ]);
 
-const CANONICAL_MIGRATION_COUNT = 366;
-const EXPECTED_NODE_COUNT = 8;
-const EXPECTED_PYTHON_COUNT = 8;
+export const MARKETPLACE_ONBOARDING_INTAKE_CANONICAL_ID_PRIVACY_FILES = new Set([
+  'packages/training-marketplace-onboarding-intake/src/index.mjs',
+  'packages/training-marketplace-onboarding-intake/test/onboarding-intake.test.mjs',
+]);
+
+const CONTRACTS = Object.freeze({
+  full: Object.freeze({
+    changedFiles: 6,
+    migrationCount: 366,
+    nodeCount: 8,
+    pythonCount: 8,
+    selectedSuite: 'marketplace-onboarding-intake',
+  }),
+  canonicalIdPrivacy: Object.freeze({
+    changedFiles: 2,
+    migrationCount: 367,
+    nodeCount: 10,
+    pythonCount: 8,
+    selectedSuite: 'marketplace-onboarding-intake-canonical-id-privacy',
+  }),
+});
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -83,23 +101,37 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isMarketplaceOnboardingIntakeScope(files) {
+function exactSetMatch(files, expected) {
   const names = [...files];
-  return names.length === MARKETPLACE_ONBOARDING_INTAKE_EXACT_FILES.size
-    && names.every((name) => MARKETPLACE_ONBOARDING_INTAKE_EXACT_FILES.has(name))
+  return names.length === expected.size
+    && names.every((name) => expected.has(name))
     && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
-function fixedInputContract(input, scope) {
-  return Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
-    && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
-    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(CANONICAL_MIGRATION_COUNT)
-    && scope.expected_changed_file_count === '6'
+export function classifyMarketplaceOnboardingIntakeScope(files) {
+  if (exactSetMatch(files, MARKETPLACE_ONBOARDING_INTAKE_EXACT_FILES)) return 'full';
+  if (exactSetMatch(files, MARKETPLACE_ONBOARDING_INTAKE_CANONICAL_ID_PRIVACY_FILES)) {
+    return 'canonicalIdPrivacy';
+  }
+  return null;
+}
+
+export function isMarketplaceOnboardingIntakeScope(files) {
+  return classifyMarketplaceOnboardingIntakeScope(files) !== null;
+}
+
+export function marketplaceOnboardingIntakeFixedInputContract(input, scope, scopeKind) {
+  const contract = CONTRACTS[scopeKind];
+  if (!contract) return false;
+  return Number(input.expectedNodeCount) === contract.nodeCount
+    && Number(input.expectedPythonCount) === contract.pythonCount
+    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(contract.migrationCount)
+    && scope.expected_changed_file_count === String(contract.changedFiles)
     && scope.migration_start === 'none'
     && scope.migration_end === 'none';
 }
 
-function failedContractResult() {
+function failedContractResult(contract) {
   return {
     ok: false,
     status: 'FAIL:fixed-input-contract',
@@ -110,7 +142,7 @@ function failedContractResult() {
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'marketplace-onboarding-intake',
+    selectedSuite: contract?.selectedSuite ?? 'marketplace-onboarding-intake',
   };
 }
 
@@ -120,11 +152,13 @@ export async function maybeRunMarketplaceOnboardingIntakeProfile(input) {
 
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
-  if (!isMarketplaceOnboardingIntakeScope(files)) return null;
+  const scopeKind = classifyMarketplaceOnboardingIntakeScope(files);
+  if (!scopeKind) return null;
+  const contract = CONTRACTS[scopeKind];
 
-  if (!fixedInputContract(input, scope)) {
+  if (!marketplaceOnboardingIntakeFixedInputContract(input, scope, scopeKind)) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
-    return failedContractResult();
+    return failedContractResult(contract);
   }
 
   await mkdir(input.runnerTemp, { recursive: true });
@@ -161,10 +195,10 @@ export async function maybeRunMarketplaceOnboardingIntakeProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const countsPassed = nodeTests === EXPECTED_NODE_COUNT
-    && nodePassed === EXPECTED_NODE_COUNT
+  const countsPassed = nodeTests === contract.nodeCount
+    && nodePassed === contract.nodeCount
     && nodeFailed === 0
-    && pythonTests === EXPECTED_PYTHON_COUNT;
+    && pythonTests === contract.pythonCount;
   const ok = passedStepCount === marketplaceOnboardingIntakeCommands.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
@@ -177,6 +211,6 @@ export async function maybeRunMarketplaceOnboardingIntakeProfile(input) {
     nodePassed,
     nodeFailed,
     pythonTests,
-    selectedSuite: 'marketplace-onboarding-intake',
+    selectedSuite: contract.selectedSuite,
   };
 }
