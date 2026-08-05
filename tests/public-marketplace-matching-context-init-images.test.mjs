@@ -41,7 +41,28 @@ test('each image uses bounded retries, mirror retag, inspect and cleanup', () =>
   assert.match(wrapper, /docker tag "\$mirror" "\$primary"/);
   assert.match(wrapper, /docker image inspect "\$primary"/);
   assert.match(wrapper, /docker image rm "\$\{primary_images\[@\]\}" "\$\{mirror_images\[@\]\}"/);
-  assert.match(wrapper, /trap cleanup_images EXIT/);
+  assert.match(wrapper, /trap cleanup_wrapper EXIT/);
+});
+
+test('wrapper patches both generated Supabase configs to a five-minute health timeout', () => {
+  assert.match(wrapper, /readonly health_timeout="5m"/);
+  assert.match(wrapper, /trainingos-marketplace-matching-context-fresh\/supabase\/config\.toml/);
+  assert.match(wrapper, /trainingos-marketplace-matching-context-upgrade\/supabase\/config\.toml/);
+  assert.match(wrapper, /patch_health_timeout_when_ready/);
+  assert.ok(wrapper.includes('health_timeout = "{health_timeout}"'));
+  assert.match(wrapper, /grep -Eq '\^health_timeout = "5m"\$'/);
+  assert.match(wrapper, /MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config/);
+});
+
+test('health-timeout watchers run before waiting for the sealed replay', () => {
+  const runnerIndex = wrapper.indexOf('bash "$runner_script" &');
+  const freshWatcherIndex = wrapper.indexOf('patch_health_timeout_when_ready "$fresh_config" fresh &');
+  const upgradeWatcherIndex = wrapper.indexOf('patch_health_timeout_when_ready "$upgrade_config" upgrade &');
+  const runnerWaitIndex = wrapper.indexOf('wait "$runner_pid"');
+  assert.ok(runnerIndex >= 0);
+  assert.ok(freshWatcherIndex > runnerIndex);
+  assert.ok(upgradeWatcherIndex > freshWatcherIndex);
+  assert.ok(runnerWaitIndex > upgradeWatcherIndex);
 });
 
 test('wrapper preserves the original sealed replay and publishes no logs', () => {
