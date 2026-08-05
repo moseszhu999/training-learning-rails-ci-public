@@ -1,0 +1,64 @@
+name: Marketplace matching-context Postgres image probe
+
+on:
+  push:
+    branches:
+      - fix/trainingos-marketplace-matching-context-image-prefetch-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-matching-context-image-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Probe fixed Supabase Postgres image with mirror fallback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          primary='supabase/postgres:17.6.1.106'
+          mirror='public.ecr.aws/supabase/postgres:17.6.1.106'
+          primary_log="$RUNNER_TEMP/matching-context-primary-image.log"
+          mirror_log="$RUNNER_TEMP/matching-context-mirror-image.log"
+          source='none'
+
+          pull_with_retries() {
+            local image="$1" log_path="$2"
+            local attempt
+            : >"$log_path"
+            for attempt in 1 2 3; do
+              if docker pull "$image" >>"$log_path" 2>&1; then
+                return 0
+              fi
+              sleep $((attempt * 5))
+            done
+            return 1
+          }
+
+          if pull_with_retries "$primary" "$primary_log"; then
+            source='dockerhub'
+          elif pull_with_retries "$mirror" "$mirror_log"; then
+            docker tag "$mirror" "$primary"
+            source='ecr-mirror'
+          else
+            echo 'MATCHING_CONTEXT_IMAGE_PREFETCH status=FAIL primary=FAIL mirror=FAIL'
+            exit 1
+          fi
+
+          docker image inspect "$primary" --format '{{.Id}}' >/dev/null
+          echo "MATCHING_CONTEXT_IMAGE_PREFETCH status=PASS source=$source expected_tag=PASS"
+
+      - name: Remove probe images
+        if: always()
+        shell: bash
+        run: |
+          docker image rm \
+            'supabase/postgres:17.6.1.106' \
+            'public.ecr.aws/supabase/postgres:17.6.1.106' \
+            >/dev/null 2>&1 || true
