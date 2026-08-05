@@ -4,7 +4,8 @@ umask 077
 
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 
-readonly runner_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-marketplace-matching-context-database.sh"
+readonly source_runner="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/run-marketplace-matching-context-database.sh"
+readonly runner_script="$RUNNER_TEMP/trainingos-marketplace-matching-context-debug-runner.sh"
 readonly health_timeout="5m"
 readonly fresh_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh/supabase/config.toml"
 readonly upgrade_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade/supabase/config.toml"
@@ -32,6 +33,7 @@ cleanup_wrapper() {
     fi
   done
   docker image rm "${primary_images[@]}" "${mirror_images[@]}" >/dev/null 2>&1 || true
+  rm -f "$runner_script"
   rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-init-image-*.log
   rm -f "$RUNNER_TEMP"/trainingos-marketplace-matching-context-health-timeout-*.log
 }
@@ -67,6 +69,100 @@ prefetch_one() {
   fi
 
   docker image inspect "$primary" --format '{{.Id}}' >/dev/null
+}
+
+prepare_debug_runner() {
+  python - "$source_runner" "$runner_script" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+text = source.read_text(encoding='utf-8')
+
+start_old = '  supabase --workdir "$workdir" db start >"$start_log" 2>&1'
+start_new = '  supabase --debug --workdir "$workdir" db start >"$start_log" 2>&1'
+if text.count(start_old) != 1:
+    raise SystemExit('database start command contract changed')
+text = text.replace(start_old, start_new, 1)
+
+declaration_old = '  local log_path="$1" exit_code="$2" sqlstate category migration_scope resource'
+declaration_new = '  local log_path="$1" exit_code="$2" sqlstate category migration_scope resource service'
+if text.count(declaration_old) != 1:
+    raise SystemExit('failure marker declaration contract changed')
+text = text.replace(declaration_old, declaration_new, 1)
+
+resource_old = '''  if grep -Eqi '(address already in use|port is already allocated|bind:.*failed)' "$log_path" 2>/dev/null; then
+    resource="port"
+  elif grep -Eqi '(pull access denied|manifest unknown|failed to pull|image.*not found)' "$log_path" 2>/dev/null; then
+    resource="image"
+  elif grep -Eqi '(container.*(unhealthy|failed|exited)|docker daemon|cannot connect to docker)' "$log_path" 2>/dev/null; then
+    resource="container"
+  elif grep -Eqi '(config.*(invalid|error)|toml.*(invalid|error))' "$log_path" 2>/dev/null; then
+    resource="config"
+  else
+    resource="none"
+  fi
+'''
+resource_new = '''  if grep -Eqi '(address already in use|port is already allocated|bind:.*failed)' "$log_path" 2>/dev/null; then
+    resource="port"
+  elif grep -Eqi '(pull access denied|manifest unknown|failed to pull|image.*not found|unable to find image)' "$log_path" 2>/dev/null; then
+    resource="image"
+  elif grep -Eqi '(database is not healthy|health check.*(failed|timeout)|timed out.*health|failed.*healthy|unhealthy database)' "$log_path" 2>/dev/null; then
+    resource="dbhealth"
+  elif grep -Eqi '(failed to connect to postgres|could not connect|connection refused|dial tcp.*5432|postgres.*connection.*failed)' "$log_path" 2>/dev/null; then
+    resource="dbconnect"
+  elif grep -Eqi '(failed to run migrations|error running.*migration|migration.*(failed|error))' "$log_path" 2>/dev/null; then
+    resource="migrationservice"
+  elif grep -Eqi '(failed to start docker container|failed to create docker container|container.*(unhealthy|failed|exited)|docker daemon|cannot connect to docker)' "$log_path" 2>/dev/null; then
+    resource="container"
+  elif grep -Eqi '(permission denied|operation not permitted)' "$log_path" 2>/dev/null; then
+    resource="permission"
+  elif grep -Eqi '(no space left on device|disk quota exceeded)' "$log_path" 2>/dev/null; then
+    resource="disk"
+  elif grep -Eqi '(network is unreachable|temporary failure in name resolution|tls handshake timeout|connection timed out)' "$log_path" 2>/dev/null; then
+    resource="network"
+  elif grep -Eqi '(config.*(invalid|error)|toml.*(invalid|error))' "$log_path" 2>/dev/null; then
+    resource="config"
+  else
+    resource="none"
+  fi
+
+  if grep -Eqi '(supabase/gotrue|gotrue|auth migration)' "$log_path" 2>/dev/null; then
+    service="auth"
+  elif grep -Eqi '(supabase/realtime|realtime migration)' "$log_path" 2>/dev/null; then
+    service="realtime"
+  elif grep -Eqi '(supabase/storage-api|storage migration)' "$log_path" 2>/dev/null; then
+    service="storage"
+  elif grep -Eqi '(supabase/postgres|postgres|database|5432)' "$log_path" 2>/dev/null; then
+    service="postgres"
+  else
+    service="none"
+  fi
+'''
+if text.count(resource_old) != 1:
+    raise SystemExit('resource classifier contract changed')
+text = text.replace(resource_old, resource_new, 1)
+
+category_old = "  elif grep -Eqi '(docker|container|supabase):.*(error|failed|unhealthy)' \"$log_path\" 2>/dev/null; then"
+category_new = "  elif grep -Eqi '(docker|container|supabase|postgres|database|migration):.*(error|failed|unhealthy|timeout|refused)' \"$log_path\" 2>/dev/null; then"
+if text.count(category_old) != 1:
+    raise SystemExit('category classifier contract changed')
+text = text.replace(category_old, category_new, 1)
+
+printf_old = '''  printf '%s-%s-migration%s-resource%s-exit%s' \\
+    "$category" "$sqlstate" "$migration_scope" "$resource" "$exit_code"
+'''
+printf_new = '''  printf '%s-%s-migration%s-resource%s-service%s-exit%s' \\
+    "$category" "$sqlstate" "$migration_scope" "$resource" "$service" "$exit_code"
+'''
+if text.count(printf_old) != 1:
+    raise SystemExit('failure marker format contract changed')
+text = text.replace(printf_old, printf_new, 1)
+
+target.write_text(text, encoding='utf-8')
+PY
+  chmod 700 "$runner_script"
 }
 
 patch_health_timeout_when_ready() {
@@ -123,6 +219,7 @@ PY
 for index in "${!primary_images[@]}"; do
   prefetch_one "$index"
 done
+prepare_debug_runner
 
 bash "$runner_script" &
 runner_pid=$!
