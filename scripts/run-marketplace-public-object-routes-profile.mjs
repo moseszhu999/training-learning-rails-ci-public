@@ -1,0 +1,165 @@
+import { closeSync, openSync } from 'node:fs';
+import { mkdir, readFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+export const MARKETPLACE_PUBLIC_OBJECT_ROUTES_EXACT_FILES = new Set([
+  'apps/training-marketplace-web/object/app.mjs',
+  'apps/training-marketplace-web/object/fixture-read-model.mjs',
+  'apps/training-marketplace-web/object/index.html',
+  'apps/training-marketplace-web/object/read-model.mjs',
+  'apps/training-marketplace-web/object/styles.css',
+  'docs/product/trainingos-marketplace-public-object-routes-v1.md',
+  'docs/testing/trainingos-marketplace-public-object-routes-v1-audit.md',
+  'packages/training-marketplace-public-object/package.json',
+  'packages/training-marketplace-public-object/src/index.d.ts',
+  'packages/training-marketplace-public-object/src/index.mjs',
+  'tests/test_trainingos_marketplace_public_object_routes_v1.py',
+]);
+
+const CANONICAL_MIGRATION_COUNT = 368;
+const EXPECTED_NODE_COUNT = 0;
+const EXPECTED_PYTHON_COUNT = 16;
+
+const command = (label, executable, args, kind = 'status') => Object.freeze({
+  label,
+  executable,
+  args: Object.freeze(args),
+  kind,
+});
+
+export const marketplacePublicObjectRoutesCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('object-app-syntax', 'node', [
+    '--check',
+    'apps/training-marketplace-web/object/app.mjs',
+  ]),
+  command('fixture-read-model-syntax', 'node', [
+    '--check',
+    'apps/training-marketplace-web/object/fixture-read-model.mjs',
+  ]),
+  command('read-model-syntax', 'node', [
+    '--check',
+    'apps/training-marketplace-web/object/read-model.mjs',
+  ]),
+  command('public-object-package-syntax', 'node', [
+    '--check',
+    'packages/training-marketplace-public-object/src/index.mjs',
+  ]),
+  command('python-static', 'python', [
+    '-m',
+    'unittest',
+    '-v',
+    'tests.test_trainingos_marketplace_public_object_routes_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
+function parsePython(text) {
+  return [...String(text).matchAll(/Ran\s+(\d+)\s+tests?/g)]
+    .reduce((sum, match) => sum + Number(match[1]), 0);
+}
+
+async function exactChangedFiles(input) {
+  const scopePath = path.join(input.runnerTemp, 'trainingos-scope-contract.env');
+  const scopeText = await readFile(scopePath, 'utf8');
+  const scope = Object.fromEntries(scopeText.trim().split('\n').map((line) => {
+    const index = line.indexOf('=');
+    return [line.slice(0, index), line.slice(index + 1)];
+  }));
+  const result = spawnSync('git', [
+    '-C', input.privateRepoPath, 'diff', '--name-only',
+    scope.expected_base_sha, input.privateExactSha,
+  ], { encoding: 'utf8', shell: false });
+  if (result.status !== 0) throw new Error('git scope failed');
+  return {
+    files: result.stdout.trim() ? result.stdout.trim().split('\n').sort() : [],
+    scope,
+  };
+}
+
+export function isMarketplacePublicObjectRoutesScope(files) {
+  const names = [...files];
+  return names.length === MARKETPLACE_PUBLIC_OBJECT_ROUTES_EXACT_FILES.size
+    && names.every((name) => MARKETPLACE_PUBLIC_OBJECT_ROUTES_EXACT_FILES.has(name))
+    && names.every((name) => !name.startsWith('supabase/migrations/'))
+    && names.filter((name) => name.startsWith('apps/training-marketplace-web/object/')).length === 5;
+}
+
+function fixedInputContract(input, scope) {
+  return Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
+    && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
+    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(CANONICAL_MIGRATION_COUNT)
+    && scope.expected_changed_file_count === '11'
+    && scope.migration_start === 'none'
+    && scope.migration_end === 'none';
+}
+
+function failedContractResult() {
+  return {
+    ok: false,
+    status: 'FAIL:fixed-input-contract',
+    failedLabels: Object.freeze(['fixed-input-contract']),
+    stepCount: marketplacePublicObjectRoutesCommands.length,
+    passedStepCount: 0,
+    nodeTests: 0,
+    nodePassed: 0,
+    nodeFailed: 0,
+    pythonTests: 0,
+    selectedSuite: 'marketplace-public-object-routes',
+  };
+}
+
+export async function maybeRunMarketplacePublicObjectRoutesProfile(input) {
+  if (input.profile !== 'generic-owned') return null;
+  const { files, scope } = await exactChangedFiles(input);
+  if (!isMarketplacePublicObjectRoutesScope(files)) return null;
+
+  if (!fixedInputContract(input, scope)) {
+    await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
+    return failedContractResult();
+  }
+
+  await mkdir(input.runnerTemp, { recursive: true });
+  let passedStepCount = 0;
+  let pythonTests = 0;
+  const failedLabels = [];
+
+  try {
+    for (const [index, item] of marketplacePublicObjectRoutesCommands.entries()) {
+      const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
+      const descriptor = openSync(logPath, 'w', 0o600);
+      const result = spawnSync(item.executable, item.args, {
+        cwd: input.privateRepoPath,
+        env: process.env,
+        stdio: ['ignore', descriptor, descriptor],
+        shell: false,
+      });
+      closeSync(descriptor);
+      const output = await readFile(logPath, 'utf8');
+      if (item.kind === 'python') pythonTests += parsePython(output);
+      if (result.status === 0) passedStepCount += 1;
+      else failedLabels.push(item.label);
+    }
+  } finally {
+    await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
+  }
+
+  const countsPassed = pythonTests === EXPECTED_PYTHON_COUNT;
+  const ok = passedStepCount === marketplacePublicObjectRoutesCommands.length && countsPassed;
+  const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
+  return {
+    ok,
+    status: ok ? 'PASS' : `FAIL:${failure}`,
+    failedLabels: Object.freeze([...failedLabels]),
+    stepCount: marketplacePublicObjectRoutesCommands.length,
+    passedStepCount,
+    nodeTests: 0,
+    nodePassed: 0,
+    nodeFailed: 0,
+    pythonTests,
+    selectedSuite: 'marketplace-public-object-routes',
+  };
+}
