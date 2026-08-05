@@ -19,19 +19,20 @@ test('matching-context profile invokes the fixed init-image wrapper', () => {
   );
 });
 
-test('wrapper pins the four Supabase CLI v2.101.0 database-init images', () => {
+test('wrapper pins the stable Supabase CLI 2.109.1 database-init stack', () => {
+  assert.match(wrapper, /readonly candidate_cli_version="2\.109\.1"/);
   for (const image of [
-    'supabase/postgres:17.6.1.106',
-    'supabase/gotrue:v2.188.1',
-    'supabase/realtime:v2.86.3',
-    'supabase/storage-api:v1.54.1',
+    'supabase/postgres:17.6.1.143',
+    'supabase/gotrue:v2.192.0',
+    'supabase/realtime:v2.112.6',
+    'supabase/storage-api:v1.62.5',
   ]) assert.ok(wrapper.includes(image), image);
 
   for (const mirror of [
-    'public.ecr.aws/supabase/postgres:17.6.1.106',
-    'public.ecr.aws/supabase/gotrue:v2.188.1',
-    'public.ecr.aws/supabase/realtime:v2.86.3',
-    'public.ecr.aws/supabase/storage-api:v1.54.1',
+    'public.ecr.aws/supabase/postgres:17.6.1.143',
+    'public.ecr.aws/supabase/gotrue:v2.192.0',
+    'public.ecr.aws/supabase/realtime:v2.112.6',
+    'public.ecr.aws/supabase/storage-api:v1.62.5',
   ]) assert.ok(wrapper.includes(mirror), mirror);
 });
 
@@ -54,10 +55,13 @@ test('wrapper patches both generated Supabase configs to a five-minute health ti
   assert.match(wrapper, /MARKETPLACE_MATCHING_CONTEXT_DB status=FAIL stage=health-timeout-config/);
 });
 
-test('wrapper creates a temporary debug runner without modifying the source runner', () => {
+test('wrapper creates a temporary stable-stack debug runner without modifying the source runner', () => {
   assert.match(wrapper, /readonly source_runner=/);
   assert.match(wrapper, /readonly runner_script="\$RUNNER_TEMP\/trainingos-marketplace-matching-context-debug-runner\.sh"/);
   assert.match(wrapper, /prepare_debug_runner/);
+  assert.match(wrapper, /stable stack replacement contract changed/);
+  assert.match(wrapper, /legacy stack marker remains in candidate runner/);
+  assert.ok(wrapper.includes('supabase_cli_version="2.109.1"'));
   assert.ok(wrapper.includes('supabase --debug --workdir "$workdir" db start'));
   assert.match(wrapper, /text\.count\(start_old\) != 1/);
   assert.match(wrapper, /target\.write_text\(text, encoding='utf-8'\)/);
