@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES,
+  MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES,
   MARKETPLACE_PUBLIC_SOURCE_EXACT_FILES,
   isMarketplaceFunnelAnalyticsScope,
+  isMarketplaceOnboardingActivationScope,
   isMarketplacePublicSourceScope,
   marketplaceNextCoreCommands,
 } from '../scripts/run-marketplace-next-core-profiles.mjs';
@@ -25,6 +27,14 @@ const funnelFiles = [
   'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
 ];
 
+const activationFiles = [
+  'docs/product/trainingos-marketplace-onboarding-activation-intent-v1.md',
+  'packages/training-marketplace-onboarding-activation/package.json',
+  'packages/training-marketplace-onboarding-activation/src/index.d.ts',
+  'packages/training-marketplace-onboarding-activation/src/index.mjs',
+  'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
+];
+
 const profileText = readFileSync(new URL('../scripts/run-marketplace-next-core-profiles.mjs', import.meta.url), 'utf8');
 const routerText = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
 
@@ -40,6 +50,13 @@ const funnelProfile = {
   sourcePath: 'packages/training-marketplace-funnel-analytics/src/index.mjs',
   declarationPath: 'packages/training-marketplace-funnel-analytics/src/index.d.ts',
   testPath: 'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
+};
+
+const activationProfile = {
+  suite: 'marketplace-onboarding-activation-intent',
+  sourcePath: 'packages/training-marketplace-onboarding-activation/src/index.mjs',
+  declarationPath: 'packages/training-marketplace-onboarding-activation/src/index.d.ts',
+  testPath: 'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
 };
 
 test('public-source profile owns exactly five bounded files', () => {
@@ -58,7 +75,15 @@ test('funnel profile owns exactly five bounded files', () => {
   assert.equal(isMarketplaceFunnelAnalyticsScope(sourceFiles), false);
 });
 
-test('both profiles run the same seven fixed non-production gates', () => {
+test('onboarding activation profile owns exactly five bounded files', () => {
+  assert.deepEqual([...MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES].sort(), [...activationFiles].sort());
+  assert.equal(isMarketplaceOnboardingActivationScope(activationFiles), true);
+  assert.equal(isMarketplaceOnboardingActivationScope(activationFiles.slice(1)), false);
+  assert.equal(isMarketplaceOnboardingActivationScope([...activationFiles, 'supabase/migrations/x.sql']), false);
+  assert.equal(isMarketplaceOnboardingActivationScope(funnelFiles), false);
+});
+
+test('all three profiles run the same seven fixed non-production gates', () => {
   const expected = [
     'install',
     'package-syntax',
@@ -70,6 +95,7 @@ test('both profiles run the same seven fixed non-production gates', () => {
   ];
   assert.deepEqual(marketplaceNextCoreCommands(sourceProfile).map((item) => item.label), expected);
   assert.deepEqual(marketplaceNextCoreCommands(funnelProfile).map((item) => item.label), expected);
+  assert.deepEqual(marketplaceNextCoreCommands(activationProfile).map((item) => item.label), expected);
 });
 
 test('fixed contracts lock migration count and distinct node counts', () => {
@@ -77,8 +103,10 @@ test('fixed contracts lock migration count and distinct node counts', () => {
     'const EXPECTED_MIGRATION_COUNT = 368',
     'expectedNodeCount: 10',
     'expectedNodeCount: 11',
+    'expectedNodeCount: 12',
     "suite: 'marketplace-public-source-observation-core'",
     "suite: 'marketplace-funnel-analytics-core'",
+    "suite: 'marketplace-onboarding-activation-intent'",
     "scope.expected_changed_file_count === '5'",
     "scope.migration_start === 'none'",
     "scope.migration_end === 'none'",
