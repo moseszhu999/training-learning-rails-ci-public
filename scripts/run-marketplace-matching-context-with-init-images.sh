@@ -9,6 +9,7 @@ readonly runner_script="$RUNNER_TEMP/trainingos-marketplace-matching-context-deb
 readonly candidate_cli_version="2.109.1"
 readonly health_timeout="5m"
 readonly fresh_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh/supabase/config.toml"
+readonly fresh_two_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-fresh-two/supabase/config.toml"
 readonly upgrade_config="$RUNNER_TEMP/trainingos-marketplace-matching-context-upgrade/supabase/config.toml"
 readonly -a primary_images=(
   "supabase/postgres:17.6.1.143"
@@ -24,10 +25,11 @@ readonly -a mirror_images=(
 )
 runner_pid=""
 fresh_watcher_pid=""
+fresh_two_watcher_pid=""
 upgrade_watcher_pid=""
 
 cleanup_wrapper() {
-  for pid in "$fresh_watcher_pid" "$upgrade_watcher_pid" "$runner_pid"; do
+  for pid in "$fresh_watcher_pid" "$fresh_two_watcher_pid" "$upgrade_watcher_pid" "$runner_pid"; do
     if [[ -n "$pid" ]]; then
       kill "$pid" >/dev/null 2>&1 || true
       wait "$pid" >/dev/null 2>&1 || true
@@ -251,6 +253,8 @@ bash "$runner_script" &
 runner_pid=$!
 patch_health_timeout_when_ready "$fresh_config" fresh &
 fresh_watcher_pid=$!
+patch_health_timeout_when_ready "$fresh_two_config" fresh-two &
+fresh_two_watcher_pid=$!
 patch_health_timeout_when_ready "$upgrade_config" upgrade &
 upgrade_watcher_pid=$!
 
@@ -258,11 +262,14 @@ set +e
 wait "$fresh_watcher_pid"
 fresh_watcher_status=$?
 fresh_watcher_pid=""
+wait "$fresh_two_watcher_pid"
+fresh_two_watcher_status=$?
+fresh_two_watcher_pid=""
 wait "$upgrade_watcher_pid"
 upgrade_watcher_status=$?
 upgrade_watcher_pid=""
 
-if [[ "$fresh_watcher_status" != 0 || "$upgrade_watcher_status" != 0 ]]; then
+if [[ "$fresh_watcher_status" != 0 || "$fresh_two_watcher_status" != 0 || "$upgrade_watcher_status" != 0 ]]; then
   kill "$runner_pid" >/dev/null 2>&1 || true
   wait "$runner_pid" >/dev/null 2>&1 || true
   runner_pid=""
