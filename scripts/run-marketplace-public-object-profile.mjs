@@ -18,7 +18,7 @@ export const MARKETPLACE_PUBLIC_OBJECT_EXACT_FILES = new Set([
 ]);
 
 const EXPECTED_NODE_COUNT = 0;
-const EXPECTED_PYTHON_COUNT = 16;
+const EXPECTED_PYTHON_COUNT = 18;
 const EXPECTED_MIGRATION_COUNT = 368;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
