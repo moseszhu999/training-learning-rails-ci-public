@@ -1,0 +1,47 @@
+name: Opaque private exact-head commitment
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/opaque-private-contract-commitment.yml
+      - carrier/opaque-contract-20260806-01/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opaque-private-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-opaque-commitment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact carrier head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Validate opaque commitment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m json.tool carrier/opaque-contract-20260806-01/commitment.json >/dev/null
+          python -m unittest -v carrier.opaque-contract-20260806-01.test_commitment
+
+      - name: Confirm public-safe scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+          printf '%s\n' "$changed"
+          allowed='^(\.github/workflows/opaque-private-contract-commitment\.yml|carrier/opaque-contract-20260806-01/(commitment\.json|test_commitment\.py))$'
+          if printf '%s\n' "$changed" | grep -Ev "$allowed" | grep -q .; then
+            echo 'unexpected public carrier path'
+            exit 1
+          fi
