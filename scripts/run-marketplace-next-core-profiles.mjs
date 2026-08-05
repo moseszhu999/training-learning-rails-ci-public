@@ -19,6 +19,14 @@ export const MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES = new Set([
   'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
 ]);
 
+export const MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES = new Set([
+  'docs/product/trainingos-marketplace-onboarding-activation-intent-v1.md',
+  'packages/training-marketplace-onboarding-activation/package.json',
+  'packages/training-marketplace-onboarding-activation/src/index.d.ts',
+  'packages/training-marketplace-onboarding-activation/src/index.mjs',
+  'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
+]);
+
 const EXPECTED_MIGRATION_COUNT = 368;
 
 const PROFILES = Object.freeze([
@@ -37,6 +45,14 @@ const PROFILES = Object.freeze([
     sourcePath: 'packages/training-marketplace-funnel-analytics/src/index.mjs',
     declarationPath: 'packages/training-marketplace-funnel-analytics/src/index.d.ts',
     testPath: 'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
+  }),
+  Object.freeze({
+    suite: 'marketplace-onboarding-activation-intent',
+    files: MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES,
+    expectedNodeCount: 12,
+    sourcePath: 'packages/training-marketplace-onboarding-activation/src/index.mjs',
+    declarationPath: 'packages/training-marketplace-onboarding-activation/src/index.d.ts',
+    testPath: 'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
   }),
 ]);
 
@@ -107,6 +123,10 @@ export function isMarketplacePublicSourceScope(files) {
 
 export function isMarketplaceFunnelAnalyticsScope(files) {
   return isExactScope(files, MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES);
+}
+
+export function isMarketplaceOnboardingActivationScope(files) {
+  return isExactScope(files, MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES);
 }
 
 function findProfile(files) {
