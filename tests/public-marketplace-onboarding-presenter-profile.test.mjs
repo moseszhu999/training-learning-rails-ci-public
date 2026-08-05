@@ -59,6 +59,10 @@ test('profile runs focused presenter, declaration, typecheck and build gates', (
   assert.doesNotMatch(profile, /database-replay/);
   assert.doesNotMatch(profile, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)/);
   assert.doesNotMatch(profile, /deploy/i);
+  assert.equal(
+    marketplaceOnboardingPresenterCommands.some((item) => item.executable === 'supabase'),
+    false,
+  );
 });
 
 test('onboarding intake router invokes presenter before intake adapter profile', () => {
@@ -74,7 +78,6 @@ test('presenter profile preserves navigation-only and no-write verification scop
     "'packages/training-marketplace-onboarding-presenter/src/index.d.ts'",
     "'tests.test_trainingos_marketplace_onboarding_presenter_v1'",
   ]) assert.ok(profile.includes(marker), marker);
-  assert.doesNotMatch(profile, /supabase\/migrations/);
   assert.doesNotMatch(profile, /formalOnboardingWriteAllowed\s*=\s*true/);
   assert.doesNotMatch(profile, /workspaceCreated\s*=\s*true/);
   assert.doesNotMatch(profile, /projectCreated\s*=\s*true/);
