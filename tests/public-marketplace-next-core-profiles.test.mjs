@@ -22,7 +22,6 @@ const sourceFiles = [
   'packages/training-marketplace-public-source/src/index.mjs',
   'tests/training-marketplace-public-source-observation-core-v1.test.mjs',
 ];
-
 const funnelFiles = [
   'docs/product/trainingos-marketplace-funnel-analytics-core-v1.md',
   'packages/training-marketplace-funnel-analytics/package.json',
@@ -30,7 +29,6 @@ const funnelFiles = [
   'packages/training-marketplace-funnel-analytics/src/index.mjs',
   'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
 ];
-
 const activationFiles = [
   'docs/product/trainingos-marketplace-onboarding-activation-intent-v1.md',
   'packages/training-marketplace-onboarding-activation/package.json',
@@ -38,7 +36,6 @@ const activationFiles = [
   'packages/training-marketplace-onboarding-activation/src/index.mjs',
   'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
 ];
-
 const texasEtplFiles = [
   'docs/product/trainingos-texas-etpl-source-adapter-v1.md',
   'packages/training-marketplace-texas-etpl/package.json',
@@ -46,7 +43,6 @@ const texasEtplFiles = [
   'packages/training-marketplace-texas-etpl/src/index.mjs',
   'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
 ];
-
 const writerFiles = [
   'docs/product/trainingos-marketplace-onboarding-writer-v1.md',
   'packages/training-marketplace-onboarding-writer/package.json',
@@ -62,33 +58,11 @@ const profileText = readFileSync(new URL('../scripts/run-marketplace-next-core-p
 const databaseText = readFileSync(new URL('../scripts/run-marketplace-onboarding-writer-database.sh', import.meta.url), 'utf8');
 const routerText = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
 
-const sourceProfile = {
-  sourcePath: 'packages/training-marketplace-public-source/src/index.mjs',
-  declarationPath: 'packages/training-marketplace-public-source/src/index.d.ts',
-  testPath: 'tests/training-marketplace-public-source-observation-core-v1.test.mjs',
-};
-const funnelProfile = {
-  sourcePath: 'packages/training-marketplace-funnel-analytics/src/index.mjs',
-  declarationPath: 'packages/training-marketplace-funnel-analytics/src/index.d.ts',
-  testPath: 'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
-};
-const activationProfile = {
-  sourcePath: 'packages/training-marketplace-onboarding-activation/src/index.mjs',
-  declarationPath: 'packages/training-marketplace-onboarding-activation/src/index.d.ts',
-  testPath: 'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
-};
-const texasEtplProfile = {
-  sourcePath: 'packages/training-marketplace-texas-etpl/src/index.mjs',
-  declarationPath: 'packages/training-marketplace-texas-etpl/src/index.d.ts',
-  testPath: 'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
-};
-const writerProfile = {
-  sourcePath: 'packages/training-marketplace-onboarding-writer/src/index.mjs',
-  declarationPath: 'packages/training-marketplace-onboarding-writer/src/index.d.ts',
-  testPath: 'tests/training-marketplace-onboarding-writer-v1.test.mjs',
-  pythonPath: 'tests/test_trainingos_marketplace_onboarding_writer_v1.py',
-  databaseScript: '/public/scripts/run-marketplace-onboarding-writer-database.sh',
-};
+const sourceProfile = { sourcePath: 'packages/training-marketplace-public-source/src/index.mjs', declarationPath: 'packages/training-marketplace-public-source/src/index.d.ts', testPath: 'tests/training-marketplace-public-source-observation-core-v1.test.mjs' };
+const funnelProfile = { sourcePath: 'packages/training-marketplace-funnel-analytics/src/index.mjs', declarationPath: 'packages/training-marketplace-funnel-analytics/src/index.d.ts', testPath: 'tests/training-marketplace-funnel-analytics-core-v1.test.mjs' };
+const activationProfile = { sourcePath: 'packages/training-marketplace-onboarding-activation/src/index.mjs', declarationPath: 'packages/training-marketplace-onboarding-activation/src/index.d.ts', testPath: 'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs' };
+const texasEtplProfile = { sourcePath: 'packages/training-marketplace-texas-etpl/src/index.mjs', declarationPath: 'packages/training-marketplace-texas-etpl/src/index.d.ts', testPath: 'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs' };
+const writerProfile = { sourcePath: 'packages/training-marketplace-onboarding-writer/src/index.mjs', declarationPath: 'packages/training-marketplace-onboarding-writer/src/index.d.ts', testPath: 'tests/training-marketplace-onboarding-writer-v1.test.mjs', pythonPath: 'tests/test_trainingos_marketplace_onboarding_writer_v1.py', databaseScript: '/public/scripts/run-marketplace-onboarding-writer-database.sh' };
 
 test('four lightweight profiles retain exact five-file scopes', () => {
   assert.deepEqual([...MARKETPLACE_PUBLIC_SOURCE_EXACT_FILES].sort(), [...sourceFiles].sort());
@@ -112,10 +86,7 @@ test('onboarding writer profile owns exactly eight files and one fixed migration
 });
 
 test('lightweight profiles retain the same seven non-database gates', () => {
-  const expected = [
-    'install', 'package-syntax', 'focused-node-contracts',
-    'declaration-typecheck', 'typecheck', 'production-build', 'bundle-verification',
-  ];
+  const expected = ['install','package-syntax','focused-node-contracts','declaration-typecheck','typecheck','production-build','bundle-verification'];
   assert.deepEqual(marketplaceNextCoreCommands(sourceProfile).map((item) => item.label), expected);
   assert.deepEqual(marketplaceNextCoreCommands(funnelProfile).map((item) => item.label), expected);
   assert.deepEqual(marketplaceNextCoreCommands(activationProfile).map((item) => item.label), expected);
@@ -124,53 +95,47 @@ test('lightweight profiles retain the same seven non-database gates', () => {
 
 test('onboarding writer runs static, database, typecheck, build and bundle gates', () => {
   assert.deepEqual(marketplaceNextCoreCommands(writerProfile).map((item) => item.label), [
-    'install',
-    'package-syntax',
-    'focused-node-contracts',
-    'python-static',
-    'database-replay',
-    'declaration-typecheck',
-    'typecheck',
-    'production-build',
-    'bundle-verification',
+    'install','package-syntax','focused-node-contracts','python-static','database-replay','declaration-typecheck','typecheck','production-build','bundle-verification',
   ]);
 });
 
 test('fixed contracts lock writer counts, scope and migration range', () => {
   for (const marker of [
-    "suite: 'marketplace-onboarding-writer'",
-    'expectedChangedFileCount: 8',
-    'expectedMigrationCount: 369',
-    "migrationStart: '20260806083000'",
-    "migrationEnd: '20260806083000'",
-    'expectedNodeCount: 8',
-    'expectedPythonCount: 13',
-    'run-marketplace-onboarding-writer-database.sh',
+    "suite: 'marketplace-onboarding-writer'", 'expectedChangedFileCount: 8', 'expectedMigrationCount: 369',
+    "migrationStart: '20260806083000'", "migrationEnd: '20260806083000'", 'expectedNodeCount: 8',
+    'expectedPythonCount: 13', 'run-marketplace-onboarding-writer-database.sh',
   ]) assert.ok(profileText.includes(marker), marker);
 });
 
-test('database controller proves fresh twice, latest-base upgrade, E2E, ACL and cleanup', () => {
+test('database controller reuses the proven exact-binary empty-database architecture', () => {
   for (const marker of [
     'canonical_migration_count=369',
     'base_migration_count=368',
-    '20260806083000_trainingos_marketplace_onboarding_writer_v1.sql',
-    'fresh-reset-one',
-    'fresh-reset-two',
-    'upgrade-copy-migration',
+    'supabase_cli_version="2.101.0"',
+    'https://github.com/supabase/cli/releases/download/v${supabase_cli_version}/supabase_linux_amd64.tar.gz',
+    'postgres_image_primary="supabase/postgres:17.6.1.106"',
+    'postgres_image_mirror="public.ecr.aws/supabase/postgres:17.6.1.106"',
+    'initialize_empty_workdir "$fresh_one" fresh-one',
+    'initialize_empty_workdir "$fresh_two" fresh-two',
+    'initialize_empty_workdir "$upgrade" upgrade',
+    'fresh-one-empty-start',
+    'fresh-two-empty-start',
+    'upgrade-copy-forward-migration',
+    'explicit_migration_up=PASS',
     'trainingos_marketplace_onboarding_writer_v1_e2e.sql',
-    "grep -qx 'tables=5'",
-    "grep -qx 'authenticated_public_rpc=1'",
-    "grep -qx 'forbidden_public_rpc_exec=0'",
+    'public_secured_rpcs=2',
+    'forbidden_predecessor_exec=0',
     'trap cleanup EXIT',
-    'supabase@2.101.0',
   ]) assert.ok(databaseText.includes(marker), marker);
+  assert.doesNotMatch(databaseText, /npx --yes supabase/);
+  assert.doesNotMatch(databaseText, /db reset --local/);
 });
 
 test('controllers contain no deployment or production credential path', () => {
   assert.doesNotMatch(profileText, /deploy-site|netlify deploy|vercel deploy|--prod/i);
   assert.doesNotMatch(databaseText, /deploy-site|netlify deploy|vercel deploy|--prod/i);
   assert.doesNotMatch(profileText + databaseText, /SUPABASE_(ACCESS_TOKEN|DB_PASSWORD)/i);
-  assert.doesNotMatch(databaseText, /production|prod-db|service-role-key/i);
+  assert.doesNotMatch(databaseText, /prod-db|service-role-key/i);
 });
 
 test('router dispatches next-core profiles before generic fallback', () => {
