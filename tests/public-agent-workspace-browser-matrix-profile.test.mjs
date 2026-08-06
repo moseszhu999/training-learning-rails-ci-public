@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   AGENT_WORKSPACE_BROWSER_MATRIX_EXACT_FILES,
   WORKSPACE_IA_DENSITY_EXACT_FILES,
+  classifyBrowserAssertionFailure,
   classifyBrowserFailure,
   isAgentWorkspaceBrowserMatrixScope,
   isWorkspaceIaDensityScope,
@@ -66,10 +67,22 @@ test('browser failures are classified without publishing raw Playwright logs', (
   assert.equal(classifyBrowserFailure('GET /src/example 404 Failed to load resource'), 'fixture-route');
   assert.equal(classifyBrowserFailure('browserType.launch: Executable does not exist'), 'browser-launch');
   assert.equal(classifyBrowserFailure('Transform failed: Cannot find module x'), 'compile-runtime');
-  assert.equal(classifyBrowserFailure('Error: expect(locator).toBeVisible Expected: visible'), 'assertion');
+  assert.equal(classifyBrowserFailure('Error: expect(locator).toBeVisible Expected: visible'), 'assertion-unknown');
   assert.equal(classifyBrowserFailure('unrecognized private runner output'), 'unknown');
   assert.match(profileText, /FAIL:\$\{labels\}@\$\{browserFailure\}/);
   assert.doesNotMatch(profileText, /console\.log\(output\)|process\.stdout\.write\(output\)/);
+});
+
+test('assertion failures map to bounded fixture stages', () => {
+  assert.equal(classifyBrowserAssertionFailure('render five explicit unavailable owner regions Expected: 5'), 'unavailable-count');
+  assert.equal(classifyBrowserAssertionFailure('never turn unavailable evidence into numeric zero unavailableSources'), 'unavailable-zero');
+  assert.equal(classifyBrowserAssertionFailure('.teacher-operations-hub ends outside the viewport'), 'horizontal-overflow');
+  assert.equal(classifyBrowserAssertionFailure('select the first occurrence explicitly 第一节课 · Unit 03 练习讲解'), 'first-selection-detail');
+  assert.equal(classifyBrowserAssertionFailure('switch to the second occurrence and update the detail 第二节课 · Spring 调试'), 'second-selection-detail');
+  assert.equal(classifyBrowserAssertionFailure('.teacher-operations-hub__course-list button Expected: 2'), 'course-count');
+  assert.equal(classifyBrowserAssertionFailure('aria-current expected true'), 'selected-state');
+  assert.equal(classifyBrowserAssertionFailure('.teacher-operations-hub__course-detail toHaveText'), 'detail-text');
+  assert.equal(classifyBrowserAssertionFailure('unrecognized assertion'), 'unknown');
 });
 
 test('browser profile still runs typecheck production build and bundle verification', () => {
