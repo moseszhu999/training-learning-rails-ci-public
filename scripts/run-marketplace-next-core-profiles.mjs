@@ -22,6 +22,16 @@ export const MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES = new Set([
   'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
 ]);
 
+export const MARKETPLACE_FIRST_PARTY_FUNNEL_RUNTIME_EXACT_FILES = new Set([
+  'docs/product/trainingos-marketplace-first-party-funnel-runtime-v1.md',
+  'packages/training-marketplace-funnel-runtime/package.json',
+  'packages/training-marketplace-funnel-runtime/src/envelope.mjs',
+  'packages/training-marketplace-funnel-runtime/src/index.d.ts',
+  'packages/training-marketplace-funnel-runtime/src/index.mjs',
+  'packages/training-marketplace-funnel-runtime/src/policy.mjs',
+  'tests/training-marketplace-first-party-funnel-runtime-v1.test.mjs',
+]);
+
 export const MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES = new Set([
   'docs/product/trainingos-marketplace-onboarding-activation-intent-v1.md',
   'packages/training-marketplace-onboarding-activation/package.json',
@@ -75,6 +85,19 @@ const PROFILES = Object.freeze([
     sourcePath: 'packages/training-marketplace-funnel-analytics/src/index.mjs',
     declarationPath: 'packages/training-marketplace-funnel-analytics/src/index.d.ts',
     testPath: 'tests/training-marketplace-funnel-analytics-core-v1.test.mjs',
+  }),
+  Object.freeze({
+    suite: 'marketplace-first-party-funnel-runtime',
+    files: MARKETPLACE_FIRST_PARTY_FUNNEL_RUNTIME_EXACT_FILES,
+    expectedChangedFileCount: 7,
+    expectedMigrationCount: 368,
+    migrationStart: 'none',
+    migrationEnd: 'none',
+    expectedNodeCount: 15,
+    expectedPythonCount: 0,
+    sourcePath: 'packages/training-marketplace-funnel-runtime/src/index.mjs',
+    declarationPath: 'packages/training-marketplace-funnel-runtime/src/index.d.ts',
+    testPath: 'tests/training-marketplace-first-party-funnel-runtime-v1.test.mjs',
   }),
   Object.freeze({
     suite: 'marketplace-onboarding-activation-intent',
@@ -205,6 +228,11 @@ export function isMarketplacePublicSourceScope(files) {
 
 export function isMarketplaceFunnelAnalyticsScope(files) {
   return isExactScope(files, MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES)
+    && [...files].every((name) => !name.startsWith('supabase/migrations/'));
+}
+
+export function isMarketplaceFirstPartyFunnelRuntimeScope(files) {
+  return isExactScope(files, MARKETPLACE_FIRST_PARTY_FUNNEL_RUNTIME_EXACT_FILES)
     && [...files].every((name) => !name.startsWith('supabase/migrations/'));
 }
 
