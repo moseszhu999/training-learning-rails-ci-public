@@ -3,7 +3,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const EXACT_FILES = new Set([
+export const WORKSPACE_IA_DENSITY_EXACT_FILES = new Set([
   'apps/training-web/src/components/TrainingOsAdvancedManagementSurface.tsx',
   'apps/training-web/src/lib/trainingos-workspace-density.ts',
   'apps/training-web/src/trainingos-agent-native-remediation-v1.css',
@@ -11,14 +11,23 @@ const EXACT_FILES = new Set([
   'tests/test_trainingos_workspace_ia_density_v1.py',
 ]);
 
-const command = (label, executable, args, kind = 'status') => Object.freeze({
+export const AGENT_WORKSPACE_BROWSER_MATRIX_EXACT_FILES = new Set([
+  'docs/testing/trainingos-agent-workspace-playwright-matrix-v1.md',
+  'playwright.config.ts',
+  'tests/trainingos-ui-e2e/agent-native-workspace-fixture.spec.ts',
+  'tests/trainingos-ui-e2e/agent-native-workspace-live.spec.ts',
+  'tests/trainingos-ui-e2e/helpers/agent-native-workspace-live.ts',
+]);
+
+const command = (label, executable, args, kind = 'status', env = undefined) => Object.freeze({
   label,
   executable,
   args: Object.freeze(args),
   kind,
+  env: env ? Object.freeze(env) : undefined,
 });
 
-const commands = Object.freeze([
+const IA_COMMANDS = Object.freeze([
   command('install', 'npm', ['ci']),
   command('python-contract', 'python', [
     '-m',
@@ -31,9 +40,38 @@ const commands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+const MATRIX_COMMANDS = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('chromium-install', 'npx', ['playwright', 'install', '--with-deps', 'chromium']),
+  command('fixture-browser-matrix', 'npx', [
+    'playwright',
+    'test',
+    'tests/trainingos-ui-e2e/agent-native-workspace-fixture.spec.ts',
+    '--project=Desktop 1440',
+    '--project=Tablet 1024',
+    '--project=Mobile 390',
+    '--reporter=line',
+  ], 'browser', {
+    TRAININGOS_AGENT_WORKSPACE_FIXTURE_ONLY: '1',
+  }),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npm', ['run', 'build']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 function parsePython(text) {
-  const match = text.match(/Ran\s+(\d+)\s+tests?/m);
+  const match = String(text).match(/Ran\s+(\d+)\s+tests?/m);
   return match ? Number(match[1]) : 0;
+}
+
+function parseBrowserPassed(text) {
+  const matches = [...String(text).matchAll(/(?:^|\s)(\d+)\s+passed(?:\s|$)/gm)];
+  return matches.length ? Number(matches.at(-1)[1]) : 0;
+}
+
+function parseBrowserSkipped(text) {
+  const matches = [...String(text).matchAll(/(?:^|\s)(\d+)\s+skipped(?:\s|$)/gm)];
+  return matches.length ? Number(matches.at(-1)[1]) : 0;
 }
 
 function git(repoPath, args) {
@@ -55,36 +93,95 @@ async function changedFiles({ privateRepoPath, runnerTemp, privateExactSha }) {
   const raw = git(privateRepoPath, [
     'diff', '--name-only', scope.expected_base_sha, privateExactSha,
   ]);
-  return raw ? raw.split('\n').filter(Boolean) : [];
+  return {
+    files: raw ? raw.split('\n').filter(Boolean) : [],
+    scope,
+  };
 }
 
-function isExactScope(files) {
-  return files.length === EXACT_FILES.size && files.every((file) => EXACT_FILES.has(file));
+function isExactScope(files, expected) {
+  return files.length === expected.size && files.every((file) => expected.has(file));
+}
+
+export function isWorkspaceIaDensityScope(files) {
+  return isExactScope(files, WORKSPACE_IA_DENSITY_EXACT_FILES);
+}
+
+export function isAgentWorkspaceBrowserMatrixScope(files) {
+  return isExactScope(files, AGENT_WORKSPACE_BROWSER_MATRIX_EXACT_FILES);
+}
+
+function selectSuite(files) {
+  if (isWorkspaceIaDensityScope(files)) {
+    return Object.freeze({
+      name: 'workspace-ia-density',
+      commands: IA_COMMANDS,
+      expectedNodeCount: 0,
+      expectedPythonCount: 5,
+    });
+  }
+  if (isAgentWorkspaceBrowserMatrixScope(files)) {
+    return Object.freeze({
+      name: 'agent-workspace-browser-matrix',
+      commands: MATRIX_COMMANDS,
+      expectedNodeCount: 6,
+      expectedPythonCount: 0,
+    });
+  }
+  return null;
 }
 
 export async function maybeRunWorkspaceIaDensityProfile(input) {
   if (input.profile !== 'generic-owned') return null;
-  const files = await changedFiles(input);
-  if (!isExactScope(files)) return null;
+  const { files, scope } = await changedFiles(input);
+  const suite = selectSuite(files);
+  if (!suite) return null;
+
+  const fixedInput = Number(input.expectedNodeCount) === suite.expectedNodeCount
+    && Number(input.expectedPythonCount) === suite.expectedPythonCount
+    && scope.expected_changed_file_count === '5'
+    && scope.migration_start === 'none'
+    && scope.migration_end === 'none';
+  if (!fixedInput) {
+    await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
+    return {
+      ok: false,
+      status: 'FAIL:fixed-input-contract',
+      failedLabels: Object.freeze(['fixed-input-contract']),
+      stepCount: suite.commands.length,
+      passedStepCount: 0,
+      nodeTests: 0,
+      nodePassed: 0,
+      nodeFailed: 0,
+      pythonTests: 0,
+      selectedSuite: suite.name,
+    };
+  }
 
   await mkdir(input.runnerTemp, { recursive: true });
   let passedStepCount = 0;
   let pythonTests = 0;
+  let browserPassed = 0;
+  let browserSkipped = 0;
   const failedLabels = [];
 
   try {
-    for (const [index, item] of commands.entries()) {
+    for (const [index, item] of suite.commands.entries()) {
       const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const result = spawnSync(item.executable, item.args, {
         cwd: input.privateRepoPath,
-        env: process.env,
+        env: { ...process.env, ...(item.env ?? {}) },
         stdio: ['ignore', descriptor, descriptor],
         shell: false,
       });
       closeSync(descriptor);
       const output = await readFile(logPath, 'utf8');
       if (item.kind === 'python') pythonTests += parsePython(output);
+      if (item.kind === 'browser') {
+        browserPassed += parseBrowserPassed(output);
+        browserSkipped += parseBrowserSkipped(output);
+      }
       if (result.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
     }
@@ -92,10 +189,10 @@ export async function maybeRunWorkspaceIaDensityProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const countsPassed = Number(input.expectedNodeCount) === 0
-    && Number(input.expectedPythonCount) === 5
-    && pythonTests === 5;
-  const ok = passedStepCount === commands.length && countsPassed;
+  const countsPassed = suite.name === 'agent-workspace-browser-matrix'
+    ? browserPassed === 6 && browserSkipped === 0
+    : pythonTests === 5;
+  const ok = passedStepCount === suite.commands.length && countsPassed;
   const status = ok
     ? 'PASS'
     : `FAIL:${failedLabels.length ? failedLabels.join(',') : 'count-contract'}`;
@@ -104,12 +201,12 @@ export async function maybeRunWorkspaceIaDensityProfile(input) {
     ok,
     status,
     failedLabels: Object.freeze([...failedLabels]),
-    stepCount: commands.length,
+    stepCount: suite.commands.length,
     passedStepCount,
-    nodeTests: 0,
-    nodePassed: 0,
+    nodeTests: browserPassed + browserSkipped,
+    nodePassed: browserPassed,
     nodeFailed: 0,
     pythonTests,
-    selectedSuite: 'workspace-ia-density',
+    selectedSuite: suite.name,
   };
 }
