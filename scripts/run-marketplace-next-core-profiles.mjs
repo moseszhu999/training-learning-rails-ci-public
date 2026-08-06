@@ -93,7 +93,7 @@ const PROFILES = Object.freeze([
     expectedMigrationCount: 368,
     migrationStart: 'none',
     migrationEnd: 'none',
-    expectedNodeCount: 14,
+    expectedNodeCount: 15,
     expectedPythonCount: 0,
     sourcePath: 'packages/training-marketplace-funnel-runtime/src/index.mjs',
     declarationPath: 'packages/training-marketplace-funnel-runtime/src/index.d.ts',
