@@ -10,6 +10,7 @@ export * from './run-marketplace-claim-review-lifecycle-profile.mjs';
 export * from './run-marketplace-public-object-profile.mjs';
 export * from './run-marketplace-participation-client-profile.mjs';
 export * from './run-marketplace-next-core-profiles.mjs';
+export * from './run-marketplace-source-refresh-profile.mjs';
 export * from './run-learning-content-resolution-db-profile.mjs';
 export * from './run-challenge-preparation-recipe-profile.mjs';
 export * from './run-learning-workspace-contract-fix-profile.mjs';
@@ -36,6 +37,7 @@ import { maybeRunMarketplaceClaimReviewProfile } from './run-marketplace-claim-r
 import { maybeRunMarketplacePublicObjectProfile } from './run-marketplace-public-object-profile.mjs';
 import { maybeRunMarketplaceParticipationClientProfile } from './run-marketplace-participation-client-profile.mjs';
 import { maybeRunMarketplaceNextCoreProfile } from './run-marketplace-next-core-profiles.mjs';
+import { maybeRunMarketplaceSourceRefreshProfile } from './run-marketplace-source-refresh-profile.mjs';
 import { maybeRunLearningContentResolutionDbProfile } from './run-learning-content-resolution-db-profile.mjs';
 import { maybeRunChallengePreparationRecipeProfile } from './run-challenge-preparation-recipe-profile.mjs';
 import { maybeRunLearningWorkspaceContractFixProfile } from './run-learning-workspace-contract-fix-profile.mjs';
@@ -124,6 +126,9 @@ export async function runProfile(input) {
 
   const marketplaceNextCore = await maybeRunMarketplaceNextCoreProfile(input);
   if (marketplaceNextCore) return marketplaceNextCore;
+
+  const marketplaceSourceRefresh = await maybeRunMarketplaceSourceRefreshProfile(input);
+  if (marketplaceSourceRefresh) return marketplaceSourceRefresh;
 
   const marketplaceParticipation = await maybeRunMarketplaceParticipationProfile(input);
   if (marketplaceParticipation) return marketplaceParticipation;
