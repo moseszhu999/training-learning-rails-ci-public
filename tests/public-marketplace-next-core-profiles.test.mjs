@@ -5,11 +5,13 @@ import {
   MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES,
   MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES,
   MARKETPLACE_ONBOARDING_WRITER_EXACT_FILES,
+  MARKETPLACE_OREGON_ETPL_EXACT_FILES,
   MARKETPLACE_PUBLIC_SOURCE_EXACT_FILES,
   MARKETPLACE_TEXAS_ETPL_EXACT_FILES,
   isMarketplaceFunnelAnalyticsScope,
   isMarketplaceOnboardingActivationScope,
   isMarketplaceOnboardingWriterScope,
+  isMarketplaceOregonEtplScope,
   isMarketplacePublicSourceScope,
   isMarketplaceTexasEtplScope,
   marketplaceNextCoreCommands,
@@ -43,6 +45,13 @@ const texasEtplFiles = [
   'packages/training-marketplace-texas-etpl/src/index.mjs',
   'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
 ];
+const oregonEtplFiles = [
+  'docs/product/trainingos-oregon-etpl-source-adapter-v1.md',
+  'packages/training-marketplace-oregon-etpl/package.json',
+  'packages/training-marketplace-oregon-etpl/src/index.d.ts',
+  'packages/training-marketplace-oregon-etpl/src/index.mjs',
+  'tests/training-marketplace-oregon-etpl-source-adapter-v1.test.mjs',
+];
 const writerFiles = [
   'docs/product/trainingos-marketplace-onboarding-writer-v1.md',
   'packages/training-marketplace-onboarding-writer/package.json',
@@ -62,19 +71,25 @@ const sourceProfile = { sourcePath: 'packages/training-marketplace-public-source
 const funnelProfile = { sourcePath: 'packages/training-marketplace-funnel-analytics/src/index.mjs', declarationPath: 'packages/training-marketplace-funnel-analytics/src/index.d.ts', testPath: 'tests/training-marketplace-funnel-analytics-core-v1.test.mjs' };
 const activationProfile = { sourcePath: 'packages/training-marketplace-onboarding-activation/src/index.mjs', declarationPath: 'packages/training-marketplace-onboarding-activation/src/index.d.ts', testPath: 'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs' };
 const texasEtplProfile = { sourcePath: 'packages/training-marketplace-texas-etpl/src/index.mjs', declarationPath: 'packages/training-marketplace-texas-etpl/src/index.d.ts', testPath: 'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs' };
+const oregonEtplProfile = { sourcePath: 'packages/training-marketplace-oregon-etpl/src/index.mjs', declarationPath: 'packages/training-marketplace-oregon-etpl/src/index.d.ts', testPath: 'tests/training-marketplace-oregon-etpl-source-adapter-v1.test.mjs' };
 const writerProfile = { sourcePath: 'packages/training-marketplace-onboarding-writer/src/index.mjs', declarationPath: 'packages/training-marketplace-onboarding-writer/src/index.d.ts', testPath: 'tests/training-marketplace-onboarding-writer-v1.test.mjs', pythonPath: 'tests/test_trainingos_marketplace_onboarding_writer_v1.py', databaseScript: '/public/scripts/run-marketplace-onboarding-writer-database.sh' };
 
-test('four lightweight profiles retain exact five-file scopes', () => {
+test('five lightweight profiles retain exact five-file scopes', () => {
   assert.deepEqual([...MARKETPLACE_PUBLIC_SOURCE_EXACT_FILES].sort(), [...sourceFiles].sort());
   assert.deepEqual([...MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES].sort(), [...funnelFiles].sort());
   assert.deepEqual([...MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES].sort(), [...activationFiles].sort());
   assert.deepEqual([...MARKETPLACE_TEXAS_ETPL_EXACT_FILES].sort(), [...texasEtplFiles].sort());
+  assert.deepEqual([...MARKETPLACE_OREGON_ETPL_EXACT_FILES].sort(), [...oregonEtplFiles].sort());
   assert.equal(isMarketplacePublicSourceScope(sourceFiles), true);
   assert.equal(isMarketplaceFunnelAnalyticsScope(funnelFiles), true);
   assert.equal(isMarketplaceOnboardingActivationScope(activationFiles), true);
   assert.equal(isMarketplaceTexasEtplScope(texasEtplFiles), true);
+  assert.equal(isMarketplaceOregonEtplScope(oregonEtplFiles), true);
   assert.equal(isMarketplacePublicSourceScope([...sourceFiles, 'package.json']), false);
   assert.equal(isMarketplaceTexasEtplScope([...texasEtplFiles, 'apps/training-web/x.ts']), false);
+  assert.equal(isMarketplaceOregonEtplScope([...oregonEtplFiles, 'apps/training-web/x.ts']), false);
+  assert.equal(isMarketplaceOregonEtplScope(texasEtplFiles), false);
+  assert.equal(isMarketplaceTexasEtplScope(oregonEtplFiles), false);
 });
 
 test('onboarding writer profile owns exactly eight files and one fixed migration', () => {
@@ -91,6 +106,23 @@ test('lightweight profiles retain the same seven non-database gates', () => {
   assert.deepEqual(marketplaceNextCoreCommands(funnelProfile).map((item) => item.label), expected);
   assert.deepEqual(marketplaceNextCoreCommands(activationProfile).map((item) => item.label), expected);
   assert.deepEqual(marketplaceNextCoreCommands(texasEtplProfile).map((item) => item.label), expected);
+  assert.deepEqual(marketplaceNextCoreCommands(oregonEtplProfile).map((item) => item.label), expected);
+});
+
+test('Oregon profile locks exact scope, zero migrations and fourteen focused Node contracts', () => {
+  for (const marker of [
+    "suite: 'marketplace-oregon-etpl-source-adapter'",
+    'files: MARKETPLACE_OREGON_ETPL_EXACT_FILES',
+    'expectedChangedFileCount: 5',
+    'expectedMigrationCount: 368',
+    "migrationStart: 'none'",
+    "migrationEnd: 'none'",
+    'expectedNodeCount: 14',
+    'expectedPythonCount: 0',
+    "sourcePath: 'packages/training-marketplace-oregon-etpl/src/index.mjs'",
+    "declarationPath: 'packages/training-marketplace-oregon-etpl/src/index.d.ts'",
+    "testPath: 'tests/training-marketplace-oregon-etpl-source-adapter-v1.test.mjs'",
+  ]) assert.ok(profileText.includes(marker), marker);
 });
 
 test('onboarding writer runs static, database, typecheck, build and bundle gates', () => {
