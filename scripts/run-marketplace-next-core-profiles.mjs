@@ -48,6 +48,14 @@ export const MARKETPLACE_TEXAS_ETPL_EXACT_FILES = new Set([
   'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
 ]);
 
+export const MARKETPLACE_OREGON_ETPL_EXACT_FILES = new Set([
+  'docs/product/trainingos-oregon-etpl-source-adapter-v1.md',
+  'packages/training-marketplace-oregon-etpl/package.json',
+  'packages/training-marketplace-oregon-etpl/src/index.d.ts',
+  'packages/training-marketplace-oregon-etpl/src/index.mjs',
+  'tests/training-marketplace-oregon-etpl-source-adapter-v1.test.mjs',
+]);
+
 export const MARKETPLACE_ONBOARDING_WRITER_EXACT_FILES = new Set([
   'docs/product/trainingos-marketplace-onboarding-writer-v1.md',
   'packages/training-marketplace-onboarding-writer/package.json',
@@ -124,6 +132,19 @@ const PROFILES = Object.freeze([
     sourcePath: 'packages/training-marketplace-texas-etpl/src/index.mjs',
     declarationPath: 'packages/training-marketplace-texas-etpl/src/index.d.ts',
     testPath: 'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
+  }),
+  Object.freeze({
+    suite: 'marketplace-oregon-etpl-source-adapter',
+    files: MARKETPLACE_OREGON_ETPL_EXACT_FILES,
+    expectedChangedFileCount: 5,
+    expectedMigrationCount: 368,
+    migrationStart: 'none',
+    migrationEnd: 'none',
+    expectedNodeCount: 14,
+    expectedPythonCount: 0,
+    sourcePath: 'packages/training-marketplace-oregon-etpl/src/index.mjs',
+    declarationPath: 'packages/training-marketplace-oregon-etpl/src/index.d.ts',
+    testPath: 'tests/training-marketplace-oregon-etpl-source-adapter-v1.test.mjs',
   }),
   Object.freeze({
     suite: 'marketplace-onboarding-writer',
@@ -243,6 +264,11 @@ export function isMarketplaceOnboardingActivationScope(files) {
 
 export function isMarketplaceTexasEtplScope(files) {
   return isExactScope(files, MARKETPLACE_TEXAS_ETPL_EXACT_FILES)
+    && [...files].every((name) => !name.startsWith('supabase/migrations/'));
+}
+
+export function isMarketplaceOregonEtplScope(files) {
+  return isExactScope(files, MARKETPLACE_OREGON_ETPL_EXACT_FILES)
     && [...files].every((name) => !name.startsWith('supabase/migrations/'));
 }
 
