@@ -74,6 +74,35 @@ function parseBrowserSkipped(text) {
   return matches.length ? Number(matches.at(-1)[1]) : 0;
 }
 
+export function classifyBrowserAssertionFailure(text) {
+  const output = String(text);
+  if (/render five explicit unavailable owner regions|data-source-status=.unavailable.|toHaveCount\(5\)/i.test(output)) {
+    return 'unavailable-count';
+  }
+  if (/never turn unavailable evidence into numeric zero|hasText:\s*\/\^\\s\*0|unavailableSources/i.test(output)) {
+    return 'unavailable-zero';
+  }
+  if (/starts outside the viewport|ends outside the viewport|documentScrollWidth|keep the .* fixture horizontally bounded/i.test(output)) {
+    return 'horizontal-overflow';
+  }
+  if (/select the first occurrence explicitly|Expected string:.*第一节课|第一节课 · Unit 03 练习讲解/i.test(output)) {
+    return 'first-selection-detail';
+  }
+  if (/switch to the second occurrence and update the detail|Expected string:.*第二节课|第二节课 · Spring 调试/i.test(output)) {
+    return 'second-selection-detail';
+  }
+  if (/teacher-operations-hub__course-list button|toHaveCount\(2\)|Expected:\s*2/i.test(output)) {
+    return 'course-count';
+  }
+  if (/aria-current|is-selected/i.test(output)) {
+    return 'selected-state';
+  }
+  if (/teacher-operations-hub__course-detail|toHaveText/i.test(output)) {
+    return 'detail-text';
+  }
+  return 'unknown';
+}
+
 export function classifyBrowserFailure(text) {
   const output = String(text);
   if (/Process from config\.webServer was not able to start|Timed out waiting.*webServer|ERR_CONNECTION_REFUSED|ECONNREFUSED/i.test(output)) {
@@ -89,7 +118,7 @@ export function classifyBrowserFailure(text) {
     return 'compile-runtime';
   }
   if (/Error:\s*expect\(|Expected:|Received:|toBeVisible|toHaveCount|toHaveClass|toHaveText|Timeout.*locator/i.test(output)) {
-    return 'assertion';
+    return `assertion-${classifyBrowserAssertionFailure(output)}`;
   }
   return 'unknown';
 }
