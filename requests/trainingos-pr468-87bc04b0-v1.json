@@ -1,0 +1,13 @@
+{
+  "requestId": "agent-workspace-playwright-87bc04b0-merge-result-v1",
+  "validationProfile": "generic-owned",
+  "privateExactSha": "87bc04b053930ccb187a8006a1d442c280bbe279",
+  "expectedBaseSha": "99b0d3f4942541ede12aa6e2b61b810e7bc20266",
+  "expectedMainSha": "99b0d3f4942541ede12aa6e2b61b810e7bc20266",
+  "changedFiles": 5,
+  "migrationCount": 0,
+  "productFilesChanged": 0,
+  "browserMatrix": ["Desktop 1440", "Tablet 1024", "Mobile 390"],
+  "productionDeployment": false,
+  "productionDatabaseWrite": false
+}
