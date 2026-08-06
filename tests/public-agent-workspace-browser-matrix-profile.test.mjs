@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   AGENT_WORKSPACE_BROWSER_MATRIX_EXACT_FILES,
   WORKSPACE_IA_DENSITY_EXACT_FILES,
+  classifyBrowserFailure,
   isAgentWorkspaceBrowserMatrixScope,
   isWorkspaceIaDensityScope,
 } from '../scripts/run-workspace-ia-density-profile.mjs';
@@ -58,6 +59,17 @@ test('fixture-only environment is explicit and network live skips cannot count',
   assert.match(profileText, /browserPassed === 6 && browserSkipped === 0/);
   assert.match(profileText, /expectedNodeCount: 6/);
   assert.match(profileText, /expectedPythonCount: 0/);
+});
+
+test('browser failures are classified without publishing raw Playwright logs', () => {
+  assert.equal(classifyBrowserFailure('Process from config.webServer was not able to start'), 'web-server');
+  assert.equal(classifyBrowserFailure('GET /src/example 404 Failed to load resource'), 'fixture-route');
+  assert.equal(classifyBrowserFailure('browserType.launch: Executable does not exist'), 'browser-launch');
+  assert.equal(classifyBrowserFailure('Transform failed: Cannot find module x'), 'compile-runtime');
+  assert.equal(classifyBrowserFailure('Error: expect(locator).toBeVisible Expected: visible'), 'assertion');
+  assert.equal(classifyBrowserFailure('unrecognized private runner output'), 'unknown');
+  assert.match(profileText, /FAIL:\$\{labels\}@\$\{browserFailure\}/);
+  assert.doesNotMatch(profileText, /console\.log\(output\)|process\.stdout\.write\(output\)/);
 });
 
 test('browser profile still runs typecheck production build and bundle verification', () => {
