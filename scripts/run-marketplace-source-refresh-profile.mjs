@@ -12,7 +12,7 @@ export const MARKETPLACE_SOURCE_REFRESH_EXACT_FILES = new Set([
 ]);
 
 const CANONICAL_MIGRATION_COUNT = 368;
-const EXPECTED_NODE_COUNT = 12;
+const EXPECTED_NODE_COUNT = 13;
 const EXPECTED_PYTHON_COUNT = 0;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
