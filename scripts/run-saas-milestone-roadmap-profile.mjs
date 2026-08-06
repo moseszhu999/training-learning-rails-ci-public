@@ -14,8 +14,15 @@ export const SAAS_MILESTONE_ROADMAP_EXACT_FILES = new Set([
   'tests/test_trainingos_viral_marketplace_entry_v1.py',
 ]);
 
+export const MARKETPLACE_REAL_PILOT_EXACT_FILES = new Set([
+  'docs/operations/trainingos-marketplace-real-pilot-operations-pack-v1.md',
+  'docs/operations/trainingos-marketplace-pilot-operator-checklist-v1.md',
+  'tests/fixtures/trainingos_marketplace_real_pilot_evidence_v1.json',
+  'tests/test_trainingos_marketplace_real_pilot_operations_pack_v1.py',
+  'public/trainingos-marketplace-real-pilot-operator-console-v1.html',
+]);
+
 const EXPECTED_NODE_COUNT = 0;
-const EXPECTED_PYTHON_COUNT = 16;
 const EXPECTED_MIGRATION_COUNT = 368;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
@@ -68,6 +75,34 @@ export const saasMilestoneRoadmapCommands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+export const marketplaceRealPilotCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('python-contracts', 'python', [
+    '-m', 'unittest', '-v',
+    'tests.test_trainingos_marketplace_real_pilot_operations_pack_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npm', ['run', 'build']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
+const PROFILES = Object.freeze([
+  Object.freeze({
+    suite: 'saas-milestone-roadmap',
+    files: SAAS_MILESTONE_ROADMAP_EXACT_FILES,
+    expectedChangedFileCount: 8,
+    expectedPythonCount: 16,
+    commands: saasMilestoneRoadmapCommands,
+  }),
+  Object.freeze({
+    suite: 'marketplace-real-pilot-operations-pack',
+    files: MARKETPLACE_REAL_PILOT_EXACT_FILES,
+    expectedChangedFileCount: 5,
+    expectedPythonCount: 14,
+    commands: marketplaceRealPilotCommands,
+  }),
+]);
+
 function parsePython(text) {
   return [...String(text).matchAll(/Ran\s+(\d+)\s+tests?/g)]
     .reduce((sum, match) => sum + Number(match[1]), 0);
@@ -91,41 +126,60 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isSaasMilestoneRoadmapScope(files) {
+function isExactScope(files, expected) {
   const names = [...files];
-  return names.length === SAAS_MILESTONE_ROADMAP_EXACT_FILES.size
-    && names.every((name) => SAAS_MILESTONE_ROADMAP_EXACT_FILES.has(name))
-    && names.every((name) => !name.startsWith('supabase/migrations/'));
+  return names.length === expected.size
+    && names.every((name) => expected.has(name))
+    && names.every((name) => !name.startsWith('supabase/migrations/'))
+    && names.every((name) => !name.startsWith('packages/'))
+    && names.every((name) => !name.startsWith('apps/'));
 }
 
-function fixedInputContract(input, scope) {
+export function isSaasMilestoneRoadmapScope(files) {
+  return isExactScope(files, SAAS_MILESTONE_ROADMAP_EXACT_FILES);
+}
+
+export function isMarketplaceRealPilotScope(files) {
+  return isExactScope(files, MARKETPLACE_REAL_PILOT_EXACT_FILES);
+}
+
+function findProfile(files) {
+  return PROFILES.find((profile) => isExactScope(files, profile.files));
+}
+
+function fixedInputContract(input, scope, profile) {
   return Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
-    && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
+    && Number(input.expectedPythonCount) === profile.expectedPythonCount
     && String(process.env.EXPECTED_MIGRATION_COUNT) === String(EXPECTED_MIGRATION_COUNT)
-    && scope.expected_changed_file_count === '8'
+    && scope.expected_changed_file_count === String(profile.expectedChangedFileCount)
     && scope.migration_start === 'none'
     && scope.migration_end === 'none';
+}
+
+function failedContractResult(profile) {
+  return {
+    ok: false,
+    status: 'FAIL:fixed-input-contract',
+    failedLabels: Object.freeze(['fixed-input-contract']),
+    stepCount: profile.commands.length,
+    passedStepCount: 0,
+    nodeTests: 0,
+    nodePassed: 0,
+    nodeFailed: 0,
+    pythonTests: 0,
+    selectedSuite: profile.suite,
+  };
 }
 
 export async function maybeRunSaasMilestoneRoadmapProfile(input) {
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
-  if (!isSaasMilestoneRoadmapScope(files)) return null;
+  const profile = findProfile(files);
+  if (!profile) return null;
 
-  if (!fixedInputContract(input, scope)) {
+  if (!fixedInputContract(input, scope, profile)) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
-    return {
-      ok: false,
-      status: 'FAIL:fixed-input-contract',
-      failedLabels: Object.freeze(['fixed-input-contract']),
-      stepCount: saasMilestoneRoadmapCommands.length,
-      passedStepCount: 0,
-      nodeTests: 0,
-      nodePassed: 0,
-      nodeFailed: 0,
-      pythonTests: 0,
-      selectedSuite: 'saas-milestone-roadmap',
-    };
+    return failedContractResult(profile);
   }
 
   await mkdir(input.runnerTemp, { recursive: true });
@@ -134,7 +188,7 @@ export async function maybeRunSaasMilestoneRoadmapProfile(input) {
   const failedLabels = [];
 
   try {
-    for (const [index, item] of saasMilestoneRoadmapCommands.entries()) {
+    for (const [index, item] of profile.commands.entries()) {
       const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const result = spawnSync(item.executable, item.args, {
@@ -153,19 +207,19 @@ export async function maybeRunSaasMilestoneRoadmapProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const countsPassed = pythonTests === EXPECTED_PYTHON_COUNT;
-  const ok = passedStepCount === saasMilestoneRoadmapCommands.length && countsPassed;
+  const countsPassed = pythonTests === profile.expectedPythonCount;
+  const ok = passedStepCount === profile.commands.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
     ok,
     status: ok ? 'PASS' : `FAIL:${failure}`,
     failedLabels: Object.freeze([...failedLabels]),
-    stepCount: saasMilestoneRoadmapCommands.length,
+    stepCount: profile.commands.length,
     passedStepCount,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests,
-    selectedSuite: 'saas-milestone-roadmap',
+    selectedSuite: profile.suite,
   };
 }
