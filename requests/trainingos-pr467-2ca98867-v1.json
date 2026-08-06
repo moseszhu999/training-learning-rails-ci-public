@@ -1,0 +1,12 @@
+{
+  "requestId": "workspace-ia-density-2ca98867-merge-result-v1",
+  "validationProfile": "generic-owned",
+  "privateExactSha": "2ca98867d76f0d6cb24e5ec6b25e17b1debeab06",
+  "expectedBaseSha": "99b0d3f4942541ede12aa6e2b61b810e7bc20266",
+  "expectedMainSha": "99b0d3f4942541ede12aa6e2b61b810e7bc20266",
+  "changedFiles": 5,
+  "migrationCount": 0,
+  "focusedPythonExpected": 5,
+  "productionDeployment": false,
+  "productionDatabaseWrite": false
+}
