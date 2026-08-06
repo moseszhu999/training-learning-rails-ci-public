@@ -158,15 +158,38 @@ start_with_marker(){
   fi
 }
 
-wait_for_health_timeout(){
-  local workdir="$1" label="$2" config attempt
+configure_health_timeout(){
+  local workdir="$1" label="$2" config
   config="$workdir/supabase/config.toml"
-  for attempt in $(seq 1 1800); do
-    if [[ -f "$config" ]] && grep -Eq '^health_timeout = "5m"$' "$config"; then return 0; fi
-    sleep 0.1
-  done
-  CURRENT_STAGE="${label}-health-timeout-not-ready"
-  return 1
+  CURRENT_STAGE="${label}-health-timeout-config"
+  [[ -f "$config" ]]
+  python - "$config" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding='utf-8').splitlines()
+replacement = 'health_timeout = "5m"'
+result = []
+replaced = False
+for line in lines:
+    if line.startswith('health_timeout = '):
+        if not replaced:
+            result.append(replacement)
+            replaced = True
+        continue
+    result.append(line)
+if not replaced:
+    insert_at = 0
+    for index, line in enumerate(result):
+        if line.startswith('project_id = '):
+            insert_at = index + 1
+            break
+    result.insert(insert_at, replacement)
+path.write_text('\n'.join(result) + '\n', encoding='utf-8')
+PY
+  grep -Eq '^health_timeout = "5m"$' "$config"
+  [[ "$(grep -Ec '^health_timeout = ' "$config")" == "1" ]]
 }
 
 initialize_empty_workdir(){
@@ -175,7 +198,7 @@ initialize_empty_workdir(){
   sealed "${label}-init" supabase --workdir "$workdir" init --force
   rm -rf "$workdir/supabase/migrations"
   mkdir -p "$workdir/supabase/migrations"
-  wait_for_health_timeout "$workdir" "$label"
+  configure_health_timeout "$workdir" "$label"
 }
 
 copy_migrations(){
