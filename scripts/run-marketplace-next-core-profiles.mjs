@@ -27,6 +27,14 @@ export const MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES = new Set([
   'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
 ]);
 
+export const MARKETPLACE_TEXAS_ETPL_EXACT_FILES = new Set([
+  'docs/product/trainingos-texas-etpl-source-adapter-v1.md',
+  'packages/training-marketplace-texas-etpl/package.json',
+  'packages/training-marketplace-texas-etpl/src/index.d.ts',
+  'packages/training-marketplace-texas-etpl/src/index.mjs',
+  'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
+]);
+
 const EXPECTED_MIGRATION_COUNT = 368;
 
 const PROFILES = Object.freeze([
@@ -53,6 +61,14 @@ const PROFILES = Object.freeze([
     sourcePath: 'packages/training-marketplace-onboarding-activation/src/index.mjs',
     declarationPath: 'packages/training-marketplace-onboarding-activation/src/index.d.ts',
     testPath: 'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
+  }),
+  Object.freeze({
+    suite: 'marketplace-texas-etpl-source-adapter',
+    files: MARKETPLACE_TEXAS_ETPL_EXACT_FILES,
+    expectedNodeCount: 9,
+    sourcePath: 'packages/training-marketplace-texas-etpl/src/index.mjs',
+    declarationPath: 'packages/training-marketplace-texas-etpl/src/index.d.ts',
+    testPath: 'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
   }),
 ]);
 
@@ -127,6 +143,10 @@ export function isMarketplaceFunnelAnalyticsScope(files) {
 
 export function isMarketplaceOnboardingActivationScope(files) {
   return isExactScope(files, MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES);
+}
+
+export function isMarketplaceTexasEtplScope(files) {
+  return isExactScope(files, MARKETPLACE_TEXAS_ETPL_EXACT_FILES);
 }
 
 function findProfile(files) {
