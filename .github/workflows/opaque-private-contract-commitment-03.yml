@@ -1,0 +1,26 @@
+name: Opaque private exact-head commitment 03
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/opaque-private-contract-commitment-03.yml
+      - carrier/opaque-contract-20260806-03/**
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python carrier/opaque-contract-20260806-03/test_commitment.py -v
+      - name: Public-safe scope
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only '${{ github.event.pull_request.base.sha }}'...HEAD)"
+          allowed='^(\.github/workflows/opaque-private-contract-commitment-03\.yml|carrier/opaque-contract-20260806-03/(commitment\.json|test_commitment\.py))$'
+          if printf '%s\n' "$changed" | grep -Ev "$allowed" | grep -q .; then exit 1; fi
