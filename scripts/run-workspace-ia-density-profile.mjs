@@ -74,6 +74,26 @@ function parseBrowserSkipped(text) {
   return matches.length ? Number(matches.at(-1)[1]) : 0;
 }
 
+export function classifyBrowserFailure(text) {
+  const output = String(text);
+  if (/Process from config\.webServer was not able to start|Timed out waiting.*webServer|ERR_CONNECTION_REFUSED|ECONNREFUSED/i.test(output)) {
+    return 'web-server';
+  }
+  if (/404\b|net::ERR_ABORTED|Failed to load resource|Cannot GET \/src\//i.test(output)) {
+    return 'fixture-route';
+  }
+  if (/browserType\.launch|Executable doesn't exist|Failed to launch browser|Target page, context or browser has been closed/i.test(output)) {
+    return 'browser-launch';
+  }
+  if (/Transform failed|Cannot find module|Module not found|SyntaxError|ReferenceError|TypeError:/i.test(output)) {
+    return 'compile-runtime';
+  }
+  if (/Error:\s*expect\(|Expected:|Received:|toBeVisible|toHaveCount|toHaveClass|toHaveText|Timeout.*locator/i.test(output)) {
+    return 'assertion';
+  }
+  return 'unknown';
+}
+
 function git(repoPath, args) {
   const result = spawnSync('git', ['-C', repoPath, ...args], {
     encoding: 'utf8',
@@ -163,6 +183,7 @@ export async function maybeRunWorkspaceIaDensityProfile(input) {
   let pythonTests = 0;
   let browserPassed = 0;
   let browserSkipped = 0;
+  let browserFailure = 'none';
   const failedLabels = [];
 
   try {
@@ -181,6 +202,7 @@ export async function maybeRunWorkspaceIaDensityProfile(input) {
       if (item.kind === 'browser') {
         browserPassed += parseBrowserPassed(output);
         browserSkipped += parseBrowserSkipped(output);
+        if (result.status !== 0) browserFailure = classifyBrowserFailure(output);
       }
       if (result.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
@@ -193,9 +215,13 @@ export async function maybeRunWorkspaceIaDensityProfile(input) {
     ? browserPassed === 6 && browserSkipped === 0
     : pythonTests === 5;
   const ok = passedStepCount === suite.commands.length && countsPassed;
-  const status = ok
-    ? 'PASS'
-    : `FAIL:${failedLabels.length ? failedLabels.join(',') : 'count-contract'}`;
+  let status = 'PASS';
+  if (!ok) {
+    const labels = failedLabels.length ? failedLabels.join(',') : 'count-contract';
+    status = suite.name === 'agent-workspace-browser-matrix' && browserFailure !== 'none'
+      ? `FAIL:${labels}@${browserFailure}`
+      : `FAIL:${labels}`;
+  }
 
   return {
     ok,
