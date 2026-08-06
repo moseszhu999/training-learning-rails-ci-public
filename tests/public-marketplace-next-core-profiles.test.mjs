@@ -5,9 +5,11 @@ import {
   MARKETPLACE_FUNNEL_ANALYTICS_EXACT_FILES,
   MARKETPLACE_ONBOARDING_ACTIVATION_EXACT_FILES,
   MARKETPLACE_PUBLIC_SOURCE_EXACT_FILES,
+  MARKETPLACE_TEXAS_ETPL_EXACT_FILES,
   isMarketplaceFunnelAnalyticsScope,
   isMarketplaceOnboardingActivationScope,
   isMarketplacePublicSourceScope,
+  isMarketplaceTexasEtplScope,
   marketplaceNextCoreCommands,
 } from '../scripts/run-marketplace-next-core-profiles.mjs';
 
@@ -35,6 +37,14 @@ const activationFiles = [
   'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
 ];
 
+const texasEtplFiles = [
+  'docs/product/trainingos-texas-etpl-source-adapter-v1.md',
+  'packages/training-marketplace-texas-etpl/package.json',
+  'packages/training-marketplace-texas-etpl/src/index.d.ts',
+  'packages/training-marketplace-texas-etpl/src/index.mjs',
+  'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
+];
+
 const profileText = readFileSync(new URL('../scripts/run-marketplace-next-core-profiles.mjs', import.meta.url), 'utf8');
 const routerText = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
 
@@ -57,6 +67,13 @@ const activationProfile = {
   sourcePath: 'packages/training-marketplace-onboarding-activation/src/index.mjs',
   declarationPath: 'packages/training-marketplace-onboarding-activation/src/index.d.ts',
   testPath: 'tests/training-marketplace-onboarding-activation-intent-v1.test.mjs',
+};
+
+const texasEtplProfile = {
+  suite: 'marketplace-texas-etpl-source-adapter',
+  sourcePath: 'packages/training-marketplace-texas-etpl/src/index.mjs',
+  declarationPath: 'packages/training-marketplace-texas-etpl/src/index.d.ts',
+  testPath: 'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
 };
 
 test('public-source profile owns exactly five bounded files', () => {
@@ -83,7 +100,15 @@ test('onboarding activation profile owns exactly five bounded files', () => {
   assert.equal(isMarketplaceOnboardingActivationScope(funnelFiles), false);
 });
 
-test('all three profiles run the same seven fixed non-production gates', () => {
+test('Texas ETPL profile owns exactly five fixed source files', () => {
+  assert.deepEqual([...MARKETPLACE_TEXAS_ETPL_EXACT_FILES].sort(), [...texasEtplFiles].sort());
+  assert.equal(isMarketplaceTexasEtplScope(texasEtplFiles), true);
+  assert.equal(isMarketplaceTexasEtplScope(texasEtplFiles.slice(1)), false);
+  assert.equal(isMarketplaceTexasEtplScope([...texasEtplFiles, 'apps/training-web/x.ts']), false);
+  assert.equal(isMarketplaceTexasEtplScope(sourceFiles), false);
+});
+
+test('all four profiles run the same seven fixed non-production gates', () => {
   const expected = [
     'install',
     'package-syntax',
@@ -96,17 +121,20 @@ test('all three profiles run the same seven fixed non-production gates', () => {
   assert.deepEqual(marketplaceNextCoreCommands(sourceProfile).map((item) => item.label), expected);
   assert.deepEqual(marketplaceNextCoreCommands(funnelProfile).map((item) => item.label), expected);
   assert.deepEqual(marketplaceNextCoreCommands(activationProfile).map((item) => item.label), expected);
+  assert.deepEqual(marketplaceNextCoreCommands(texasEtplProfile).map((item) => item.label), expected);
 });
 
 test('fixed contracts lock migration count and distinct node counts', () => {
   for (const marker of [
     'const EXPECTED_MIGRATION_COUNT = 368',
+    'expectedNodeCount: 9',
     'expectedNodeCount: 10',
     'expectedNodeCount: 11',
     'expectedNodeCount: 12',
     "suite: 'marketplace-public-source-observation-core'",
     "suite: 'marketplace-funnel-analytics-core'",
     "suite: 'marketplace-onboarding-activation-intent'",
+    "suite: 'marketplace-texas-etpl-source-adapter'",
     "scope.expected_changed_file_count === '5'",
     "scope.migration_start === 'none'",
     "scope.migration_end === 'none'",
