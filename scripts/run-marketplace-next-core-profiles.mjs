@@ -158,7 +158,7 @@ const PROFILES = Object.freeze([
     sourcePath: 'packages/training-marketplace-onboarding-writer/src/index.mjs',
     declarationPath: 'packages/training-marketplace-onboarding-writer/src/index.d.ts',
     testPath: 'tests/training-marketplace-onboarding-writer-v1.test.mjs',
-    pythonPath: 'tests/test_trainingos_marketplace-onboarding-writer-v1.py',
+    pythonPath: 'tests/test_trainingos_marketplace_onboarding_writer_v1.py',
     databaseScript: path.join(publicRoot, 'scripts/run-marketplace-onboarding-writer-database.sh'),
   }),
 ]);
