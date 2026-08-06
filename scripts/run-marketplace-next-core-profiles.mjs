@@ -48,6 +48,14 @@ export const MARKETPLACE_TEXAS_ETPL_EXACT_FILES = new Set([
   'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
 ]);
 
+export const MARKETPLACE_OREGON_ETPL_EXACT_FILES = new Set([
+  'docs/product/trainingos-oregon-etpl-source-adapter-v1.md',
+  'packages/training-marketplace-oregon-etpl/package.json',
+  'packages/training-marketplace-oregon-etpl/src/index.d.ts',
+  'packages/training-marketplace-oregon-etpl/src/index.mjs',
+  'tests/training-marketplace-oregon-etpl-source-adapter-v1.test.mjs',
+]);
+
 export const MARKETPLACE_ONBOARDING_WRITER_EXACT_FILES = new Set([
   'docs/product/trainingos-marketplace-onboarding-writer-v1.md',
   'packages/training-marketplace-onboarding-writer/package.json',
@@ -126,6 +134,19 @@ const PROFILES = Object.freeze([
     testPath: 'tests/training-marketplace-texas-etpl-source-adapter-v1.test.mjs',
   }),
   Object.freeze({
+    suite: 'marketplace-oregon-etpl-source-adapter',
+    files: MARKETPLACE_OREGON_ETPL_EXACT_FILES,
+    expectedChangedFileCount: 5,
+    expectedMigrationCount: 368,
+    migrationStart: 'none',
+    migrationEnd: 'none',
+    expectedNodeCount: 14,
+    expectedPythonCount: 0,
+    sourcePath: 'packages/training-marketplace-oregon-etpl/src/index.mjs',
+    declarationPath: 'packages/training-marketplace-oregon-etpl/src/index.d.ts',
+    testPath: 'tests/training-marketplace-oregon-etpl-source-adapter-v1.test.mjs',
+  }),
+  Object.freeze({
     suite: 'marketplace-onboarding-writer',
     files: MARKETPLACE_ONBOARDING_WRITER_EXACT_FILES,
     expectedChangedFileCount: 8,
@@ -137,7 +158,7 @@ const PROFILES = Object.freeze([
     sourcePath: 'packages/training-marketplace-onboarding-writer/src/index.mjs',
     declarationPath: 'packages/training-marketplace-onboarding-writer/src/index.d.ts',
     testPath: 'tests/training-marketplace-onboarding-writer-v1.test.mjs',
-    pythonPath: 'tests/test_trainingos_marketplace_onboarding_writer_v1.py',
+    pythonPath: 'tests/test_trainingos_marketplace-onboarding-writer-v1.py',
     databaseScript: path.join(publicRoot, 'scripts/run-marketplace-onboarding-writer-database.sh'),
   }),
 ]);
@@ -243,6 +264,11 @@ export function isMarketplaceOnboardingActivationScope(files) {
 
 export function isMarketplaceTexasEtplScope(files) {
   return isExactScope(files, MARKETPLACE_TEXAS_ETPL_EXACT_FILES)
+    && [...files].every((name) => !name.startsWith('supabase/migrations/'));
+}
+
+export function isMarketplaceOregonEtplScope(files) {
+  return isExactScope(files, MARKETPLACE_OREGON_ETPL_EXACT_FILES)
     && [...files].every((name) => !name.startsWith('supabase/migrations/'));
 }
 
