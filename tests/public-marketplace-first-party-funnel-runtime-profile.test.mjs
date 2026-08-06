@@ -52,7 +52,7 @@ test('fixed profile locks exact counts and no database replay', () => {
     'expectedMigrationCount: 368',
     "migrationStart: 'none'",
     "migrationEnd: 'none'",
-    'expectedNodeCount: 14',
+    'expectedNodeCount: 15',
     'expectedPythonCount: 0',
     'training-marketplace-first-party-funnel-runtime-v1.test.mjs',
   ]) assert.ok(profileText.includes(marker), marker);
