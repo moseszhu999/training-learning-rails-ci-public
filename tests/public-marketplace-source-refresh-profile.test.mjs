@@ -41,7 +41,7 @@ test('source refresh profile locks seven non-database gates', () => {
 test('source refresh profile locks migration and test counts', () => {
   for (const marker of [
     'const CANONICAL_MIGRATION_COUNT = 368',
-    'const EXPECTED_NODE_COUNT = 12',
+    'const EXPECTED_NODE_COUNT = 13',
     'const EXPECTED_PYTHON_COUNT = 0',
     "scope.expected_changed_file_count === '5'",
     "scope.migration_start === 'none'",
