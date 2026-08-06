@@ -1,0 +1,137 @@
+name: Oregon ETPL native live probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/oregon-etpl-native-live-probe.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oregon-etpl-native-live-probe-82c31094
+  cancel-in-progress: false
+
+jobs:
+  native-live-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate read-only private credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PRIVATE_TOKEN" ]]
+
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: 82c3109441ebab41f86d616dfdf29887ee013914
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Run exact bounded official API probe
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {
+            OregonEtplSource,
+            fetchOregonEtplPublicObjects,
+          } from './packages/training-marketplace-oregon-etpl/src/index.mjs';
+
+          const observedAt = new Date().toISOString();
+          try {
+            const batch = await fetchOregonEtplPublicObjects({
+              observedAt,
+              limit: 5,
+              offset: 0,
+              timeoutMs: 15_000,
+            });
+
+            assert.equal(OregonEtplSource.datasetId, 'dhnh-39zs');
+            assert.equal(new URL(OregonEtplSource.dataUrl).origin, 'https://data.oregon.gov');
+            assert.equal(new URL(OregonEtplSource.dataUrl).pathname, '/resource/dhnh-39zs.json');
+            assert.equal(batch.officialApiFetchPerformed, true);
+            assert.ok(batch.itemCount > 0 && batch.itemCount <= 5);
+            assert.equal(batch.itemCount, batch.items.length);
+            assert.ok(batch.items.every(({ observation }) =>
+              typeof observation.publicPayload?.displayName === 'string'
+              && observation.publicPayload.displayName.length > 0
+              && typeof observation.publicPayload?.headline === 'string'
+              && observation.publicPayload.headline.length > 0));
+            assert.ok(batch.items.some(({ observation }) =>
+              Boolean(observation.publicPayload?.cipCode || observation.publicPayload?.cipName)));
+            assert.equal(batch.authenticationBypassed, false);
+            assert.equal(batch.privateContactHarvested, false);
+            assert.equal(batch.streetAddressImported, false);
+            assert.equal(batch.geolocationImported, false);
+            assert.equal(batch.automaticOutreachPerformed, false);
+            assert.equal(batch.verifiedParticipation, false);
+            assert.equal(batch.formalBusinessWritePerformed, false);
+
+            const ageDays = Math.floor((Date.parse(batch.observedAt) - Date.parse(batch.sourceUpdatedAt)) / 86_400_000);
+            assert.ok(Number.isInteger(ageDays) && ageDays >= 0);
+            const active = batch.items.filter(({ publicObjectInput }) => publicObjectInput.sourceRef?.state === 'active').length;
+            const stale = batch.items.filter(({ publicObjectInput }) => publicObjectInput.sourceRef?.state === 'stale').length;
+            const withdrawn = batch.items.filter(({ publicObjectInput }) => publicObjectInput.sourceRef?.state === 'withdrawn').length;
+
+            console.log(JSON.stringify({
+              status: 'PASS',
+              exactHead: '82c3109441ebab41f86d616dfdf29887ee013914',
+              publisher: 'Oregon Higher Education Coordinating Commission through Oregon Open Data',
+              datasetId: OregonEtplSource.datasetId,
+              endpointHost: new URL(OregonEtplSource.dataUrl).hostname,
+              endpointPath: new URL(OregonEtplSource.dataUrl).pathname,
+              requestedLimit: batch.limit,
+              requestedOffset: batch.offset,
+              returnedRows: batch.itemCount,
+              providerProgramFieldsPresent: true,
+              cipFieldPresent: true,
+              sourceUpdatedAt: batch.sourceUpdatedAt,
+              observedAt: batch.observedAt,
+              sourceAgeDays: ageDays,
+              states: { active, stale, withdrawn },
+              deliveryMode: 'unknown',
+              privacy: {
+                authenticationBypassed: batch.authenticationBypassed,
+                privateContactHarvested: batch.privateContactHarvested,
+                streetAddressImported: batch.streetAddressImported,
+                geolocationImported: batch.geolocationImported,
+                automaticOutreachPerformed: batch.automaticOutreachPerformed,
+                verifiedParticipation: batch.verifiedParticipation,
+                formalBusinessWritePerformed: batch.formalBusinessWritePerformed,
+              },
+            }));
+          } catch (error) {
+            const diagnostic = [error?.code, error?.cause?.code, error?.name, error?.message]
+              .filter(Boolean).join(' ');
+            const blockedDns = /ENOTFOUND|EAI_AGAIN|getaddrinfo|Temporary failure in name resolution/i.test(diagnostic);
+            console.error(JSON.stringify({
+              status: blockedDns ? 'BLOCKED_DNS' : 'FAIL',
+              exactHead: '82c3109441ebab41f86d616dfdf29887ee013914',
+              datasetId: OregonEtplSource.datasetId,
+              endpointHost: new URL(OregonEtplSource.dataUrl).hostname,
+              errorClass: blockedDns ? 'DNS_RESOLUTION' : String(error?.name || 'Error'),
+            }));
+            process.exitCode = 1;
+          }
+          NODE
+
+      - name: Remove private checkout
+        if: always()
+        shell: bash
+        run: rm -rf private-repo
