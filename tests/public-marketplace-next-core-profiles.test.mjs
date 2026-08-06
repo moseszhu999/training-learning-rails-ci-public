@@ -163,6 +163,19 @@ test('database controller reuses the proven exact-binary empty-database architec
   assert.doesNotMatch(databaseText, /db reset --local/);
 });
 
+test('database controller configures health timeout deterministically after init', () => {
+  for (const marker of [
+    'configure_health_timeout(){',
+    'replacement = \'health_timeout = "5m"\'',
+    'configure_health_timeout "$workdir" "$label"',
+    'grep -Eq \'^health_timeout = "5m"$\'',
+    'grep -Ec \'^health_timeout = \'',
+  ]) assert.ok(databaseText.includes(marker), marker);
+  assert.doesNotMatch(databaseText, /wait_for_health_timeout/);
+  assert.doesNotMatch(databaseText, /seq 1 1800/);
+  assert.ok(databaseText.indexOf('sealed "${label}-init"') < databaseText.indexOf('configure_health_timeout "$workdir" "$label"'));
+});
+
 test('controllers contain no deployment or production credential path', () => {
   assert.doesNotMatch(profileText, /deploy-site|netlify deploy|vercel deploy|--prod/i);
   assert.doesNotMatch(databaseText, /deploy-site|netlify deploy|vercel deploy|--prod/i);
