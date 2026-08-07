@@ -3,33 +3,32 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import {
-  maybeRunLiveClassroomTencentReconciliationDbProfile,
-} from './run-live-classroom-tencent-reconciliation-db-profile.mjs';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER = path.join(
+export const LIVE_CLASSROOM_TENCENT_RECONCILIATION_DB_RUNNER = path.join(
   publicRoot,
-  'scripts/run-live-classroom-tencent-binding-db-profile.sh',
+  'scripts/run-live-classroom-tencent-reconciliation-db-profile.sh',
 );
 
-export const LIVE_CLASSROOM_TENCENT_BINDING_DB_EXACT_FILES = new Set([
-  'docs/architecture/trainingos-live-classroom-tencent-binding-v1.md',
+export const LIVE_CLASSROOM_TENCENT_RECONCILIATION_DB_EXACT_FILES = new Set([
+  'docs/architecture/trainingos-live-classroom-tencent-reconciliation-v1.md',
+  'lib/trainingos-agent-gateway/tencent-live-classroom-api.mjs',
   'lib/trainingos-agent-gateway/tencent-live-classroom-binding.mjs',
-  'netlify/functions/trainingos-live-classroom-tencent-authorize.mjs',
-  'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-binding.test.mjs',
-  'supabase/migrations/20260807220000_trainingos_live_classroom_tencent_binding_v1.sql',
-  'tests/sql/trainingos_live_classroom_tencent_binding_v1_e2e.sql',
-  'tests/test_trainingos_live_classroom_tencent_binding_v1.py',
+  'lib/trainingos-agent-gateway/tencent-live-classroom-reconciliation.mjs',
+  'netlify/functions/trainingos-live-classroom-tencent-reconcile.mjs',
+  'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-reconciliation.test.mjs',
+  'supabase/migrations/20260807221000_trainingos_live_classroom_tencent_reconciliation_v1.sql',
+  'tests/sql/trainingos_live_classroom_tencent_reconciliation_v1_e2e.sql',
+  'tests/test_trainingos_live_classroom_tencent_reconciliation_v1.py',
 ]);
 
-const EXPECTED_NODE_COUNT = 8;
-const EXPECTED_PYTHON_COUNT = 14;
-const EXPECTED_CHANGED_FILE_COUNT = 7;
-const EXPECTED_MIGRATION_COUNT = 370;
-const MIGRATION_START = '20260807220000';
-const MIGRATION_END = '20260807220000';
-const DATABASE_SAFE_STATUS_BASENAME = 'trainingos-live-classroom-tencent-binding-db-safe-status.txt';
+const EXPECTED_NODE_COUNT = 59;
+const EXPECTED_PYTHON_COUNT = 55;
+const EXPECTED_CHANGED_FILE_COUNT = 9;
+const EXPECTED_MIGRATION_COUNT = 371;
+const MIGRATION_START = '20260807221000';
+const MIGRATION_END = '20260807221000';
+const DATABASE_SAFE_STATUS_BASENAME = 'trainingos-live-classroom-tencent-reconciliation-db-safe-status.txt';
 
 const SAFE_DATABASE_STAGES = new Set([
   'inputs',
@@ -61,17 +60,16 @@ const SAFE_DATABASE_STAGES = new Set([
 ]);
 
 const SAFE_E2E_REASONS = new Set([
-  'TRAININGOS_TENCENT_BINDING_E2E_CONTROL_CURSOR_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_ACL_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_CLAIM_REPLAY_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_CONCURRENT_CLAIM_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_ROOM_CONFLICT_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_STUDENT_READ_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_TERMINAL_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_FAILURE_STATE_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_FAILED_RECLAIM_FAILED',
-  'TRAININGOS_TENCENT_BINDING_E2E_UNRELATED_READ_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_CONTROL_CURSOR_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_ACL_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_CLAIM_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_CONTEXT_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_BAD_DIGEST_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_RECONCILE_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_ROOM_CONFLICT_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_STUDENT_READ_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_FAILED_CONTEXT_FAILED',
+  'TRAININGOS_TENCENT_RECONCILIATION_E2E_FAILED_TERMINAL_FAILED',
 ]);
 
 const command = (label, executable, args, kind = 'status', env = {}) => Object.freeze({
@@ -82,20 +80,30 @@ const command = (label, executable, args, kind = 'status', env = {}) => Object.f
   env: Object.freeze(env),
 });
 
-export const liveClassroomTencentBindingDbCommands = Object.freeze([
+export const liveClassroomTencentReconciliationDbCommands = Object.freeze([
   command('install', 'npm', ['ci']),
+  command('api-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-api.mjs']),
   command('binding-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-binding.mjs']),
-  command('endpoint-syntax', 'node', ['--check', 'netlify/functions/trainingos-live-classroom-tencent-authorize.mjs']),
+  command('provisioning-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-provisioning.mjs']),
+  command('reconciliation-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-reconciliation.mjs']),
+  command('endpoint-syntax', 'node', ['--check', 'netlify/functions/trainingos-live-classroom-tencent-reconcile.mjs']),
   command('focused-node-contracts', 'node', [
     '--test',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-server-authorization.test.mjs',
     'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-binding.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-provisioning.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-provisioning-user-recovery.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-reconciliation.test.mjs',
   ], 'node'),
   command('focused-python-contracts', 'python', [
     '-m', 'unittest', '-v',
+    'tests.test_trainingos_live_classroom_tencent_server_authorization_v1',
     'tests.test_trainingos_live_classroom_tencent_binding_v1',
+    'tests.test_trainingos_live_classroom_tencent_provisioning_v1',
+    'tests.test_trainingos_live_classroom_tencent_reconciliation_v1',
   ], 'python'),
-  command('database-replay', 'bash', [LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER], 'database', {
-    TRAININGOS_TENCENT_BINDING_DB_PROFILE: '1',
+  command('database-replay', 'bash', [LIVE_CLASSROOM_TENCENT_RECONCILIATION_DB_RUNNER], 'database', {
+    TRAININGOS_TENCENT_RECONCILIATION_DB_PROFILE: '1',
   }),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
@@ -121,12 +129,12 @@ function parsePython(text) {
 function sanitizeStageAndReason(stage, reason = '') {
   if (!SAFE_DATABASE_STAGES.has(stage)) return 'unknown';
   if (!reason) return stage;
-  const match = /^(TRAININGOS_TENCENT_BINDING_E2E_[A-Z0-9_]+):([A-Z0-9]{5})$/.exec(reason);
+  const match = /^(TRAININGOS_TENCENT_RECONCILIATION_E2E_[A-Z0-9_]+):([A-Z0-9]{5})$/.exec(reason);
   if (!match || !SAFE_E2E_REASONS.has(match[1])) return stage;
   return `${stage}:${reason}`;
 }
 
-export function sanitizeLiveClassroomTencentBindingDatabaseStatusFile(text) {
+export function sanitizeLiveClassroomTencentReconciliationDatabaseStatusFile(text) {
   const values = Object.fromEntries(
     String(text).split(/\r?\n/).filter(Boolean).map((line) => {
       const index = line.indexOf('=');
@@ -137,9 +145,9 @@ export function sanitizeLiveClassroomTencentBindingDatabaseStatusFile(text) {
   return sanitizeStageAndReason(values.stage || '', values.reason || '');
 }
 
-export function sanitizeLiveClassroomTencentBindingDatabaseFailure(text) {
+export function sanitizeLiveClassroomTencentReconciliationDatabaseFailure(text) {
   const matches = [...String(text).matchAll(
-    /LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=([a-z0-9-]+)(?: reason=(TRAININGOS_TENCENT_BINDING_E2E_[A-Z0-9_]+):([A-Z0-9]{5}))?/g,
+    /LIVE_CLASSROOM_TENCENT_RECONCILIATION_DB status=FAIL stage=([a-z0-9-]+)(?: reason=(TRAININGOS_TENCENT_RECONCILIATION_E2E_[A-Z0-9_]+):([A-Z0-9]{5}))?/g,
   )];
   const match = matches.at(-1);
   if (!match) return 'unknown';
@@ -166,10 +174,10 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isLiveClassroomTencentBindingDbScope(files) {
+export function isLiveClassroomTencentReconciliationDbScope(files) {
   const names = [...files];
-  return names.length === LIVE_CLASSROOM_TENCENT_BINDING_DB_EXACT_FILES.size
-    && names.every((name) => LIVE_CLASSROOM_TENCENT_BINDING_DB_EXACT_FILES.has(name));
+  return names.length === LIVE_CLASSROOM_TENCENT_RECONCILIATION_DB_EXACT_FILES.size
+    && names.every((name) => LIVE_CLASSROOM_TENCENT_RECONCILIATION_DB_EXACT_FILES.has(name));
 }
 
 function failedResult(reason) {
@@ -177,23 +185,20 @@ function failedResult(reason) {
     ok: false,
     status: `FAIL:${reason}`,
     failedLabels: Object.freeze([reason]),
-    stepCount: liveClassroomTencentBindingDbCommands.length,
+    stepCount: liveClassroomTencentReconciliationDbCommands.length,
     passedStepCount: 0,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'live-classroom-tencent-binding-db',
+    selectedSuite: 'live-classroom-tencent-reconciliation-db',
   };
 }
 
-export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
-  const reconciliation = await maybeRunLiveClassroomTencentReconciliationDbProfile(input);
-  if (reconciliation) return reconciliation;
-
+export async function maybeRunLiveClassroomTencentReconciliationDbProfile(input) {
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
-  if (!isLiveClassroomTencentBindingDbScope(files)) return null;
+  if (!isLiveClassroomTencentReconciliationDbScope(files)) return null;
 
   const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
@@ -216,7 +221,7 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
   const failedLabels = [];
 
   try {
-    for (const [index, item] of liveClassroomTencentBindingDbCommands.entries()) {
+    for (const [index, item] of liveClassroomTencentReconciliationDbCommands.entries()) {
       const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       if (item.kind === 'database') await rm(databaseSafeStatusPath, { force: true });
@@ -226,7 +231,7 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
           ...process.env,
           ...item.env,
           ...(item.kind === 'database'
-            ? { TRAININGOS_TENCENT_BINDING_DB_SAFE_STATUS_FILE: databaseSafeStatusPath }
+            ? { TRAININGOS_TENCENT_RECONCILIATION_DB_SAFE_STATUS_FILE: databaseSafeStatusPath }
             : {}),
         },
         stdio: ['ignore', descriptor, descriptor],
@@ -244,9 +249,9 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
           databaseFailure = 'complete';
         } else {
           const safeStatus = await readFile(databaseSafeStatusPath, 'utf8').catch(() => '');
-          const fromStatusFile = sanitizeLiveClassroomTencentBindingDatabaseStatusFile(safeStatus);
+          const fromStatusFile = sanitizeLiveClassroomTencentReconciliationDatabaseStatusFile(safeStatus);
           databaseFailure = fromStatusFile === 'unknown'
-            ? sanitizeLiveClassroomTencentBindingDatabaseFailure(output)
+            ? sanitizeLiveClassroomTencentReconciliationDatabaseFailure(output)
             : fromStatusFile;
         }
       }
@@ -261,19 +266,19 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
   const countsPassed = nodeTests === EXPECTED_NODE_COUNT
     && nodePassed === EXPECTED_NODE_COUNT
     && pythonTests === EXPECTED_PYTHON_COUNT;
-  const ok = passedStepCount === liveClassroomTencentBindingDbCommands.length && countsPassed;
+  const ok = passedStepCount === liveClassroomTencentReconciliationDbCommands.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   const diagnosticSuffix = failedLabels.includes('database-replay') ? `@${databaseFailure}` : '';
   return {
     ok,
     status: ok ? 'PASS' : `FAIL:${failure}${diagnosticSuffix}`,
     failedLabels: Object.freeze([...failedLabels]),
-    stepCount: liveClassroomTencentBindingDbCommands.length,
+    stepCount: liveClassroomTencentReconciliationDbCommands.length,
     passedStepCount,
     nodeTests,
     nodePassed,
     nodeFailed: nodeTests - nodePassed,
     pythonTests,
-    selectedSuite: 'live-classroom-tencent-binding-db',
+    selectedSuite: 'live-classroom-tencent-reconciliation-db',
   };
 }
