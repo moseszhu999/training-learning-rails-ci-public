@@ -22,6 +22,7 @@ export * from './run-interaction-web-profile.mjs';
 export * from './run-marketplace-discovery-core-profile.mjs';
 export * from './run-marketplace-participation-profile.mjs';
 export * from './run-saas-milestone-roadmap-profile.mjs';
+export * from './run-live-classroom-tencent-server-authorization-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,6 +50,7 @@ import { maybeRunInteractionWebProfile } from './run-interaction-web-profile.mjs
 import { maybeRunMarketplaceDiscoveryCoreProfile } from './run-marketplace-discovery-core-profile.mjs';
 import { maybeRunMarketplaceParticipationProfile } from './run-marketplace-participation-profile.mjs';
 import { maybeRunSaasMilestoneRoadmapProfile } from './run-saas-milestone-roadmap-profile.mjs';
+import { maybeRunLiveClassroomTencentServerAuthorizationProfile } from './run-live-classroom-tencent-server-authorization-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -135,6 +137,9 @@ export async function runProfile(input) {
 
   const marketplaceDiscoveryCore = await maybeRunMarketplaceDiscoveryCoreProfile(input);
   if (marketplaceDiscoveryCore) return marketplaceDiscoveryCore;
+
+  const liveClassroomTencentServerAuthorization = await maybeRunLiveClassroomTencentServerAuthorizationProfile(input);
+  if (liveClassroomTencentServerAuthorization) return liveClassroomTencentServerAuthorization;
 
   const saasMilestoneRoadmap = await maybeRunSaasMilestoneRoadmapProfile(input);
   if (saasMilestoneRoadmap) return saasMilestoneRoadmap;
