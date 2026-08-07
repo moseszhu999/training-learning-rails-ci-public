@@ -2,21 +2,22 @@ import { closeSync, openSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { maybeRunLiveClassroomTencentProvisioningProfile } from './run-live-classroom-tencent-provisioning-profile.mjs';
 
-export const LIVE_CLASSROOM_TENCENT_SERVER_AUTH_EXACT_FILES = new Set([
-  'docs/architecture/trainingos-live-classroom-tencent-server-authorization-v1.md',
+export const LIVE_CLASSROOM_TENCENT_PROVISIONING_EXACT_FILES = new Set([
+  'docs/architecture/trainingos-live-classroom-tencent-provisioning-v1.md',
   'lib/trainingos-agent-gateway/tencent-live-classroom-api.mjs',
   'lib/trainingos-agent-gateway/tencent-live-classroom-authorization.mjs',
-  'netlify/functions/trainingos-live-classroom-tencent-authorize.mjs',
-  'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-server-authorization.test.mjs',
-  'tests/test_trainingos_live_classroom_tencent_server_authorization_v1.py',
+  'lib/trainingos-agent-gateway/tencent-live-classroom-provisioning.mjs',
+  'netlify/functions/trainingos-live-classroom-tencent-provision.mjs',
+  'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-provisioning-user-recovery.test.mjs',
+  'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-provisioning.test.mjs',
+  'tests/test_trainingos_live_classroom_tencent_provisioning_v1.py',
 ]);
 
-const EXPECTED_NODE_COUNT = 14;
-const EXPECTED_PYTHON_COUNT = 11;
-const EXPECTED_CHANGED_FILE_COUNT = 6;
-const EXPECTED_MIGRATION_COUNT = 368;
+const EXPECTED_NODE_COUNT = 44;
+const EXPECTED_PYTHON_COUNT = 39;
+const EXPECTED_CHANGED_FILE_COUNT = 8;
+const EXPECTED_MIGRATION_COUNT = 370;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -25,18 +26,24 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
-export const liveClassroomTencentServerAuthorizationCommands = Object.freeze([
+export const liveClassroomTencentProvisioningCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('api-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-api.mjs']),
   command('authorization-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-authorization.mjs']),
-  command('endpoint-syntax', 'node', ['--check', 'netlify/functions/trainingos-live-classroom-tencent-authorize.mjs']),
+  command('provisioning-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-provisioning.mjs']),
+  command('endpoint-syntax', 'node', ['--check', 'netlify/functions/trainingos-live-classroom-tencent-provision.mjs']),
   command('focused-node-contracts', 'node', [
     '--test',
     'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-server-authorization.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-binding.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-provisioning.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-provisioning-user-recovery.test.mjs',
   ], 'node'),
   command('focused-python-contracts', 'python', [
     '-m', 'unittest', '-v',
     'tests.test_trainingos_live_classroom_tencent_server_authorization_v1',
+    'tests.test_trainingos_live_classroom_tencent_binding_v1',
+    'tests.test_trainingos_live_classroom_tencent_provisioning_v1',
   ], 'python'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
@@ -79,43 +86,40 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isLiveClassroomTencentServerAuthorizationScope(files) {
+export function isLiveClassroomTencentProvisioningScope(files) {
   const names = [...files];
-  return names.length === LIVE_CLASSROOM_TENCENT_SERVER_AUTH_EXACT_FILES.size
-    && names.every((name) => LIVE_CLASSROOM_TENCENT_SERVER_AUTH_EXACT_FILES.has(name))
+  return names.length === LIVE_CLASSROOM_TENCENT_PROVISIONING_EXACT_FILES.size
+    && names.every((name) => LIVE_CLASSROOM_TENCENT_PROVISIONING_EXACT_FILES.has(name))
     && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
-function failedResult(reason, stepCount = liveClassroomTencentServerAuthorizationCommands.length) {
+function failedResult(reason) {
   return {
     ok: false,
     status: `FAIL:${reason}`,
     failedLabels: Object.freeze([reason]),
-    stepCount,
+    stepCount: liveClassroomTencentProvisioningCommands.length,
     passedStepCount: 0,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'live-classroom-tencent-server-authorization',
+    selectedSuite: 'live-classroom-tencent-provisioning',
   };
 }
 
-export async function maybeRunLiveClassroomTencentServerAuthorizationProfile(input) {
-  const provisioning = await maybeRunLiveClassroomTencentProvisioningProfile(input);
-  if (provisioning) return provisioning;
-
+export async function maybeRunLiveClassroomTencentProvisioningProfile(input) {
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
-  if (!isLiveClassroomTencentServerAuthorizationScope(files)) return null;
+  if (!isLiveClassroomTencentProvisioningScope(files)) return null;
 
-  const inputMatches = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
+  const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
     && String(process.env.EXPECTED_MIGRATION_COUNT) === String(EXPECTED_MIGRATION_COUNT)
     && scope.expected_changed_file_count === String(EXPECTED_CHANGED_FILE_COUNT)
     && scope.migration_start === 'none'
     && scope.migration_end === 'none';
-  if (!inputMatches) {
+  if (!fixedInputs) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
     return failedResult('fixed-input-contract');
   }
@@ -128,7 +132,7 @@ export async function maybeRunLiveClassroomTencentServerAuthorizationProfile(inp
   const failedLabels = [];
 
   try {
-    for (const [index, item] of liveClassroomTencentServerAuthorizationCommands.entries()) {
+    for (const [index, item] of liveClassroomTencentProvisioningCommands.entries()) {
       const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const result = spawnSync(item.executable, item.args, {
@@ -154,18 +158,18 @@ export async function maybeRunLiveClassroomTencentServerAuthorizationProfile(inp
   const countsPassed = nodeTests === EXPECTED_NODE_COUNT
     && nodePassed === EXPECTED_NODE_COUNT
     && pythonTests === EXPECTED_PYTHON_COUNT;
-  const ok = passedStepCount === liveClassroomTencentServerAuthorizationCommands.length && countsPassed;
+  const ok = passedStepCount === liveClassroomTencentProvisioningCommands.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
     ok,
     status: ok ? 'PASS' : `FAIL:${failure}`,
     failedLabels: Object.freeze([...failedLabels]),
-    stepCount: liveClassroomTencentServerAuthorizationCommands.length,
+    stepCount: liveClassroomTencentProvisioningCommands.length,
     passedStepCount,
     nodeTests,
     nodePassed,
     nodeFailed: nodeTests - nodePassed,
     pythonTests,
-    selectedSuite: 'live-classroom-tencent-server-authorization',
+    selectedSuite: 'live-classroom-tencent-provisioning',
   };
 }
