@@ -27,12 +27,13 @@ test('course-video selector remains independent from live classroom', () => {
   }
 });
 
-test('live classroom fixed profile runs bounded validation only', () => {
+test('live classroom fixed profile runs bounded deterministic validation only', () => {
   assert.deepEqual(liveClassroomStackCommands.map((item) => item.label), [
     'install',
     'focused-python-contracts',
     'typecheck',
-    'production-build',
+    'direct-vite-production-build',
+    'postbuild-copy',
     'bundle-verification',
   ]);
   const python = liveClassroomStackCommands.find((item) => item.label === 'focused-python-contracts');
@@ -45,6 +46,29 @@ test('live classroom fixed profile runs bounded validation only', () => {
     'tests.test_trainingos_live_classroom_postclass_evidence_v1',
     'tests.test_trainingos_live_classroom_runtime_matrix_v1',
   ]);
+
+  const build = liveClassroomStackCommands.find((item) => item.label === 'direct-vite-production-build');
+  assert.deepEqual(build, {
+    label: 'direct-vite-production-build',
+    executable: 'npx',
+    args: ['vite', 'build', '--config', 'vite.config.ts'],
+    kind: 'status',
+  });
+  const postbuild = liveClassroomStackCommands.find((item) => item.label === 'postbuild-copy');
+  assert.deepEqual(postbuild, {
+    label: 'postbuild-copy',
+    executable: 'node',
+    args: ['scripts/copy-trainingos-marketplace-web.mjs'],
+    kind: 'status',
+  });
+});
+
+test('profile bypasses inherited npm prebuild but keeps actual Vite and bundle verification', () => {
+  const text = JSON.stringify(liveClassroomStackCommands);
+  assert.equal(text.includes('npm","args":["run","build"'), false);
+  assert.equal(text.includes('"vite","build","--config","vite.config.ts"'), true);
+  assert.equal(text.includes('copy-trainingos-marketplace-web.mjs'), true);
+  assert.equal(text.includes('verify:build'), true);
 });
 
 test('profile has no deployment, RTC, network, database, or arbitrary shell execution', () => {
