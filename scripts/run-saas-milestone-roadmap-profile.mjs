@@ -55,6 +55,13 @@ export const LIVE_CLASSROOM_STACK_EXACT_FILES = new Set([
   'tests/trainingos-ui-e2e/live-classroom-runtime-matrix.spec.ts',
 ]);
 
+export const LIVE_CLASSROOM_RUNTIME_WIRING_EXACT_FILES = new Set([
+  'apps/training-web/src/components/TrainingOsLiveClassroomSurface.tsx',
+  'docs/architecture/trainingos-live-classroom-runtime-wiring-v1.md',
+  'docs/architecture/trainingos-live-classroom-tencent-provider-v1.md',
+  'tests/test_trainingos_live_classroom_runtime_wiring_v1.py',
+]);
+
 const EXPECTED_MIGRATION_COUNT = 368;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
@@ -149,6 +156,18 @@ export const liveClassroomStackCommands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+export const liveClassroomRuntimeWiringCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('focused-python-contracts', 'python', [
+    '-m', 'unittest', '-v',
+    'tests.test_trainingos_live_classroom_runtime_wiring_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 const PROFILES = Object.freeze([
   Object.freeze({
     suite: 'saas-milestone-roadmap',
@@ -181,6 +200,14 @@ const PROFILES = Object.freeze([
     expectedNodeCount: 0,
     expectedPythonCount: 40,
     commands: liveClassroomStackCommands,
+  }),
+  Object.freeze({
+    suite: 'live-classroom-runtime-wiring',
+    files: LIVE_CLASSROOM_RUNTIME_WIRING_EXACT_FILES,
+    expectedChangedFileCount: 4,
+    expectedNodeCount: 0,
+    expectedPythonCount: 8,
+    commands: liveClassroomRuntimeWiringCommands,
   }),
 ]);
 
@@ -238,6 +265,10 @@ export function isCourseVideoSharedMediaScope(files) {
 
 export function isLiveClassroomStackScope(files) {
   return isExactScope(files, LIVE_CLASSROOM_STACK_EXACT_FILES);
+}
+
+export function isLiveClassroomRuntimeWiringScope(files) {
+  return isExactScope(files, LIVE_CLASSROOM_RUNTIME_WIRING_EXACT_FILES);
 }
 
 function findProfile(files) {
