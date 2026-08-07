@@ -5,6 +5,7 @@ import {
   LIVE_CLASSROOM_TENCENT_BINDING_DB_EXACT_FILES,
   isLiveClassroomTencentBindingDbScope,
   liveClassroomTencentBindingDbCommands,
+  sanitizeLiveClassroomTencentBindingDatabaseFailure,
 } from '../scripts/run-live-classroom-tencent-binding-db-profile.mjs';
 
 test('F3 database selector accepts exactly seven owned files', () => {
@@ -42,6 +43,7 @@ test('F3 database profile hard-requires runtime contracts and database replay', 
     'tests.test_trainingos_live_classroom_tencent_binding_v1',
   ]);
   const database = liveClassroomTencentBindingDbCommands.find((item) => item.label === 'database-replay');
+  assert.equal(database?.kind, 'database');
   assert.deepEqual(database?.args, ['scripts/run-live-classroom-tencent-binding-db-profile.sh']);
 });
 
@@ -62,6 +64,28 @@ test('F3 runner fixes migration count/range and runs fresh plus upgrade replay',
   ]) {
     assert.equal(runner.includes(token), true, token);
   }
+});
+
+test('F3 database diagnostics expose only allowlisted stage and reason', () => {
+  assert.equal(
+    sanitizeLiveClassroomTencentBindingDatabaseFailure(
+      'LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=fresh-bootstrap',
+    ),
+    'fresh-bootstrap',
+  );
+  assert.equal(
+    sanitizeLiveClassroomTencentBindingDatabaseFailure(
+      'LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=fresh-sql-e2e reason=TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED:P0001',
+    ),
+    'fresh-sql-e2e:TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED:P0001',
+  );
+  assert.equal(
+    sanitizeLiveClassroomTencentBindingDatabaseFailure(
+      'LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=private-path reason=SECRET_TEXT:P0001',
+    ),
+    'unknown',
+  );
+  assert.equal(sanitizeLiveClassroomTencentBindingDatabaseFailure('raw unclassified output'), 'unknown');
 });
 
 test('F3 runner never targets hosted or production Supabase', () => {
