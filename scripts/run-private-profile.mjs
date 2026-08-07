@@ -24,6 +24,7 @@ export * from './run-marketplace-participation-profile.mjs';
 export * from './run-saas-milestone-roadmap-profile.mjs';
 export * from './run-live-classroom-tencent-server-authorization-profile.mjs';
 export * from './run-live-classroom-tencent-binding-db-profile.mjs';
+export * from './run-live-classroom-tencent-readonly-probe-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -53,6 +54,7 @@ import { maybeRunMarketplaceParticipationProfile } from './run-marketplace-parti
 import { maybeRunSaasMilestoneRoadmapProfile } from './run-saas-milestone-roadmap-profile.mjs';
 import { maybeRunLiveClassroomTencentServerAuthorizationProfile } from './run-live-classroom-tencent-server-authorization-profile.mjs';
 import { maybeRunLiveClassroomTencentBindingDbProfile } from './run-live-classroom-tencent-binding-db-profile.mjs';
+import { maybeRunLiveClassroomTencentReadonlyProbeProfile } from './run-live-classroom-tencent-readonly-probe-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -139,6 +141,9 @@ export async function runProfile(input) {
 
   const marketplaceDiscoveryCore = await maybeRunMarketplaceDiscoveryCoreProfile(input);
   if (marketplaceDiscoveryCore) return marketplaceDiscoveryCore;
+
+  const liveClassroomTencentReadonlyProbe = await maybeRunLiveClassroomTencentReadonlyProbeProfile(input);
+  if (liveClassroomTencentReadonlyProbe) return liveClassroomTencentReadonlyProbe;
 
   const liveClassroomTencentBindingDb = await maybeRunLiveClassroomTencentBindingDbProfile(input);
   if (liveClassroomTencentBindingDb) return liveClassroomTencentBindingDb;
