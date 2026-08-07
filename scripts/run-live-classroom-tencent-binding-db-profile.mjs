@@ -19,6 +19,7 @@ const EXPECTED_CHANGED_FILE_COUNT = 7;
 const EXPECTED_MIGRATION_COUNT = 369;
 const MIGRATION_START = '20260807220000';
 const MIGRATION_END = '20260807220000';
+const DATABASE_SAFE_STATUS_BASENAME = 'trainingos-live-classroom-tencent-binding-db-safe-status.txt';
 
 const SAFE_DATABASE_STAGES = new Set([
   'inputs',
@@ -107,16 +108,32 @@ function parsePython(text) {
     .reduce((sum, match) => sum + Number(match[1]), 0);
 }
 
+function sanitizeStageAndReason(stage, reason = '') {
+  if (!SAFE_DATABASE_STAGES.has(stage)) return 'unknown';
+  if (!reason) return stage;
+  const match = /^(TRAININGOS_TENCENT_BINDING_E2E_[A-Z0-9_]+):([A-Z0-9]{5})$/.exec(reason);
+  if (!match || !SAFE_E2E_REASONS.has(match[1])) return stage;
+  return `${stage}:${reason}`;
+}
+
+export function sanitizeLiveClassroomTencentBindingDatabaseStatusFile(text) {
+  const values = Object.fromEntries(
+    String(text).split(/\r?\n/).filter(Boolean).map((line) => {
+      const index = line.indexOf('=');
+      if (index <= 0) return ['', ''];
+      return [line.slice(0, index), line.slice(index + 1)];
+    }).filter(([key]) => key === 'stage' || key === 'reason'),
+  );
+  return sanitizeStageAndReason(values.stage || '', values.reason || '');
+}
+
 export function sanitizeLiveClassroomTencentBindingDatabaseFailure(text) {
   const matches = [...String(text).matchAll(
     /LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=([a-z0-9-]+)(?: reason=(TRAININGOS_TENCENT_BINDING_E2E_[A-Z0-9_]+):([A-Z0-9]{5}))?/g,
   )];
   const match = matches.at(-1);
   if (!match) return 'unknown';
-  const stage = SAFE_DATABASE_STAGES.has(match[1]) ? match[1] : 'unknown';
-  const reason = match[2]?.split(':')[0];
-  if (stage === 'unknown' || !reason || !SAFE_E2E_REASONS.has(reason)) return stage;
-  return `${stage}:${match[2]}`;
+  return sanitizeStageAndReason(match[1], match[2] || '');
 }
 
 async function exactChangedFiles(input) {
@@ -177,6 +194,7 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
   }
 
   await mkdir(input.runnerTemp, { recursive: true });
+  const databaseSafeStatusPath = path.join(input.runnerTemp, DATABASE_SAFE_STATUS_BASENAME);
   let passedStepCount = 0;
   let nodeTests = 0;
   let nodePassed = 0;
@@ -188,9 +206,16 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
     for (const [index, item] of liveClassroomTencentBindingDbCommands.entries()) {
       const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
+      if (item.kind === 'database') await rm(databaseSafeStatusPath, { force: true });
       const result = spawnSync(item.executable, item.args, {
         cwd: input.privateRepoPath,
-        env: { ...process.env, ...item.env },
+        env: {
+          ...process.env,
+          ...item.env,
+          ...(item.kind === 'database'
+            ? { TRAININGOS_TENCENT_BINDING_DB_SAFE_STATUS_FILE: databaseSafeStatusPath }
+            : {}),
+        },
         stdio: ['ignore', descriptor, descriptor],
         shell: false,
       });
@@ -202,15 +227,22 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
       }
       if (item.kind === 'python') pythonTests += parsePython(output);
       if (item.kind === 'database') {
-        databaseFailure = result.status === 0
-          ? 'complete'
-          : sanitizeLiveClassroomTencentBindingDatabaseFailure(output);
+        if (result.status === 0) {
+          databaseFailure = 'complete';
+        } else {
+          const safeStatus = await readFile(databaseSafeStatusPath, 'utf8').catch(() => '');
+          const fromStatusFile = sanitizeLiveClassroomTencentBindingDatabaseStatusFile(safeStatus);
+          databaseFailure = fromStatusFile === 'unknown'
+            ? sanitizeLiveClassroomTencentBindingDatabaseFailure(output)
+            : fromStatusFile;
+        }
       }
       if (result.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
     }
   } finally {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
+    await rm(databaseSafeStatusPath, { force: true });
   }
 
   const countsPassed = nodeTests === EXPECTED_NODE_COUNT
