@@ -22,7 +22,15 @@ export const MARKETPLACE_REAL_PILOT_EXACT_FILES = new Set([
   'public/trainingos-marketplace-real-pilot-operator-console-v1.html',
 ]);
 
-const EXPECTED_NODE_COUNT = 0;
+export const COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES = new Set([
+  'docs/architecture/trainingos-course-video-shared-media-adapter-v1.md',
+  'packages/training-course-video-shared-media-adapter/package.json',
+  'packages/training-course-video-shared-media-adapter/src/index.d.ts',
+  'packages/training-course-video-shared-media-adapter/src/index.mjs',
+  'packages/training-course-video-shared-media-adapter/test/course-video-adapter.test.mjs',
+  'tests/test_trainingos_course_video_shared_media_adapter_v1.py',
+]);
+
 const EXPECTED_MIGRATION_COUNT = 368;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
@@ -86,11 +94,27 @@ export const marketplaceRealPilotCommands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+export const courseVideoSharedMediaCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('package-syntax', 'node', ['--check', 'packages/training-course-video-shared-media-adapter/src/index.mjs']),
+  command('focused-node-contracts', 'node', ['--test', 'packages/training-course-video-shared-media-adapter/test/course-video-adapter.test.mjs'], 'node'),
+  command('focused-python-contracts', 'python', ['tests/test_trainingos_course_video_shared_media_adapter_v1.py', '-v'], 'python'),
+  command('declaration-typecheck', 'npx', [
+    'tsc', '--noEmit', '--strict', '--skipLibCheck', 'false',
+    '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2022',
+    'packages/training-course-video-shared-media-adapter/src/index.d.ts',
+  ]),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npm', ['run', 'build']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 const PROFILES = Object.freeze([
   Object.freeze({
     suite: 'saas-milestone-roadmap',
     files: SAAS_MILESTONE_ROADMAP_EXACT_FILES,
     expectedChangedFileCount: 8,
+    expectedNodeCount: 0,
     expectedPythonCount: 16,
     commands: saasMilestoneRoadmapCommands,
   }),
@@ -98,10 +122,29 @@ const PROFILES = Object.freeze([
     suite: 'marketplace-real-pilot-operations-pack',
     files: MARKETPLACE_REAL_PILOT_EXACT_FILES,
     expectedChangedFileCount: 5,
+    expectedNodeCount: 0,
     expectedPythonCount: 14,
     commands: marketplaceRealPilotCommands,
   }),
+  Object.freeze({
+    suite: 'course-video-shared-media-adapter',
+    files: COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES,
+    expectedChangedFileCount: 6,
+    expectedNodeCount: 12,
+    expectedPythonCount: 9,
+    commands: courseVideoSharedMediaCommands,
+  }),
 ]);
+
+function parseNode(text) {
+  return [...String(text).matchAll(/^# tests\s+(\d+)$/gm)]
+    .reduce((sum, match) => sum + Number(match[1]), 0);
+}
+
+function parseNodePassed(text) {
+  return [...String(text).matchAll(/^# pass\s+(\d+)$/gm)]
+    .reduce((sum, match) => sum + Number(match[1]), 0);
+}
 
 function parsePython(text) {
   return [...String(text).matchAll(/Ran\s+(\d+)\s+tests?/g)]
@@ -130,9 +173,7 @@ function isExactScope(files, expected) {
   const names = [...files];
   return names.length === expected.size
     && names.every((name) => expected.has(name))
-    && names.every((name) => !name.startsWith('supabase/migrations/'))
-    && names.every((name) => !name.startsWith('packages/'))
-    && names.every((name) => !name.startsWith('apps/'));
+    && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
 export function isSaasMilestoneRoadmapScope(files) {
@@ -143,12 +184,16 @@ export function isMarketplaceRealPilotScope(files) {
   return isExactScope(files, MARKETPLACE_REAL_PILOT_EXACT_FILES);
 }
 
+export function isCourseVideoSharedMediaScope(files) {
+  return isExactScope(files, COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES);
+}
+
 function findProfile(files) {
   return PROFILES.find((profile) => isExactScope(files, profile.files));
 }
 
 function fixedInputContract(input, scope, profile) {
-  return Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
+  return Number(input.expectedNodeCount) === profile.expectedNodeCount
     && Number(input.expectedPythonCount) === profile.expectedPythonCount
     && String(process.env.EXPECTED_MIGRATION_COUNT) === String(EXPECTED_MIGRATION_COUNT)
     && scope.expected_changed_file_count === String(profile.expectedChangedFileCount)
@@ -184,6 +229,8 @@ export async function maybeRunSaasMilestoneRoadmapProfile(input) {
 
   await mkdir(input.runnerTemp, { recursive: true });
   let passedStepCount = 0;
+  let nodeTests = 0;
+  let nodePassed = 0;
   let pythonTests = 0;
   const failedLabels = [];
 
@@ -199,6 +246,10 @@ export async function maybeRunSaasMilestoneRoadmapProfile(input) {
       });
       closeSync(descriptor);
       const output = await readFile(logPath, 'utf8');
+      if (item.kind === 'node') {
+        nodeTests += parseNode(output);
+        nodePassed += parseNodePassed(output);
+      }
       if (item.kind === 'python') pythonTests += parsePython(output);
       if (result.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
@@ -207,7 +258,9 @@ export async function maybeRunSaasMilestoneRoadmapProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const countsPassed = pythonTests === profile.expectedPythonCount;
+  const countsPassed = nodeTests === profile.expectedNodeCount
+    && nodePassed === profile.expectedNodeCount
+    && pythonTests === profile.expectedPythonCount;
   const ok = passedStepCount === profile.commands.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
@@ -216,9 +269,9 @@ export async function maybeRunSaasMilestoneRoadmapProfile(input) {
     failedLabels: Object.freeze([...failedLabels]),
     stepCount: profile.commands.length,
     passedStepCount,
-    nodeTests: 0,
-    nodePassed: 0,
-    nodeFailed: 0,
+    nodeTests,
+    nodePassed,
+    nodeFailed: nodeTests - nodePassed,
     pythonTests,
     selectedSuite: profile.suite,
   };
