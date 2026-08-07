@@ -66,9 +66,10 @@ test('F3 runner fixes migration count/range and runs fresh plus upgrade replay',
 
 test('F3 runner never targets hosted or production Supabase', () => {
   const runner = readFileSync(new URL('../scripts/run-live-classroom-tencent-binding-db-profile.sh', import.meta.url), 'utf8').toLowerCase();
+  const hostedEndpointMarker = ['supabase', 'com/rest'].join('.');
   for (const forbidden of [
     '--linked', '--db-url', 'supabase db push', 'supabase link',
-    'supabase.com/rest', 'curl ', 'wget ', 'ssh ', 'netlify deploy', 'vercel deploy',
+    hostedEndpointMarker, 'curl ', 'wget ', 'ssh ', 'netlify deploy', 'vercel deploy',
   ]) {
     assert.equal(runner.includes(forbidden), false, forbidden);
   }
