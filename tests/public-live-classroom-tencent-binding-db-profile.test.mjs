@@ -66,6 +66,19 @@ test('F3 runner fixes migration count/range and runs fresh plus upgrade replay',
   }
 });
 
+test('F3 sealed runner emits bounded stage after redirected command failure', () => {
+  const runner = readFileSync(new URL('../scripts/run-live-classroom-tencent-binding-db-profile.sh', import.meta.url), 'utf8');
+  const start = runner.indexOf('sealed(){');
+  const end = runner.indexOf('\n}\n\nmanifest_count', start);
+  assert.ok(start >= 0 && end > start);
+  const sealed = runner.slice(start, end);
+  assert.ok(sealed.includes('if "$@" >"$log" 2>&1; then'));
+  assert.ok(sealed.includes('code=$?'));
+  assert.ok(sealed.includes('LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=$CURRENT_STAGE'));
+  assert.ok(sealed.indexOf('>"$log" 2>&1') < sealed.indexOf('status=FAIL stage=$CURRENT_STAGE'));
+  assert.ok(sealed.includes('return "$code"'));
+});
+
 test('F3 database diagnostics expose only allowlisted stage and reason', () => {
   assert.equal(
     sanitizeLiveClassroomTencentBindingDatabaseFailure(
