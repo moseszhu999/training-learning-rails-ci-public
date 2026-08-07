@@ -144,7 +144,8 @@ export const liveClassroomStackCommands = Object.freeze([
     'tests.test_trainingos_live_classroom_runtime_matrix_v1',
   ], 'python'),
   command('typecheck', 'npm', ['run', 'typecheck']),
-  command('production-build', 'npm', ['run', 'build']),
+  command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
