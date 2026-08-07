@@ -3,13 +3,34 @@ set -Eeuo pipefail
 umask 077
 
 CURRENT_STAGE="inputs"
-on_error(){ echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=$CURRENT_STAGE"; }
+safe_status_file="${TRAININGOS_TENCENT_BINDING_DB_SAFE_STATUS_FILE:-}"
+
+write_status(){
+  local stage="$1" reason="${2:-}"
+  [[ -n "${RUNNER_TEMP:-}" && -n "$safe_status_file" ]] || return 0
+  [[ "$safe_status_file" == "$RUNNER_TEMP/"* ]] || return 0
+  {
+    printf 'stage=%s\n' "$stage"
+    [[ -z "$reason" ]] || printf 'reason=%s\n' "$reason"
+  } >"$safe_status_file"
+  chmod 600 "$safe_status_file"
+}
+
+on_error(){
+  write_status "$CURRENT_STAGE"
+  echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=$CURRENT_STAGE"
+}
 trap on_error ERR
 
-required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT RUNNER_TEMP)
+required=(PRIVATE_REPO_PATH PRIVATE_EXACT_SHA EXPECTED_MIGRATION_COUNT RUNNER_TEMP TRAININGOS_TENCENT_BINDING_DB_SAFE_STATUS_FILE)
 for name in "${required[@]}"; do
-  [[ -n "${!name:-}" ]] || { echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=inputs"; exit 2; }
+  [[ -n "${!name:-}" ]] || {
+    write_status inputs
+    echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=inputs"
+    exit 2
+  }
 done
+write_status inputs
 
 canonical_migration_count=369
 base_migration_count=368
@@ -17,7 +38,11 @@ migration_file=20260807220000_trainingos_live_classroom_tencent_binding_v1.sql
 
 CURRENT_STAGE="scope-contract"
 scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
-[[ -f "$scope_file" ]] || { echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=scope-contract"; exit 2; }
+[[ -f "$scope_file" ]] || {
+  write_status scope-contract
+  echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=scope-contract"
+  exit 2
+}
 read_scope(){ awk -F= -v wanted="$1" '$1 == wanted { print substr($0,index($0,"=")+1); exit }' "$scope_file"; }
 expected_base_sha="$(read_scope expected_base_sha)"
 [[ "$PRIVATE_EXACT_SHA" =~ ^[0-9a-f]{40}$ && "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]]
@@ -54,6 +79,7 @@ sealed(){
     return 0
   else
     code=$?
+    write_status "$CURRENT_STAGE"
     echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=$CURRENT_STAGE"
     return "$code"
   fi
@@ -105,6 +131,7 @@ run_e2e(){
   set -e
   if [[ "$code" -ne 0 ]]; then
     reason="$(sanitize_e2e_reason "$log_file")"
+    write_status "${label}-sql-e2e" "$reason"
     if [[ -n "$reason" ]]; then
       echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=${label}-sql-e2e reason=$reason"
     else
@@ -166,4 +193,5 @@ CURRENT_STAGE="upgrade-stop"
 sealed upgrade-stop supabase --workdir "$upgrade" stop --no-backup
 
 CURRENT_STAGE="complete"
+write_status complete
 echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=PASS canonical_migrations=$canonical_migration_count fresh=PASS second_replay=PASS upgrade=PASS sql_e2e=PASS zero_residue=PASS cleanup=PASS"

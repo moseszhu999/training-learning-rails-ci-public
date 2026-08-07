@@ -6,6 +6,7 @@ import {
   isLiveClassroomTencentBindingDbScope,
   liveClassroomTencentBindingDbCommands,
   sanitizeLiveClassroomTencentBindingDatabaseFailure,
+  sanitizeLiveClassroomTencentBindingDatabaseStatusFile,
 } from '../scripts/run-live-classroom-tencent-binding-db-profile.mjs';
 
 test('F3 database selector accepts exactly seven owned files', () => {
@@ -66,20 +67,39 @@ test('F3 runner fixes migration count/range and runs fresh plus upgrade replay',
   }
 });
 
-test('F3 sealed runner emits bounded stage after redirected command failure', () => {
+test('F3 DB runner records bounded stage in a dedicated runner-local status file', () => {
   const runner = readFileSync(new URL('../scripts/run-live-classroom-tencent-binding-db-profile.sh', import.meta.url), 'utf8');
-  const start = runner.indexOf('sealed(){');
-  const end = runner.indexOf('\n}\n\nmanifest_count', start);
-  assert.ok(start >= 0 && end > start);
-  const sealed = runner.slice(start, end);
-  assert.ok(sealed.includes('if "$@" >"$log" 2>&1; then'));
-  assert.ok(sealed.includes('code=$?'));
-  assert.ok(sealed.includes('LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=$CURRENT_STAGE'));
-  assert.ok(sealed.indexOf('>"$log" 2>&1') < sealed.indexOf('status=FAIL stage=$CURRENT_STAGE'));
-  assert.ok(sealed.includes('return "$code"'));
+  assert.ok(runner.includes('TRAININGOS_TENCENT_BINDING_DB_SAFE_STATUS_FILE'));
+  assert.ok(runner.includes('write_status(){'));
+  assert.ok(runner.includes('printf \'stage=%s\\n\''));
+  assert.ok(runner.includes('chmod 600 "$safe_status_file"'));
+  assert.ok(runner.includes('write_status "$CURRENT_STAGE"'));
+  assert.ok(runner.includes('write_status "${label}-sql-e2e" "$reason"'));
+  assert.ok(runner.includes('write_status complete'));
 });
 
-test('F3 database diagnostics expose only allowlisted stage and reason', () => {
+test('F3 status-file diagnostics expose only allowlisted stage and reason', () => {
+  assert.equal(
+    sanitizeLiveClassroomTencentBindingDatabaseStatusFile('stage=fresh-bootstrap\n'),
+    'fresh-bootstrap',
+  );
+  assert.equal(
+    sanitizeLiveClassroomTencentBindingDatabaseStatusFile(
+      'stage=fresh-sql-e2e\nreason=TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED:P0001\n',
+    ),
+    'fresh-sql-e2e:TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED:P0001',
+  );
+  assert.equal(
+    sanitizeLiveClassroomTencentBindingDatabaseStatusFile('stage=private-path\nreason=SECRET_TEXT:P0001\n'),
+    'unknown',
+  );
+  assert.equal(
+    sanitizeLiveClassroomTencentBindingDatabaseStatusFile('stage=fresh-sql-e2e\nreason=SECRET_TEXT:P0001\n'),
+    'fresh-sql-e2e',
+  );
+});
+
+test('F3 stdout diagnostics retain safe fallback behavior', () => {
   assert.equal(
     sanitizeLiveClassroomTencentBindingDatabaseFailure(
       'LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=fresh-bootstrap',
@@ -91,12 +111,6 @@ test('F3 database diagnostics expose only allowlisted stage and reason', () => {
       'LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=fresh-sql-e2e reason=TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED:P0001',
     ),
     'fresh-sql-e2e:TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED:P0001',
-  );
-  assert.equal(
-    sanitizeLiveClassroomTencentBindingDatabaseFailure(
-      'LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=private-path reason=SECRET_TEXT:P0001',
-    ),
-    'unknown',
   );
   assert.equal(sanitizeLiveClassroomTencentBindingDatabaseFailure('raw unclassified output'), 'unknown');
 });
