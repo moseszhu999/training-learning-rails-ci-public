@@ -3,6 +3,9 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  maybeRunLiveClassroomTencentReconciliationDbProfile,
+} from './run-live-classroom-tencent-reconciliation-db-profile.mjs';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER = path.join(
@@ -185,6 +188,9 @@ function failedResult(reason) {
 }
 
 export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
+  const reconciliation = await maybeRunLiveClassroomTencentReconciliationDbProfile(input);
+  if (reconciliation) return reconciliation;
+
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
   if (!isLiveClassroomTencentBindingDbScope(files)) return null;
