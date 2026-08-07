@@ -48,7 +48,15 @@ trap cleanup EXIT
 
 sealed(){
   local label="$1"; shift
-  "$@" >"$RUNNER_TEMP/trainingos-live-classroom-tencent-binding-${label}.log" 2>&1
+  local log="$RUNNER_TEMP/trainingos-live-classroom-tencent-binding-${label}.log"
+  local code
+  if "$@" >"$log" 2>&1; then
+    return 0
+  else
+    code=$?
+    echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=$CURRENT_STAGE"
+    return "$code"
+  fi
 }
 
 manifest_count(){
@@ -99,6 +107,8 @@ run_e2e(){
     reason="$(sanitize_e2e_reason "$log_file")"
     if [[ -n "$reason" ]]; then
       echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=${label}-sql-e2e reason=$reason"
+    else
+      echo "LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=${label}-sql-e2e"
     fi
     return "$code"
   fi
