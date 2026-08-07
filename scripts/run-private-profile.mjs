@@ -23,6 +23,7 @@ export * from './run-marketplace-discovery-core-profile.mjs';
 export * from './run-marketplace-participation-profile.mjs';
 export * from './run-saas-milestone-roadmap-profile.mjs';
 export * from './run-live-classroom-tencent-server-authorization-profile.mjs';
+export * from './run-live-classroom-tencent-binding-db-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -51,6 +52,7 @@ import { maybeRunMarketplaceDiscoveryCoreProfile } from './run-marketplace-disco
 import { maybeRunMarketplaceParticipationProfile } from './run-marketplace-participation-profile.mjs';
 import { maybeRunSaasMilestoneRoadmapProfile } from './run-saas-milestone-roadmap-profile.mjs';
 import { maybeRunLiveClassroomTencentServerAuthorizationProfile } from './run-live-classroom-tencent-server-authorization-profile.mjs';
+import { maybeRunLiveClassroomTencentBindingDbProfile } from './run-live-classroom-tencent-binding-db-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -137,6 +139,9 @@ export async function runProfile(input) {
 
   const marketplaceDiscoveryCore = await maybeRunMarketplaceDiscoveryCoreProfile(input);
   if (marketplaceDiscoveryCore) return marketplaceDiscoveryCore;
+
+  const liveClassroomTencentBindingDb = await maybeRunLiveClassroomTencentBindingDbProfile(input);
+  if (liveClassroomTencentBindingDb) return liveClassroomTencentBindingDb;
 
   const liveClassroomTencentServerAuthorization = await maybeRunLiveClassroomTencentServerAuthorizationProfile(input);
   if (liveClassroomTencentServerAuthorization) return liveClassroomTencentServerAuthorization;
