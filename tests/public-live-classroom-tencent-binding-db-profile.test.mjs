@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   LIVE_CLASSROOM_TENCENT_BINDING_DB_EXACT_FILES,
+  LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER,
   isLiveClassroomTencentBindingDbScope,
   liveClassroomTencentBindingDbCommands,
   sanitizeLiveClassroomTencentBindingDatabaseFailure,
@@ -18,7 +21,7 @@ test('F3 database selector accepts exactly seven owned files', () => {
   );
 });
 
-test('F3 database profile hard-requires runtime contracts and database replay', () => {
+test('F3 database profile hard-requires runtime contracts and public DB runner', () => {
   assert.deepEqual(liveClassroomTencentBindingDbCommands.map((item) => item.label), [
     'install',
     'binding-syntax',
@@ -45,11 +48,25 @@ test('F3 database profile hard-requires runtime contracts and database replay', 
   ]);
   const database = liveClassroomTencentBindingDbCommands.find((item) => item.label === 'database-replay');
   assert.equal(database?.kind, 'database');
-  assert.deepEqual(database?.args, ['scripts/run-live-classroom-tencent-binding-db-profile.sh']);
+  assert.equal(isAbsolute(LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER), true);
+  assert.equal(database?.args?.[0], LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER);
+  assert.equal(
+    LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER.endsWith('/scripts/run-live-classroom-tencent-binding-db-profile.sh'),
+    true,
+  );
+  assert.notEqual(database?.args?.[0], 'scripts/run-live-classroom-tencent-binding-db-profile.sh');
+});
+
+test('F3 public DB runner parses as bash before private execution', () => {
+  const result = spawnSync('bash', ['-n', LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER], {
+    encoding: 'utf8',
+    shell: false,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
 test('F3 runner fixes migration count/range and runs fresh plus upgrade replay', () => {
-  const runner = readFileSync(new URL('../scripts/run-live-classroom-tencent-binding-db-profile.sh', import.meta.url), 'utf8');
+  const runner = readFileSync(LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER, 'utf8');
   for (const token of [
     'canonical_migration_count=369',
     'base_migration_count=368',
@@ -68,7 +85,7 @@ test('F3 runner fixes migration count/range and runs fresh plus upgrade replay',
 });
 
 test('F3 DB runner records bounded stage in a dedicated runner-local status file', () => {
-  const runner = readFileSync(new URL('../scripts/run-live-classroom-tencent-binding-db-profile.sh', import.meta.url), 'utf8');
+  const runner = readFileSync(LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER, 'utf8');
   assert.ok(runner.includes('TRAININGOS_TENCENT_BINDING_DB_SAFE_STATUS_FILE'));
   assert.ok(runner.includes('write_status(){'));
   assert.ok(runner.includes('printf \'stage=%s\\n\''));
@@ -116,7 +133,7 @@ test('F3 stdout diagnostics retain safe fallback behavior', () => {
 });
 
 test('F3 runner never targets hosted or production Supabase', () => {
-  const runner = readFileSync(new URL('../scripts/run-live-classroom-tencent-binding-db-profile.sh', import.meta.url), 'utf8').toLowerCase();
+  const runner = readFileSync(LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER, 'utf8').toLowerCase();
   const hostedEndpointMarker = ['supabase', 'com/rest'].join('.');
   for (const forbidden of [
     '--linked', '--db-url', 'supabase db push', 'supabase link',

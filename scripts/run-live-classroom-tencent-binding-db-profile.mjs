@@ -2,6 +2,13 @@ import { closeSync, openSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER = path.join(
+  publicRoot,
+  'scripts/run-live-classroom-tencent-binding-db-profile.sh',
+);
 
 export const LIVE_CLASSROOM_TENCENT_BINDING_DB_EXACT_FILES = new Set([
   'docs/architecture/trainingos-live-classroom-tencent-binding-v1.md',
@@ -84,7 +91,7 @@ export const liveClassroomTencentBindingDbCommands = Object.freeze([
     '-m', 'unittest', '-v',
     'tests.test_trainingos_live_classroom_tencent_binding_v1',
   ], 'python'),
-  command('database-replay', 'bash', ['scripts/run-live-classroom-tencent-binding-db-profile.sh'], 'database', {
+  command('database-replay', 'bash', [LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER], 'database', {
     TRAININGOS_TENCENT_BINDING_DB_PROFILE: '1',
   }),
   command('typecheck', 'npm', ['run', 'typecheck']),
