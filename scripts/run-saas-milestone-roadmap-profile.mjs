@@ -31,6 +31,30 @@ export const COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES = new Set([
   'tests/test_trainingos_course_video_shared_media_adapter_v1.py',
 ]);
 
+export const LIVE_CLASSROOM_STACK_EXACT_FILES = new Set([
+  'apps/training-web/src/components/TrainingOsAdvancedOperations.tsx',
+  'apps/training-web/src/components/TrainingOsLiveClassroomSurface.tsx',
+  'apps/training-web/src/lib/trainingos-live-classroom-contract.ts',
+  'apps/training-web/src/lib/trainingos-live-classroom-postclass-evidence.ts',
+  'apps/training-web/src/lib/trainingos-live-classroom-teaching-interactions.ts',
+  'apps/training-web/src/lib/trainingos-live-classroom-tencent-bootstrap.ts',
+  'apps/training-web/src/lib/trainingos-live-classroom-tencent-provider.ts',
+  'apps/training-web/src/trainingos-live-classroom.css',
+  'docs/architecture/trainingos-live-classroom-contract-v1.md',
+  'docs/architecture/trainingos-live-classroom-postclass-evidence-v1.md',
+  'docs/architecture/trainingos-live-classroom-teaching-interactions-v1.md',
+  'docs/architecture/trainingos-live-classroom-tencent-provider-v1.md',
+  'docs/testing/trainingos-live-classroom-browser-network-cost-matrix-v1.md',
+  'public/trainingos-live-classroom-runtime-matrix-v1.html',
+  'tests/test_trainingos_live_classroom_contract_v1.py',
+  'tests/test_trainingos_live_classroom_postclass_evidence_v1.py',
+  'tests/test_trainingos_live_classroom_runtime_matrix_v1.py',
+  'tests/test_trainingos_live_classroom_teaching_interactions_v1.py',
+  'tests/test_trainingos_live_classroom_tencent_provider_v1.py',
+  'tests/trainingos-ui-e2e/live-classroom-runtime-matrix.config.ts',
+  'tests/trainingos-ui-e2e/live-classroom-runtime-matrix.spec.ts',
+]);
+
 const EXPECTED_MIGRATION_COUNT = 368;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
@@ -109,6 +133,21 @@ export const courseVideoSharedMediaCommands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+export const liveClassroomStackCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('focused-python-contracts', 'python', [
+    '-m', 'unittest', '-v',
+    'tests.test_trainingos_live_classroom_contract_v1',
+    'tests.test_trainingos_live_classroom_tencent_provider_v1',
+    'tests.test_trainingos_live_classroom_teaching_interactions_v1',
+    'tests.test_trainingos_live_classroom_postclass_evidence_v1',
+    'tests.test_trainingos_live_classroom_runtime_matrix_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npm', ['run', 'build']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 const PROFILES = Object.freeze([
   Object.freeze({
     suite: 'saas-milestone-roadmap',
@@ -133,6 +172,14 @@ const PROFILES = Object.freeze([
     expectedNodeCount: 12,
     expectedPythonCount: 9,
     commands: courseVideoSharedMediaCommands,
+  }),
+  Object.freeze({
+    suite: 'live-classroom-stack',
+    files: LIVE_CLASSROOM_STACK_EXACT_FILES,
+    expectedChangedFileCount: 21,
+    expectedNodeCount: 0,
+    expectedPythonCount: 40,
+    commands: liveClassroomStackCommands,
   }),
 ]);
 
@@ -186,6 +233,10 @@ export function isMarketplaceRealPilotScope(files) {
 
 export function isCourseVideoSharedMediaScope(files) {
   return isExactScope(files, COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES);
+}
+
+export function isLiveClassroomStackScope(files) {
+  return isExactScope(files, LIVE_CLASSROOM_STACK_EXACT_FILES);
 }
 
 function findProfile(files) {
