@@ -85,6 +85,41 @@ sealed(){
   fi
 }
 
+classify_start_failure(){
+  local log_file="$1"
+  if grep -Eqi 'failed to apply migration|migration[^[:alnum:]].*failed|error running migration|migrat(e|ing|ion).*error|sqlstate' "$log_file"; then
+    printf 'migration-init'
+  elif grep -Eqi 'port is already allocated|address already in use|port[^[:alnum:]].*already in use|bind[^[:alnum:]].*failed' "$log_file"; then
+    printf 'port-bind'
+  elif grep -Eqi 'too many requests|rate.?limit|pull rate limit|http[^[:alnum:]]*429' "$log_file"; then
+    printf 'registry-rate-limit'
+  elif grep -Eqi 'cannot connect to the docker|docker daemon|container runtime|pull access denied|manifest unknown|image[^[:alnum:]].*pull[^[:alnum:]].*failed' "$log_file"; then
+    printf 'docker-start'
+  elif grep -Eqi 'unhealthy|health.?check|not ready|timed out waiting|timeout[^[:alnum:]].*container' "$log_file"; then
+    printf 'container-health'
+  else
+    printf 'unknown'
+  fi
+}
+
+sealed_start(){
+  local label="$1"; shift
+  local log="$RUNNER_TEMP/trainingos-live-classroom-tencent-reconciliation-${label}.log"
+  local code category safe_stage
+  if "$@" >"$log" 2>&1; then
+    return 0
+  else
+    code=$?
+    category="$(classify_start_failure "$log")"
+    safe_stage="$CURRENT_STAGE"
+    [[ "$category" == 'unknown' ]] || safe_stage="${CURRENT_STAGE}-${category}"
+    CURRENT_STAGE="$safe_stage"
+    write_status "$CURRENT_STAGE"
+    echo "LIVE_CLASSROOM_TENCENT_RECONCILIATION_DB status=FAIL stage=$CURRENT_STAGE"
+    return "$code"
+  fi
+}
+
 manifest_count(){
   python - "$1" <<'PY'
 import json, pathlib, sys
@@ -157,7 +192,7 @@ sealed fresh-bootstrap python "$PRIVATE_REPO_PATH/scripts/build-trainingos-fresh
 CURRENT_STAGE="fresh-migration-count"
 [[ "$(manifest_count "$fresh/supabase/trainingos-bootstrap-manifest.json")" == "$canonical_migration_count" ]]
 CURRENT_STAGE="fresh-start"
-sealed fresh-start supabase --workdir "$fresh" start
+sealed_start fresh-start supabase --workdir "$fresh" start
 CURRENT_STAGE="fresh-reset-one"
 sealed fresh-reset-one supabase --workdir "$fresh" db reset --local --no-seed
 CURRENT_STAGE="fresh-reset-two"
@@ -180,7 +215,7 @@ sealed upgrade-bootstrap python "$base_worktree/scripts/build-trainingos-fresh-b
 CURRENT_STAGE="upgrade-migration-count"
 [[ "$(manifest_count "$upgrade/supabase/trainingos-bootstrap-manifest.json")" == "$base_migration_count" ]]
 CURRENT_STAGE="upgrade-start"
-sealed upgrade-start supabase --workdir "$upgrade" start
+sealed_start upgrade-start supabase --workdir "$upgrade" start
 CURRENT_STAGE="upgrade-base-reset"
 sealed upgrade-base-reset supabase --workdir "$upgrade" db reset --local --no-seed
 CURRENT_STAGE="upgrade-copy-migration"
