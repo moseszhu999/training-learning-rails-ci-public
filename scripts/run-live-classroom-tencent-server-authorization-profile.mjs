@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunLiveClassroomTencentProvisioningProfile } from './run-live-classroom-tencent-provisioning-profile.mjs';
 
 export const LIVE_CLASSROOM_TENCENT_SERVER_AUTH_EXACT_FILES = new Set([
   'docs/architecture/trainingos-live-classroom-tencent-server-authorization-v1.md',
@@ -101,6 +102,9 @@ function failedResult(reason, stepCount = liveClassroomTencentServerAuthorizatio
 }
 
 export async function maybeRunLiveClassroomTencentServerAuthorizationProfile(input) {
+  const provisioning = await maybeRunLiveClassroomTencentProvisioningProfile(input);
+  if (provisioning) return provisioning;
+
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
   if (!isLiveClassroomTencentServerAuthorizationScope(files)) return null;
