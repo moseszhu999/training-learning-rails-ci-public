@@ -20,6 +20,49 @@ const EXPECTED_MIGRATION_COUNT = 369;
 const MIGRATION_START = '20260807220000';
 const MIGRATION_END = '20260807220000';
 
+const SAFE_DATABASE_STAGES = new Set([
+  'inputs',
+  'scope-contract',
+  'supabase-wrapper',
+  'fresh-init',
+  'fresh-bootstrap',
+  'fresh-migration-count',
+  'fresh-start',
+  'fresh-reset-one',
+  'fresh-reset-two',
+  'fresh-status',
+  'fresh-sql-e2e',
+  'fresh-zero-residue',
+  'fresh-stop',
+  'upgrade-worktree',
+  'upgrade-init',
+  'upgrade-bootstrap',
+  'upgrade-migration-count',
+  'upgrade-start',
+  'upgrade-base-reset',
+  'upgrade-copy-migration',
+  'upgrade-apply',
+  'upgrade-status',
+  'upgrade-sql-e2e',
+  'upgrade-zero-residue',
+  'upgrade-stop',
+  'complete',
+]);
+
+const SAFE_E2E_REASONS = new Set([
+  'TRAININGOS_TENCENT_BINDING_E2E_CONTROL_CURSOR_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_ACL_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_CLAIM_REPLAY_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_CONCURRENT_CLAIM_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_FINALIZE_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_ROOM_CONFLICT_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_STUDENT_READ_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_TERMINAL_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_FAILURE_STATE_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_FAILED_RECLAIM_FAILED',
+  'TRAININGOS_TENCENT_BINDING_E2E_UNRELATED_READ_FAILED',
+]);
+
 const command = (label, executable, args, kind = 'status', env = {}) => Object.freeze({
   label,
   executable,
@@ -40,7 +83,7 @@ export const liveClassroomTencentBindingDbCommands = Object.freeze([
     '-m', 'unittest', '-v',
     'tests.test_trainingos_live_classroom_tencent_binding_v1',
   ], 'python'),
-  command('database-replay', 'bash', ['scripts/run-live-classroom-tencent-binding-db-profile.sh'], 'status', {
+  command('database-replay', 'bash', ['scripts/run-live-classroom-tencent-binding-db-profile.sh'], 'database', {
     TRAININGOS_TENCENT_BINDING_DB_PROFILE: '1',
   }),
   command('typecheck', 'npm', ['run', 'typecheck']),
@@ -62,6 +105,18 @@ function parseNodePassed(text) {
 function parsePython(text) {
   return [...String(text).matchAll(/Ran\s+(\d+)\s+tests?/g)]
     .reduce((sum, match) => sum + Number(match[1]), 0);
+}
+
+export function sanitizeLiveClassroomTencentBindingDatabaseFailure(text) {
+  const matches = [...String(text).matchAll(
+    /LIVE_CLASSROOM_TENCENT_BINDING_DB status=FAIL stage=([a-z0-9-]+)(?: reason=(TRAININGOS_TENCENT_BINDING_E2E_[A-Z0-9_]+):([A-Z0-9]{5}))?/g,
+  )];
+  const match = matches.at(-1);
+  if (!match) return 'unknown';
+  const stage = SAFE_DATABASE_STAGES.has(match[1]) ? match[1] : 'unknown';
+  const reason = match[2]?.split(':')[0];
+  if (stage === 'unknown' || !reason || !SAFE_E2E_REASONS.has(reason)) return stage;
+  return `${stage}:${match[2]}`;
 }
 
 async function exactChangedFiles(input) {
@@ -126,6 +181,7 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
   let nodeTests = 0;
   let nodePassed = 0;
   let pythonTests = 0;
+  let databaseFailure = 'not-run';
   const failedLabels = [];
 
   try {
@@ -145,6 +201,11 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
         nodePassed += parseNodePassed(output);
       }
       if (item.kind === 'python') pythonTests += parsePython(output);
+      if (item.kind === 'database') {
+        databaseFailure = result.status === 0
+          ? 'complete'
+          : sanitizeLiveClassroomTencentBindingDatabaseFailure(output);
+      }
       if (result.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
     }
@@ -157,9 +218,10 @@ export async function maybeRunLiveClassroomTencentBindingDbProfile(input) {
     && pythonTests === EXPECTED_PYTHON_COUNT;
   const ok = passedStepCount === liveClassroomTencentBindingDbCommands.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
+  const diagnosticSuffix = failedLabels.includes('database-replay') ? `@${databaseFailure}` : '';
   return {
     ok,
-    status: ok ? 'PASS' : `FAIL:${failure}`,
+    status: ok ? 'PASS' : `FAIL:${failure}${diagnosticSuffix}`,
     failedLabels: Object.freeze([...failedLabels]),
     stepCount: liveClassroomTencentBindingDbCommands.length,
     passedStepCount,
