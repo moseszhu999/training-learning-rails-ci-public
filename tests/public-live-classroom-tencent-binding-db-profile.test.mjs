@@ -68,8 +68,8 @@ test('F3 public DB runner parses as bash before private execution', () => {
 test('F3 runner fixes migration count/range and runs fresh plus upgrade replay', () => {
   const runner = readFileSync(LIVE_CLASSROOM_TENCENT_BINDING_DB_RUNNER, 'utf8');
   for (const token of [
-    'canonical_migration_count=369',
-    'base_migration_count=368',
+    'canonical_migration_count=370',
+    'base_migration_count=369',
     'migration_file=20260807220000_trainingos_live_classroom_tencent_binding_v1.sql',
     'fresh-reset-one',
     'fresh-reset-two',

@@ -32,8 +32,8 @@ for name in "${required[@]}"; do
 done
 write_status inputs
 
-canonical_migration_count=369
-base_migration_count=368
+canonical_migration_count=370
+base_migration_count=369
 migration_file=20260807220000_trainingos_live_classroom_tencent_binding_v1.sql
 
 CURRENT_STAGE="scope-contract"
