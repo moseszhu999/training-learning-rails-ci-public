@@ -1,0 +1,169 @@
+name: TrainingOS Agent baseline diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/agent-baseline-diagnostic-request.json
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    if: startsWith(github.head_ref, 'ci/agent-baseline-diagnostic/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out public diagnostic request
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate bounded diagnostic request
+        id: request
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, appendFile } from 'node:fs/promises';
+          const request = JSON.parse(await readFile('.github/agent-baseline-diagnostic-request.json', 'utf8'));
+          const allowed = new Set(['requestId', 'privateExactSha', 'expectedMainSha']);
+          const keys = Object.keys(request);
+          const sha = /^[0-9a-f]{40}$/;
+          const id = /^agent-baseline-diagnostic-[0-9a-f]{8}-v[1-9][0-9]*$/;
+          const ok = keys.length === allowed.size
+            && keys.every((key) => allowed.has(key))
+            && id.test(String(request.requestId || ''))
+            && sha.test(String(request.privateExactSha || ''))
+            && sha.test(String(request.expectedMainSha || ''))
+            && request.privateExactSha === request.expectedMainSha;
+          await appendFile(process.env.GITHUB_OUTPUT, [
+            `status=${ok ? 'PASS' : 'FAIL'}`,
+            `private_exact_sha=${ok ? request.privateExactSha : ''}`,
+            `expected_main_sha=${ok ? request.expectedMainSha : ''}`,
+          ].join('\n') + '\n', 'utf8');
+          console.log(`AGENT_BASELINE_DIAGNOSTIC_REQUEST status=${ok ? 'PASS' : 'FAIL'}`);
+          if (!ok) process.exitCode = 1;
+          NODE
+
+      - name: Validate read-only private credential presence
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          test -n "$PRIVATE_TOKEN"
+
+      - name: Check out exact private commit
+        if: steps.request.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ steps.request.outputs.private_exact_sha }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Check out current private main
+        if: steps.request.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-main
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Verify exact target is still current main
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.request.outputs.private_exact_sha }}
+        run: |
+          exact="$(git -C private-repo rev-parse HEAD)"
+          current="$(git -C private-main rev-parse HEAD)"
+          test "$exact" = "$EXPECTED_SHA"
+          test "$current" = "$EXPECTED_SHA"
+          echo 'AGENT_BASELINE_DIAGNOSTIC_MAIN_EQUALITY status=PASS'
+
+      - name: Install exact private dependencies
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        run: npm ci --prefix private-repo
+
+      - name: Run full Agent prototype suite with sealed output
+        id: agent
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        run: |
+          set +e
+          npm --prefix private-repo run test:agent > "$RUNNER_TEMP/trainingos-agent-baseline-private.log" 2>&1
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized failing test-file diagnostic
+        if: always() && steps.request.outputs.status == 'PASS'
+        shell: bash
+        env:
+          AGENT_EXIT_CODE: ${{ steps.agent.outputs.exit_code }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, appendFile, rm } from 'node:fs/promises';
+          const logPath = `${process.env.RUNNER_TEMP}/trainingos-agent-baseline-private.log`;
+          const text = await readFile(logPath, 'utf8').catch(() => '');
+          const lastCount = (label) => {
+            const matches = [...text.matchAll(new RegExp(`^# ${label}\\s+(\\d+)\\s*$`, 'gm'))];
+            return matches.length ? Number(matches.at(-1)[1]) : 0;
+          };
+          const tests = lastCount('tests');
+          const passed = lastCount('pass');
+          const failed = lastCount('fail');
+          const lines = text.split(/\r?\n/);
+          const files = new Set();
+          let window = 0;
+          const pathPattern = /prototypes\/trainingos-agent-mvp-v1\/(?:test\/)?[A-Za-z0-9._/-]+\.test\.mjs/g;
+          for (const line of lines) {
+            if (/^\s*not ok\s+\d+\s+-\s+/.test(line)) window = 48;
+            if (window > 0) {
+              for (const match of line.matchAll(pathPattern)) files.add(match[0]);
+              window -= 1;
+            }
+          }
+          const failingFiles = [...files].sort().slice(0, 20);
+          const exitCode = Number(process.env.AGENT_EXIT_CODE || 0);
+          const status = exitCode === 0
+            ? 'TESTS_PASS'
+            : failingFiles.length > 0 ? 'TESTS_FAIL_IDENTIFIED' : 'TESTS_FAIL_FILE_UNRESOLVED';
+          const safeFiles = failingFiles.length ? failingFiles.join(',') : 'none';
+          const summary = [
+            '## TrainingOS Agent baseline diagnostic',
+            '',
+            '- Exact private main equality: **PASS**',
+            `- Agent suite exit code: **${exitCode}**`,
+            `- Tests: **${tests}**`,
+            `- Passed: **${passed}**`,
+            `- Failed: **${failed}**`,
+            `- Diagnostic status: **${status}**`,
+            `- Failing test files: \`${safeFiles}\``,
+            '',
+            'Only repository-relative `.test.mjs` paths and aggregate counts are published. Raw private logs, assertions, stack traces, source, environment variables, and secrets are not published.'
+          ].join('\n') + '\n';
+          await appendFile(process.env.GITHUB_STEP_SUMMARY, summary, 'utf8');
+          console.log(`AGENT_BASELINE_DIAGNOSTIC status=${status} tests=${tests} passed=${passed} failed=${failed} failing_files=${safeFiles}`);
+          await rm(logPath, { force: true });
+          NODE
+
+      - name: Remove private checkouts
+        if: always()
+        shell: bash
+        run: rm -rf private-repo private-main
