@@ -11,6 +11,7 @@ import { maybeRunIndustryRolePackRegistryProfile } from './run-industry-role-pac
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
+import { maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile } from './run-live-classroom-postclass-evidence-current-main-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -70,6 +71,8 @@ export async function runProfile(input) {
   if (liveClassroomTeachingInteractions) return liveClassroomTeachingInteractions;
   const canonicalNorthStar = await maybeRunCanonicalNorthStarCurrentMainProfile(input);
   if (canonicalNorthStar) return canonicalNorthStar;
+  const liveClassroomPostclassEvidence = await maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile(input);
+  if (liveClassroomPostclassEvidence) return liveClassroomPostclassEvidence;
   return runStage14Profile(input);
 }
 
