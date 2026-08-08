@@ -115,3 +115,20 @@ test('focused suites contain only release-gate private contracts', () => {
     'tests.test_trainingos_netlify_production_release_gate_v1',
   ]);
 });
+
+test('central router selects release gate before other generic-owned scopes', () => {
+  const router = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
+  assert.equal(
+    router.includes("export * from './run-netlify-production-release-gate-profile.mjs';"),
+    true,
+  );
+  assert.equal(
+    router.includes("import { maybeRunNetlifyProductionReleaseGateProfile } from './run-netlify-production-release-gate-profile.mjs';"),
+    true,
+  );
+  const releaseGate = router.indexOf('maybeRunNetlifyProductionReleaseGateProfile(input)');
+  const workspace = router.indexOf('maybeRunWorkspaceIaDensityProfile(input)');
+  const marketplace = router.indexOf('maybeRunMarketplaceReviewerAuthorityProfile(input)');
+  const liveClassroom = router.indexOf('maybeRunLiveClassroomTencentProbeTargetAttestationProfile(input)');
+  assert.ok(releaseGate >= 0 && workspace > releaseGate && marketplace > releaseGate && liveClassroom > releaseGate);
+});
