@@ -8,6 +8,7 @@ import { maybeRunEntitlementBillingProjectionProfile } from './run-entitlement-b
 import { maybeRunAgentSkillEvalFrameworkV2Profile } from './run-agent-skill-eval-framework-v2-profile.mjs';
 import { maybeRunIndustryRolePackFoundationProfile } from './run-industry-role-pack-foundation-profile.mjs';
 import { maybeRunIndustryRolePackRegistryProfile } from './run-industry-role-pack-registry-profile.mjs';
+import { maybeRunTrainingBlueprintDraftCompilerProfile } from './run-training-blueprint-draft-compiler-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
@@ -68,6 +69,8 @@ export async function runProfile(input) {
   if (industryRolePack) return industryRolePack;
   const industryRolePackRegistry = await maybeRunIndustryRolePackRegistryProfile(input);
   if (industryRolePackRegistry) return industryRolePackRegistry;
+  const trainingBlueprintDraftCompiler = await maybeRunTrainingBlueprintDraftCompilerProfile(input);
+  if (trainingBlueprintDraftCompiler) return trainingBlueprintDraftCompiler;
   const liveClassroomTencentProvider = await maybeRunLiveClassroomTencentProviderCurrentMainProfile(input);
   if (liveClassroomTencentProvider) return liveClassroomTencentProvider;
   const liveClassroomTeachingInteractions = await maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile(input);
