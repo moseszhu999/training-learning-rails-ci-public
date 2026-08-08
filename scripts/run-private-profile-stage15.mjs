@@ -9,6 +9,7 @@ import { maybeRunAgentSkillEvalFrameworkV2Profile } from './run-agent-skill-eval
 import { maybeRunIndustryRolePackFoundationProfile } from './run-industry-role-pack-foundation-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
+import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -64,6 +65,8 @@ export async function runProfile(input) {
   if (liveClassroomTencentProvider) return liveClassroomTencentProvider;
   const liveClassroomTeachingInteractions = await maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile(input);
   if (liveClassroomTeachingInteractions) return liveClassroomTeachingInteractions;
+  const canonicalNorthStar = await maybeRunCanonicalNorthStarCurrentMainProfile(input);
+  if (canonicalNorthStar) return canonicalNorthStar;
   return runStage14Profile(input);
 }
 
