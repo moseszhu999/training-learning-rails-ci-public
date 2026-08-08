@@ -46,11 +46,37 @@ export function isLiveClassroomRuntimeWiringCurrentMainScope(files) {
     && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
-function failedContractResult() {
+export function liveClassroomRuntimeWiringFixedInputMismatches({
+  expectedNodeCount,
+  expectedPythonCount,
+  expectedMigrationCount,
+  expectedChangedFileCount,
+  migrationStart,
+  migrationEnd,
+}) {
+  const checks = Object.freeze({
+    'node-count': Number(expectedNodeCount) === EXPECTED_NODE_COUNT,
+    'python-count': Number(expectedPythonCount) === EXPECTED_PYTHON_COUNT,
+    'migration-metadata': String(expectedMigrationCount) === String(EXPECTED_MIGRATION_COUNT),
+    'changed-file-count': String(expectedChangedFileCount) === String(EXPECTED_CHANGED_FILE_COUNT),
+    'migration-start': migrationStart === 'none',
+    'migration-end': migrationEnd === 'none',
+  });
+  return Object.freeze(Object.entries(checks).filter(([, ok]) => !ok).map(([key]) => key));
+}
+
+function failedContractResult(mismatches) {
+  const suffix = mismatches.length ? `:${mismatches.join('+')}` : '';
   return {
-    ok: false, status: 'FAIL:fixed-input-contract', failedLabels: Object.freeze(['fixed-input-contract']),
-    stepCount: liveClassroomRuntimeWiringCurrentMainCommands.length, passedStepCount: 0,
-    nodeTests: 0, nodePassed: 0, nodeFailed: 0, pythonTests: 0,
+    ok: false,
+    status: `FAIL:fixed-input-contract${suffix}`,
+    failedLabels: Object.freeze(['fixed-input-contract', ...mismatches]),
+    stepCount: liveClassroomRuntimeWiringCurrentMainCommands.length,
+    passedStepCount: 0,
+    nodeTests: 0,
+    nodePassed: 0,
+    nodeFailed: 0,
+    pythonTests: 0,
     selectedSuite: 'live-classroom-runtime-wiring-current-main',
   };
 }
@@ -59,15 +85,17 @@ export async function maybeRunLiveClassroomRuntimeWiringCurrentMainProfile(input
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
   if (!isLiveClassroomRuntimeWiringCurrentMainScope(files)) return null;
-  const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
-    && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
-    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(EXPECTED_MIGRATION_COUNT)
-    && scope.expected_changed_file_count === String(EXPECTED_CHANGED_FILE_COUNT)
-    && scope.migration_start === 'none'
-    && scope.migration_end === 'none';
-  if (!fixedInputs) {
+  const mismatches = liveClassroomRuntimeWiringFixedInputMismatches({
+    expectedNodeCount: input.expectedNodeCount,
+    expectedPythonCount: input.expectedPythonCount,
+    expectedMigrationCount: process.env.EXPECTED_MIGRATION_COUNT,
+    expectedChangedFileCount: scope.expected_changed_file_count,
+    migrationStart: scope.migration_start,
+    migrationEnd: scope.migration_end,
+  });
+  if (mismatches.length) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
-    return failedContractResult();
+    return failedContractResult(mismatches);
   }
 
   let passedStepCount = 0;
@@ -98,8 +126,13 @@ export async function maybeRunLiveClassroomRuntimeWiringCurrentMainProfile(input
   return {
     ok,
     status: ok ? 'PASS' : `FAIL:${failedLabels.length ? failedLabels.join(',') : 'count-contract'}`,
-    failedLabels: Object.freeze([...failedLabels]), stepCount, passedStepCount,
-    nodeTests: 0, nodePassed: 0, nodeFailed: 0, pythonTests,
+    failedLabels: Object.freeze([...failedLabels]),
+    stepCount,
+    passedStepCount,
+    nodeTests: 0,
+    nodePassed: 0,
+    nodeFailed: 0,
+    pythonTests,
     selectedSuite: 'live-classroom-runtime-wiring-current-main',
   };
 }
