@@ -31,6 +31,15 @@ export const COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES = new Set([
   'tests/test_trainingos_course_video_shared_media_adapter_v1.py',
 ]);
 
+export const LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES = new Set([
+  'apps/training-web/src/components/TrainingOsAdvancedOperations.tsx',
+  'apps/training-web/src/components/TrainingOsLiveClassroomSurface.tsx',
+  'apps/training-web/src/lib/trainingos-live-classroom-contract.ts',
+  'apps/training-web/src/trainingos-live-classroom.css',
+  'docs/architecture/trainingos-live-classroom-contract-v1.md',
+  'tests/test_trainingos_live_classroom_contract_v1.py',
+]);
+
 export const LIVE_CLASSROOM_STACK_EXACT_FILES = new Set([
   'apps/training-web/src/components/TrainingOsAdvancedOperations.tsx',
   'apps/training-web/src/components/TrainingOsLiveClassroomSurface.tsx',
@@ -140,6 +149,18 @@ export const courseVideoSharedMediaCommands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+export const liveClassroomContractShellCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('focused-python-contracts', 'python', [
+    '-m', 'unittest', '-v',
+    'tests.test_trainingos_live_classroom_contract_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 export const liveClassroomStackCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('focused-python-contracts', 'python', [
@@ -192,6 +213,15 @@ const PROFILES = Object.freeze([
     expectedNodeCount: 12,
     expectedPythonCount: 9,
     commands: courseVideoSharedMediaCommands,
+  }),
+  Object.freeze({
+    suite: 'live-classroom-contract-shell',
+    files: LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES,
+    expectedChangedFileCount: 6,
+    expectedNodeCount: 0,
+    expectedPythonCount: 9,
+    expectedMigrationCount: 369,
+    commands: liveClassroomContractShellCommands,
   }),
   Object.freeze({
     suite: 'live-classroom-stack',
@@ -263,6 +293,10 @@ export function isCourseVideoSharedMediaScope(files) {
   return isExactScope(files, COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES);
 }
 
+export function isLiveClassroomContractShellScope(files) {
+  return isExactScope(files, LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES);
+}
+
 export function isLiveClassroomStackScope(files) {
   return isExactScope(files, LIVE_CLASSROOM_STACK_EXACT_FILES);
 }
@@ -276,9 +310,10 @@ function findProfile(files) {
 }
 
 function fixedInputContract(input, scope, profile) {
+  const expectedMigrationCount = profile.expectedMigrationCount ?? EXPECTED_MIGRATION_COUNT;
   return Number(input.expectedNodeCount) === profile.expectedNodeCount
     && Number(input.expectedPythonCount) === profile.expectedPythonCount
-    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(EXPECTED_MIGRATION_COUNT)
+    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(expectedMigrationCount)
     && scope.expected_changed_file_count === String(profile.expectedChangedFileCount)
     && scope.migration_start === 'none'
     && scope.migration_end === 'none';
