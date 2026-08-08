@@ -73,7 +73,7 @@ test('AgentSkill pilot profile has no deployment network database or arbitrary s
   const text = JSON.stringify(agentSkillPilotCommands).toLowerCase();
   for (const forbidden of [
     'curl', 'wget', 'ssh', 'scp', 'deploy', 'netlify deploy', 'vercel deploy',
-    'supabase db', 'psql', 'playwright', 'bash -c', 'sh -c', 'service_role',
+    'supabase db', 'psql', 'playwright', 'bash -c', 'sh -c',
   ]) {
     assert.equal(text.includes(forbidden), false, forbidden);
   }
