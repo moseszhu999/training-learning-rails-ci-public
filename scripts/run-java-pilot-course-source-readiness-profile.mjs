@@ -14,7 +14,7 @@ export const JAVA_PILOT_COURSE_SOURCE_READINESS_EXACT_FILES = new Set([
 const EXPECTED_CHANGED_FILE_COUNT = 5;
 const EXPECTED_NODE_COUNT = 8;
 const EXPECTED_PYTHON_COUNT = 7;
-const EXPECTED_MIGRATION_COUNT = 370;
+const EXPECTED_MIGRATION_COUNT = 371;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({ label, executable, args: Object.freeze(args), kind });
 
