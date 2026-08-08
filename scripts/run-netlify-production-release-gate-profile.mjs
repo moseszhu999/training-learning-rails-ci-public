@@ -1,5 +1,5 @@
 import { closeSync, openSync } from 'node:fs';
-import { readFile, readdir, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -89,9 +89,31 @@ function gateStagePassed(item, result, output) {
   return result.status === 0;
 }
 
-async function canonicalMigrationCount(privateRepoPath) {
-  const entries = await readdir(path.join(privateRepoPath, 'supabase/migrations'));
-  return entries.filter((name) => /^\d{14}_.+\.sql$/.test(name)).length;
+async function canonicalMigrationCount(input) {
+  const bootstrapRoot = path.join(input.runnerTemp, 'trainingos-release-gate-bootstrap-count');
+  const outputDir = path.join(bootstrapRoot, 'migrations');
+  const manifestPath = path.join(bootstrapRoot, 'trainingos-bootstrap-manifest.json');
+  await rm(bootstrapRoot, { recursive: true, force: true });
+  try {
+    const result = spawnSync('python', [
+      path.join(input.privateRepoPath, 'scripts/build-trainingos-fresh-bootstrap.py'),
+      '--repo-root', input.privateRepoPath,
+      '--output-dir', outputDir,
+      '--commit-sha', input.privateExactSha,
+    ], {
+      cwd: input.privateRepoPath,
+      stdio: 'ignore',
+      shell: false,
+    });
+    if (result.status !== 0) return -1;
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const count = Number(manifest.migrationCount);
+    return Number.isInteger(count) && count >= 0 ? count : -1;
+  } catch {
+    return -1;
+  } finally {
+    await rm(bootstrapRoot, { recursive: true, force: true });
+  }
 }
 
 async function exactChangedFiles(input) {
@@ -141,12 +163,7 @@ export async function maybeRunNetlifyProductionReleaseGateProfile(input) {
   const { files, scope } = await exactChangedFiles(input);
   if (!isNetlifyProductionReleaseGateScope(files)) return null;
 
-  let actualMigrationCount = -1;
-  try {
-    actualMigrationCount = await canonicalMigrationCount(input.privateRepoPath);
-  } catch {
-    actualMigrationCount = -1;
-  }
+  const actualMigrationCount = await canonicalMigrationCount(input);
 
   const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
