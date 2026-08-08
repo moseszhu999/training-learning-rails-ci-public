@@ -6,6 +6,7 @@ import {
 import { maybeRunLiveClassroomACurrentMainProfile } from './run-live-classroom-a-current-main-profile.mjs';
 import { maybeRunEntitlementBillingProjectionProfile } from './run-entitlement-billing-projection-profile.mjs';
 import { maybeRunProviderNeutralBillingIntentProfile } from './run-provider-neutral-billing-intent-profile.mjs';
+import { maybeRunStripeTestAdapterWebhookProfile } from './run-stripe-test-adapter-webhook-profile.mjs';
 import { maybeRunAgentSkillEvalFrameworkV2Profile } from './run-agent-skill-eval-framework-v2-profile.mjs';
 import { maybeRunIndustryRolePackFoundationProfile } from './run-industry-role-pack-foundation-profile.mjs';
 import { maybeRunIndustryRolePackRegistryProfile } from './run-industry-role-pack-registry-profile.mjs';
@@ -72,6 +73,8 @@ export async function runProfile(input) {
   if (entitlementProjection) return entitlementProjection;
   const providerNeutralBillingIntent = await maybeRunProviderNeutralBillingIntentProfile(input);
   if (providerNeutralBillingIntent) return providerNeutralBillingIntent;
+  const stripeTestAdapter = await maybeRunStripeTestAdapterWebhookProfile(input);
+  if (stripeTestAdapter) return stripeTestAdapter;
   const agentSkillEvalFrameworkV2 = await maybeRunAgentSkillEvalFrameworkV2Profile(input);
   if (agentSkillEvalFrameworkV2) return agentSkillEvalFrameworkV2;
   const industryRolePack = await maybeRunIndustryRolePackFoundationProfile(input);
