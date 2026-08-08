@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES,
   liveClassroomContractShellCommands,
@@ -47,20 +48,15 @@ test('A-slice current-main fixed profile runs 9 contracts and real build gates',
 });
 
 test('A-slice uses current canonical migration metadata without changing legacy profiles', () => {
-  const source = readFileSource();
+  const source = readFileSync(
+    new URL('../scripts/run-saas-milestone-roadmap-profile.mjs', import.meta.url),
+    'utf8',
+  );
   assert.equal(source.includes("suite: 'live-classroom-contract-shell'"), true);
   assert.equal(source.includes('expectedMigrationCount: 369'), true);
   assert.equal(source.includes('profile.expectedMigrationCount ?? EXPECTED_MIGRATION_COUNT'), true);
   assert.equal(source.includes('const EXPECTED_MIGRATION_COUNT = 368;'), true);
 });
-
-function readFileSource() {
-  return requireSource('../scripts/run-saas-milestone-roadmap-profile.mjs');
-}
-
-function requireSource(relativePath) {
-  return import.meta.resolve ? null : relativePath;
-}
 
 test('live classroom selector accepts exactly the 21 stacked files', () => {
   assert.equal(LIVE_CLASSROOM_STACK_EXACT_FILES.size, 21);
