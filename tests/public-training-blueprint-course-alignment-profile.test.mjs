@@ -35,13 +35,13 @@ test('alignment profile runs exact focused contracts and repository build gates'
     ['-m', 'unittest', '-v', 'tests.test_trainingos_training_blueprint_course_alignment_v1']);
 });
 
-test('alignment profile locks 4 files 10 node 7 python zero migration and 369 canonical migrations', () => {
+test('alignment profile locks 4 files 10 node 7 python zero migration and 370 canonical migrations', () => {
   const source = readFileSync(new URL('../scripts/run-training-blueprint-course-alignment-profile.mjs', import.meta.url), 'utf8');
   for (const token of [
     'const EXPECTED_CHANGED_FILE_COUNT = 4;',
     'const EXPECTED_NODE_COUNT = 10;',
     'const EXPECTED_PYTHON_COUNT = 7;',
-    'const EXPECTED_MIGRATION_COUNT = 369;',
+    'const EXPECTED_MIGRATION_COUNT = 370;',
     "selectedSuite: 'training-blueprint-course-alignment'",
   ]) assert.equal(source.includes(token), true, token);
 });

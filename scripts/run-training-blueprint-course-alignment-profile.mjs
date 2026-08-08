@@ -13,7 +13,7 @@ export const TRAINING_BLUEPRINT_COURSE_ALIGNMENT_EXACT_FILES = new Set([
 const EXPECTED_CHANGED_FILE_COUNT = 4;
 const EXPECTED_NODE_COUNT = 10;
 const EXPECTED_PYTHON_COUNT = 7;
-const EXPECTED_MIGRATION_COUNT = 369;
+const EXPECTED_MIGRATION_COUNT = 370;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({ label, executable, args: Object.freeze(args), kind });
 
