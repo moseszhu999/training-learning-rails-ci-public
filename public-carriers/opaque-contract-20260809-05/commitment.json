@@ -7,7 +7,7 @@
     "artifact_2": "6affdae3b3c1aa6aa7689e9b6a7b3225a636aa1ac0025f490cca1285ceaf1487",
     "artifact_3": "f702f4e7a1fb960e97cf7c40923c3fb693a59d789ffdf84b5053ef0a20fdfced"
   },
-  "bundle_sha256": "1bd8f793bca22effab165de3e1f1e84a1551ef831fe032853b861c45e31cfec4",
+  "bundle_sha256": "e77d15fce7834d2eb398df0af38d1ec17a7a38f75bb11e6fed7e600a6e11a00e",
   "local_exact_content_validation": {
     "private_ci_step_execution": "unavailable",
     "public_commitment_tests_passed": 0,
