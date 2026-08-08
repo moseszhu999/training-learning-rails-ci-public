@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
+  LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES,
+  liveClassroomContractShellCommands,
+  isLiveClassroomContractShellScope,
   LIVE_CLASSROOM_STACK_EXACT_FILES,
   liveClassroomStackCommands,
   isLiveClassroomStackScope,
@@ -10,6 +14,49 @@ import {
   isCourseVideoSharedMediaScope,
   COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES,
 } from '../scripts/run-saas-milestone-roadmap-profile.mjs';
+
+test('A-slice selector accepts exactly the six contract-shell files', () => {
+  assert.equal(LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES.size, 6);
+  assert.equal(isLiveClassroomContractShellScope(LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES), true);
+  assert.equal(
+    isLiveClassroomContractShellScope([...LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES, 'netlify.toml']),
+    false,
+  );
+  const replaced = [...LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES];
+  replaced[0] = 'supabase/migrations/20260807999999_not_allowed.sql';
+  assert.equal(isLiveClassroomContractShellScope(replaced), false);
+});
+
+test('A-slice current-main fixed profile runs 9 contracts and real build gates', () => {
+  assert.deepEqual(liveClassroomContractShellCommands.map((item) => item.label), [
+    'install',
+    'focused-python-contracts',
+    'typecheck',
+    'direct-vite-production-build',
+    'postbuild-copy',
+    'bundle-verification',
+  ]);
+  const python = liveClassroomContractShellCommands.find((item) => item.label === 'focused-python-contracts');
+  assert.deepEqual(python?.args, [
+    '-m', 'unittest', '-v',
+    'tests.test_trainingos_live_classroom_contract_v1',
+  ]);
+  const build = liveClassroomContractShellCommands.find((item) => item.label === 'direct-vite-production-build');
+  assert.deepEqual(build?.args, ['vite', 'build', '--config', 'vite.config.ts']);
+  const postbuild = liveClassroomContractShellCommands.find((item) => item.label === 'postbuild-copy');
+  assert.deepEqual(postbuild?.args, ['scripts/copy-trainingos-marketplace-web.mjs']);
+});
+
+test('A-slice uses current canonical migration metadata without changing legacy profiles', () => {
+  const source = readFileSync(
+    new URL('../scripts/run-saas-milestone-roadmap-profile.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.equal(source.includes("suite: 'live-classroom-contract-shell'"), true);
+  assert.equal(source.includes('expectedMigrationCount: 369'), true);
+  assert.equal(source.includes('profile.expectedMigrationCount ?? EXPECTED_MIGRATION_COUNT'), true);
+  assert.equal(source.includes('const EXPECTED_MIGRATION_COUNT = 368;'), true);
+});
 
 test('live classroom selector accepts exactly the 21 stacked files', () => {
   assert.equal(LIVE_CLASSROOM_STACK_EXACT_FILES.size, 21);
@@ -38,6 +85,7 @@ test('runtime wiring selector accepts exactly the four F1 files', () => {
 test('course-video selector remains independent from live classroom', () => {
   assert.equal(isCourseVideoSharedMediaScope(COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES), true);
   for (const file of COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES) {
+    assert.equal(LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES.has(file), false, file);
     assert.equal(LIVE_CLASSROOM_STACK_EXACT_FILES.has(file), false, file);
     assert.equal(LIVE_CLASSROOM_RUNTIME_WIRING_EXACT_FILES.has(file), false, file);
   }
@@ -100,17 +148,25 @@ test('runtime wiring profile runs eight contracts plus the same real build gates
 });
 
 test('profile bypasses inherited npm prebuild but keeps actual Vite and bundle verification', () => {
-  for (const commands of [liveClassroomStackCommands, liveClassroomRuntimeWiringCommands]) {
+  for (const commands of [
+    liveClassroomContractShellCommands,
+    liveClassroomStackCommands,
+    liveClassroomRuntimeWiringCommands,
+  ]) {
     const text = JSON.stringify(commands);
-    assert.equal(text.includes('npm","args":["run","build"'), false);
-    assert.equal(text.includes('"vite","build","--config","vite.config.ts"'), true);
+    assert.equal(text.includes('npm\",\"args\":[\"run\",\"build\"'), false);
+    assert.equal(text.includes('\"vite\",\"build\",\"--config\",\"vite.config.ts\"'), true);
     assert.equal(text.includes('copy-trainingos-marketplace-web.mjs'), true);
     assert.equal(text.includes('verify:build'), true);
   }
 });
 
 test('live classroom profiles have no deployment, RTC, network, database, or arbitrary shell execution', () => {
-  const text = JSON.stringify([liveClassroomStackCommands, liveClassroomRuntimeWiringCommands]).toLowerCase();
+  const text = JSON.stringify([
+    liveClassroomContractShellCommands,
+    liveClassroomStackCommands,
+    liveClassroomRuntimeWiringCommands,
+  ]).toLowerCase();
   for (const forbidden of [
     'curl', 'wget', 'ssh', 'scp', 'deploy', 'netlify', 'vercel', 'supabase db',
     'psql', 'tencent', 'zoom', 'agora', 'zego', 'playwright', 'bash -c', 'sh -c',
