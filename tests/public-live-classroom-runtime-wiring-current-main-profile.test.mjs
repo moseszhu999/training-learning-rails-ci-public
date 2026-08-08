@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   LIVE_CLASSROOM_RUNTIME_WIRING_CURRENT_MAIN_EXACT_FILES,
   liveClassroomRuntimeWiringCurrentMainCommands,
+  liveClassroomRuntimeWiringFixedInputMismatches,
   isLiveClassroomRuntimeWiringCurrentMainScope,
 } from '../scripts/run-live-classroom-runtime-wiring-current-main-profile.mjs';
 
@@ -31,6 +32,25 @@ test('current-main F1 locks canonical migration metadata at 369', () => {
     'const EXPECTED_MIGRATION_COUNT = 369;',
     "selectedSuite: 'live-classroom-runtime-wiring-current-main'",
   ]) assert.equal(source.includes(token), true, token);
+});
+
+test('fixed-input diagnostics expose only mismatch keys', () => {
+  assert.deepEqual(liveClassroomRuntimeWiringFixedInputMismatches({
+    expectedNodeCount: '0',
+    expectedPythonCount: '8',
+    expectedMigrationCount: '369',
+    expectedChangedFileCount: '4',
+    migrationStart: 'none',
+    migrationEnd: 'none',
+  }), []);
+  assert.deepEqual(liveClassroomRuntimeWiringFixedInputMismatches({
+    expectedNodeCount: '1',
+    expectedPythonCount: '8',
+    expectedMigrationCount: '369',
+    expectedChangedFileCount: '4',
+    migrationStart: 'none',
+    migrationEnd: 'none',
+  }), ['node-count']);
 });
 
 test('high-level Tencent authorization router considers current-main F1 before historical selectors', () => {
