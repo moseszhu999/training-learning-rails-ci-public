@@ -13,6 +13,7 @@ import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './r
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
 import { maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile } from './run-live-classroom-postclass-evidence-current-main-profile.mjs';
 import { maybeRunCourseDesignMcpReadV1Profile } from './run-course-design-mcp-read-v1-profile.mjs';
+import { maybeRunLiveClassroomBrowserMatrixCurrentMainProfile } from './run-live-classroom-browser-matrix-current-main-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -27,9 +28,9 @@ const todayMasterDetail = {
 
 const permissionContracts = [
   { label: 'python-role-menu-content', moduleName: 'tests.test_trainingos_role_menu_content_permissions_v1' },
-  { label: 'python-advanced-settings', moduleName: 'tests.test_trainingos_advanced_settings' },
-  { label: 'python-risk-intervention', moduleName: 'tests.test_trainingos_risk_intervention_ui_contract' },
-  { label: 'python-zero-permission-core', moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract' },
+  { label: 'python-advanced-settings', moduleName: 'tests.test_trainingos_advanced_settings', },
+  { label: 'python-risk-intervention', moduleName: 'tests.test_trainingos_risk_intervention_ui_contract', },
+  { label: 'python-zero-permission-core', moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract', },
 ];
 
 for (const { label } of [todayMasterDetail, ...permissionContracts]) {
@@ -76,6 +77,8 @@ export async function runProfile(input) {
   if (liveClassroomPostclassEvidence) return liveClassroomPostclassEvidence;
   const courseDesignMcpRead = await maybeRunCourseDesignMcpReadV1Profile(input);
   if (courseDesignMcpRead) return courseDesignMcpRead;
+  const liveClassroomBrowserMatrix = await maybeRunLiveClassroomBrowserMatrixCurrentMainProfile(input);
+  if (liveClassroomBrowserMatrix) return liveClassroomBrowserMatrix;
   return runStage14Profile(input);
 }
 
