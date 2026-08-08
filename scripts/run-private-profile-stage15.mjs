@@ -14,6 +14,7 @@ import { maybeRunJavaDeveloperNewHirePilotProfile } from './run-java-developer-n
 import { maybeRunTrainingBlueprintCourseAlignmentProfile } from './run-training-blueprint-course-alignment-profile.mjs';
 import { maybeRunJavaPilotCourseSourceReadinessProfile } from './run-java-pilot-course-source-readiness-profile.mjs';
 import { maybeRunJavaCourseCanonicalizationProfile } from './run-java-course-source-canonicalization-profile.mjs';
+import { maybeRunCapabilityInitiativeProfile } from './run-capability-initiative-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
@@ -86,6 +87,8 @@ export async function runProfile(input) {
   if (javaPilotCourseSourceReadiness) return javaPilotCourseSourceReadiness;
   const javaCourseCanonicalization = await maybeRunJavaCourseCanonicalizationProfile(input);
   if (javaCourseCanonicalization) return javaCourseCanonicalization;
+  const capabilityInitiative = await maybeRunCapabilityInitiativeProfile(input);
+  if (capabilityInitiative) return capabilityInitiative;
   const liveClassroomTencentProvider = await maybeRunLiveClassroomTencentProviderCurrentMainProfile(input);
   if (liveClassroomTencentProvider) return liveClassroomTencentProvider;
   const liveClassroomTeachingInteractions = await maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile(input);
