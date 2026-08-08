@@ -1,0 +1,25 @@
+{
+  "schema": "public_carrier.opaque_private_exact_head_commitment.v1",
+  "profile_id": "opaque-contract-20260808-01",
+  "source_head_sha256": "de77b8c688bbf0479daf38feb56530c01c35eec3b163db685608229662b27d6a",
+  "artifact_commitments": {
+    "artifact_1": "a3196558eed0cacbfb7f7c80540c87291197ec850a8d6985342348b3da3ecf0a",
+    "artifact_2": "ee3ce6192e75e6cf699aad16dd1eec5b78021e8fb8ee9ef8e2c09f5e6b6605e7",
+    "artifact_3": "b6898258d89be1473c7488ef0c453e601b1f0e366aca7ccaab375752cf4e084e"
+  },
+  "bundle_sha256": "c2a728e9ee544587c28a86e242ef0ac109bb4f5ce36df726bf47bb9f1adc1f6b",
+  "local_exact_content_validation": {
+    "private_ci_step_execution": "unavailable",
+    "public_commitment_tests_passed": 0,
+    "public_commitment_tests_failed": 0
+  },
+  "disclosure": {
+    "classification": "opaque_hashes_only",
+    "contains_private_repository_name": false,
+    "contains_private_branch_or_head": false,
+    "contains_private_file_paths": false,
+    "contains_private_code_or_data": false,
+    "contains_strategy_values": false,
+    "contains_secrets_or_credentials": false
+  }
+}
