@@ -28,7 +28,7 @@ test('release gate selector accepts exactly five no-migration owned files', () =
   );
 });
 
-test('release gate profile locks ten stages and exact 10/12/368 contract', () => {
+test('release gate profile locks ten stages and exact 10/12/369 contract', () => {
   assert.deepEqual(netlifyProductionReleaseGateCommands.map((item) => item.label), [
     'install',
     'gate-syntax',
@@ -49,7 +49,7 @@ test('release gate profile locks ten stages and exact 10/12/368 contract', () =>
     'const EXPECTED_NODE_COUNT = 10;',
     'const EXPECTED_PYTHON_COUNT = 12;',
     'const EXPECTED_CHANGED_FILE_COUNT = 5;',
-    'const EXPECTED_MIGRATION_COUNT = 368;',
+    'const EXPECTED_MIGRATION_COUNT = 369;',
     'actualMigrationCount === EXPECTED_MIGRATION_COUNT',
     "scope.migration_start === 'none'",
     "scope.migration_end === 'none'",
