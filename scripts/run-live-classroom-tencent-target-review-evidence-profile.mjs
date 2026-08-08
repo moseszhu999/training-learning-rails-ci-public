@@ -10,12 +10,13 @@ export const LIVE_CLASSROOM_TENCENT_TARGET_REVIEW_EVIDENCE_EXACT_FILES = new Set
   'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-probe-target-reviews.test.mjs',
   'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-readonly-probe.test.mjs',
   'scripts/trainingos-live-classroom-tencent-readonly-probe.mjs',
+  'tests/test_trainingos_live_classroom_tencent_readonly_probe_v1.py',
   'tests/test_trainingos_live_classroom_tencent_target_review_evidence_v1.py',
 ]);
 
 const EXPECTED_NODE_COUNT = 91;
 const EXPECTED_PYTHON_COUNT = 89;
-const EXPECTED_CHANGED_FILE_COUNT = 7;
+const EXPECTED_CHANGED_FILE_COUNT = 8;
 const EXPECTED_MIGRATION_COUNT = 371;
 const TARGET_MANIFEST = 'config/trainingos-live-classroom-tencent-probe-targets-v1.json';
 const REVIEW_REGISTRY = 'config/trainingos-live-classroom-tencent-probe-target-reviews-v1.json';
