@@ -31,6 +31,14 @@ export const COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES = new Set([
   'tests/test_trainingos_course_video_shared_media_adapter_v1.py',
 ]);
 
+export const AGENT_SKILL_PILOT_EXACT_FILES = new Set([
+  '.agents/skills/training-learning-outcomes/SKILL.md',
+  '.agents/skills/training-course-alignment/SKILL.md',
+  '.agents/skills/training-assessment-plan/SKILL.md',
+  'docs/architecture/trainingos-agent-skill-pilot-v1.md',
+  'tests/test_trainingos_agent_skill_pilot_v1.py',
+]);
+
 export const LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES = new Set([
   'apps/training-web/src/components/TrainingOsAdvancedOperations.tsx',
   'apps/training-web/src/components/TrainingOsLiveClassroomSurface.tsx',
@@ -149,6 +157,18 @@ export const courseVideoSharedMediaCommands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+export const agentSkillPilotCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('focused-python-contracts', 'python', [
+    '-m', 'unittest', '-v',
+    'tests.test_trainingos_agent_skill_pilot_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 export const liveClassroomContractShellCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('focused-python-contracts', 'python', [
@@ -213,6 +233,15 @@ const PROFILES = Object.freeze([
     expectedNodeCount: 12,
     expectedPythonCount: 9,
     commands: courseVideoSharedMediaCommands,
+  }),
+  Object.freeze({
+    suite: 'agent-skill-pilot',
+    files: AGENT_SKILL_PILOT_EXACT_FILES,
+    expectedChangedFileCount: 5,
+    expectedNodeCount: 0,
+    expectedPythonCount: 8,
+    expectedMigrationCount: 369,
+    commands: agentSkillPilotCommands,
   }),
   Object.freeze({
     suite: 'live-classroom-contract-shell',
@@ -291,6 +320,10 @@ export function isMarketplaceRealPilotScope(files) {
 
 export function isCourseVideoSharedMediaScope(files) {
   return isExactScope(files, COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES);
+}
+
+export function isAgentSkillPilotScope(files) {
+  return isExactScope(files, AGENT_SKILL_PILOT_EXACT_FILES);
 }
 
 export function isLiveClassroomContractShellScope(files) {
