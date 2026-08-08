@@ -7,11 +7,12 @@ import {
   liveClassroomTencentTargetReviewEvidenceCommands,
 } from '../scripts/run-live-classroom-tencent-target-review-evidence-profile.mjs';
 
-test('F8 selector accepts exactly seven no-migration owned files', () => {
-  assert.equal(LIVE_CLASSROOM_TENCENT_TARGET_REVIEW_EVIDENCE_EXACT_FILES.size, 7);
+test('F8 selector accepts exactly eight no-migration owned files', () => {
+  assert.equal(LIVE_CLASSROOM_TENCENT_TARGET_REVIEW_EVIDENCE_EXACT_FILES.size, 8);
   for (const required of [
     'config/trainingos-live-classroom-tencent-probe-target-reviews-v1.json',
     'lib/trainingos-agent-gateway/tencent-live-classroom-probe-target-reviews.mjs',
+    'tests/test_trainingos_live_classroom_tencent_readonly_probe_v1.py',
     'tests/test_trainingos_live_classroom_tencent_target_review_evidence_v1.py',
   ]) {
     assert.equal(LIVE_CLASSROOM_TENCENT_TARGET_REVIEW_EVIDENCE_EXACT_FILES.has(required), true, required);
@@ -50,7 +51,7 @@ test('F8 locks ten command stages plus dual-empty-registry gate', () => {
   assert.equal(source.includes("failedLabels = registriesPassed ? [] : ['target-review-registries-empty']"), true);
 });
 
-test('F8 hard-locks 7 files, 371 migrations and combined 91/89 counts', () => {
+test('F8 hard-locks 8 files, 371 migrations and combined 91/89 counts', () => {
   const source = readFileSync(
     new URL('../scripts/run-live-classroom-tencent-target-review-evidence-profile.mjs', import.meta.url),
     'utf8',
@@ -58,7 +59,7 @@ test('F8 hard-locks 7 files, 371 migrations and combined 91/89 counts', () => {
   for (const token of [
     'const EXPECTED_NODE_COUNT = 91;',
     'const EXPECTED_PYTHON_COUNT = 89;',
-    'const EXPECTED_CHANGED_FILE_COUNT = 7;',
+    'const EXPECTED_CHANGED_FILE_COUNT = 8;',
     'const EXPECTED_MIGRATION_COUNT = 371;',
     "scope.migration_start === 'none'",
     "scope.migration_end === 'none'",
@@ -114,6 +115,7 @@ test('F8 regression set includes F2 through F8 review-evidence suites', () => {
   assert.equal(node.args.some((value) => value.endsWith('tencent-live-classroom-readonly-probe.test.mjs')), true);
   assert.equal(python.args.includes('tests.test_trainingos_live_classroom_tencent_target_review_evidence_v1'), true);
   assert.equal(python.args.includes('tests.test_trainingos_live_classroom_tencent_probe_target_attestation_v1'), true);
+  assert.equal(python.args.includes('tests.test_trainingos_live_classroom_tencent_readonly_probe_v1'), true);
 });
 
 test('F7 selector delegates F8 first without central router expansion', () => {
