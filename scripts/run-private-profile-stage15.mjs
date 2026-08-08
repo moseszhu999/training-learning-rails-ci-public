@@ -10,6 +10,7 @@ import { maybeRunIndustryRolePackFoundationProfile } from './run-industry-role-p
 import { maybeRunIndustryRolePackRegistryProfile } from './run-industry-role-pack-registry-profile.mjs';
 import { maybeRunTrainingBlueprintDraftCompilerProfile } from './run-training-blueprint-draft-compiler-profile.mjs';
 import { maybeRunJavaDeveloperNewHirePilotProfile } from './run-java-developer-new-hire-pilot-blueprint-profile.mjs';
+import { maybeRunTrainingBlueprintCourseAlignmentProfile } from './run-training-blueprint-course-alignment-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
@@ -74,6 +75,8 @@ export async function runProfile(input) {
   if (trainingBlueprintDraftCompiler) return trainingBlueprintDraftCompiler;
   const javaDeveloperNewHirePilot = await maybeRunJavaDeveloperNewHirePilotProfile(input);
   if (javaDeveloperNewHirePilot) return javaDeveloperNewHirePilot;
+  const trainingBlueprintCourseAlignment = await maybeRunTrainingBlueprintCourseAlignmentProfile(input);
+  if (trainingBlueprintCourseAlignment) return trainingBlueprintCourseAlignment;
   const liveClassroomTencentProvider = await maybeRunLiveClassroomTencentProviderCurrentMainProfile(input);
   if (liveClassroomTencentProvider) return liveClassroomTencentProvider;
   const liveClassroomTeachingInteractions = await maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile(input);
