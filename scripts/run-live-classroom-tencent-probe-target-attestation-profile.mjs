@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunLiveClassroomTencentTargetReviewEvidenceProfile } from './run-live-classroom-tencent-target-review-evidence-profile.mjs';
 
 export const LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES = new Set([
   'config/trainingos-live-classroom-tencent-probe-targets-v1.json',
@@ -152,6 +153,8 @@ function failedResult(reason) {
 }
 
 export async function maybeRunLiveClassroomTencentProbeTargetAttestationProfile(input) {
+  const targetReviewEvidence = await maybeRunLiveClassroomTencentTargetReviewEvidenceProfile(input);
+  if (targetReviewEvidence) return targetReviewEvidence;
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
   if (!isLiveClassroomTencentProbeTargetAttestationScope(files)) return null;
