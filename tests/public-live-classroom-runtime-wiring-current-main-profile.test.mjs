@@ -33,6 +33,15 @@ test('current-main F1 locks canonical migration metadata at 369', () => {
   ]) assert.equal(source.includes(token), true, token);
 });
 
+test('high-level Tencent authorization router considers current-main F1 before historical selectors', () => {
+  const router = readFileSync(new URL('../scripts/run-live-classroom-tencent-server-authorization-profile.mjs', import.meta.url), 'utf8');
+  const importToken = "import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live-classroom-runtime-wiring-current-main-profile.mjs';";
+  assert.equal(router.includes(importToken), true);
+  const currentF1 = router.indexOf('maybeRunLiveClassroomRuntimeWiringCurrentMainProfile(input)');
+  const provisioning = router.indexOf('maybeRunLiveClassroomTencentProvisioningProfile(input)');
+  assert.ok(currentF1 >= 0 && provisioning > currentF1);
+});
+
 test('validation profile cannot execute provider, network, database, browser, or deploy actions', () => {
   const text = JSON.stringify(liveClassroomRuntimeWiringCurrentMainCommands).toLowerCase();
   for (const forbidden of ['curl', 'wget', 'ssh', 'tencent', 'createroom', 'loginuser', 'joinclass', 'playwright', 'netlify deploy', 'vercel deploy', 'supabase db', 'psql']) {
