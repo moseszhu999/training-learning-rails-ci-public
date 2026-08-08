@@ -58,6 +58,24 @@ test('release gate profile locks ten stages and exact 10/12/369 contract', () =>
   }
 });
 
+test('canonical migration count reuses the private fresh-bootstrap manifest semantics', () => {
+  const source = readFileSync(
+    new URL('../scripts/run-netlify-production-release-gate-profile.mjs', import.meta.url),
+    'utf8',
+  );
+  for (const token of [
+    "scripts/build-trainingos-fresh-bootstrap.py",
+    "trainingos-bootstrap-manifest.json",
+    "manifest.migrationCount",
+    "stdio: 'ignore'",
+    "await rm(bootstrapRoot, { recursive: true, force: true })",
+  ]) {
+    assert.equal(source.includes(token), true, token);
+  }
+  assert.equal(source.includes("readdir(path.join(privateRepoPath, 'supabase/migrations'))"), false);
+  assert.equal(source.includes('/^\\d{14}_.+\\.sql$/'), false);
+});
+
 test('production simulation proves ordinary exact head is skipped with no authorization', () => {
   const command = netlifyProductionReleaseGateCommands.find((item) => item.label === 'production-default-skip');
   assert.equal(command.kind, 'production-skip');
