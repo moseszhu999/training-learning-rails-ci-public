@@ -2,24 +2,23 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { maybeRunLiveClassroomTencentTargetReviewEvidenceProfile } from './run-live-classroom-tencent-target-review-evidence-profile.mjs';
 
-export const LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES = new Set([
-  'config/trainingos-live-classroom-tencent-probe-targets-v1.json',
-  'docs/architecture/trainingos-live-classroom-tencent-probe-target-attestation-v1.md',
-  'lib/trainingos-agent-gateway/tencent-live-classroom-probe-targets.mjs',
-  'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-probe-targets.test.mjs',
+export const LIVE_CLASSROOM_TENCENT_TARGET_REVIEW_EVIDENCE_EXACT_FILES = new Set([
+  'config/trainingos-live-classroom-tencent-probe-target-reviews-v1.json',
+  'docs/architecture/trainingos-live-classroom-tencent-target-review-evidence-v1.md',
+  'lib/trainingos-agent-gateway/tencent-live-classroom-probe-target-reviews.mjs',
+  'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-probe-target-reviews.test.mjs',
   'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-readonly-probe.test.mjs',
   'scripts/trainingos-live-classroom-tencent-readonly-probe.mjs',
-  'tests/test_trainingos_live_classroom_tencent_probe_target_attestation_v1.py',
-  'tests/test_trainingos_live_classroom_tencent_readonly_probe_v1.py',
+  'tests/test_trainingos_live_classroom_tencent_target_review_evidence_v1.py',
 ]);
 
-const EXPECTED_NODE_COUNT = 79;
-const EXPECTED_PYTHON_COUNT = 77;
-const EXPECTED_CHANGED_FILE_COUNT = 8;
+const EXPECTED_NODE_COUNT = 91;
+const EXPECTED_PYTHON_COUNT = 89;
+const EXPECTED_CHANGED_FILE_COUNT = 7;
 const EXPECTED_MIGRATION_COUNT = 371;
-const TARGET_MANIFEST_RELATIVE_PATH = 'config/trainingos-live-classroom-tencent-probe-targets-v1.json';
+const TARGET_MANIFEST = 'config/trainingos-live-classroom-tencent-probe-targets-v1.json';
+const REVIEW_REGISTRY = 'config/trainingos-live-classroom-tencent-probe-target-reviews-v1.json';
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -28,9 +27,9 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
-export const liveClassroomTencentProbeTargetAttestationCommands = Object.freeze([
+export const liveClassroomTencentTargetReviewEvidenceCommands = Object.freeze([
   command('install', 'npm', ['ci']),
-  command('target-verifier-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-probe-targets.mjs']),
+  command('review-verifier-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/tencent-live-classroom-probe-target-reviews.mjs']),
   command('probe-syntax', 'node', ['--check', 'scripts/trainingos-live-classroom-tencent-readonly-probe.mjs']),
   command('probe-dry-run', 'node', ['scripts/trainingos-live-classroom-tencent-readonly-probe.mjs'], 'probe'),
   command('focused-node-contracts', 'node', [
@@ -42,6 +41,7 @@ export const liveClassroomTencentProbeTargetAttestationCommands = Object.freeze(
     'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-reconciliation.test.mjs',
     'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-readonly-probe.test.mjs',
     'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-probe-targets.test.mjs',
+    'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-probe-target-reviews.test.mjs',
   ], 'node'),
   command('focused-python-contracts', 'python', [
     '-m', 'unittest', '-v',
@@ -51,6 +51,7 @@ export const liveClassroomTencentProbeTargetAttestationCommands = Object.freeze(
     'tests.test_trainingos_live_classroom_tencent_reconciliation_v1',
     'tests.test_trainingos_live_classroom_tencent_readonly_probe_v1',
     'tests.test_trainingos_live_classroom_tencent_probe_target_attestation_v1',
+    'tests.test_trainingos_live_classroom_tencent_target_review_evidence_v1',
   ], 'python'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
@@ -78,14 +79,15 @@ function parseDryRun(text) {
     const payload = JSON.parse(String(text).trim());
     const forbidden = [
       'rooms', 'room', 'providerRoomId', 'roomId', 'roomName',
-      'secretId', 'secretKey', 'sdkAppId', 'token', 'headers', 'payload',
-      'targetKey', 'reviewRef', 'expiresOn',
+      'secretId', 'secretKey', 'sdkAppId', 'sdkAppIdSha256', 'token', 'headers', 'payload',
+      'targetKey', 'reviewRef', 'expiresOn', 'evidenceRefs',
     ];
     return payload?.status === 'DRY_RUN'
       && payload?.executeRequested === false
       && payload?.executionAuthorized === false
       && payload?.targetAttestationVerified === false
       && payload?.targetReviewReferencePresent === false
+      && payload?.targetReviewEvidenceVerified === false
       && payload?.providerReadAttempted === false
       && payload?.networkExecutionPerformed === false
       && payload?.providerWritePerformed === false
@@ -98,13 +100,18 @@ function parseDryRun(text) {
   }
 }
 
-async function targetManifestIsEmpty(privateRepoPath) {
+async function registriesAreEmpty(privateRepoPath) {
   try {
-    const payload = JSON.parse(await readFile(path.join(privateRepoPath, TARGET_MANIFEST_RELATIVE_PATH), 'utf8'));
-    return payload?.schema === 'trainingos.tencent-lcic-probe-targets.v1'
-      && payload?.policy === 'explicit-reviewed-isolated-non-production-only'
-      && Array.isArray(payload?.targets)
-      && payload.targets.length === 0;
+    const target = JSON.parse(await readFile(path.join(privateRepoPath, TARGET_MANIFEST), 'utf8'));
+    const review = JSON.parse(await readFile(path.join(privateRepoPath, REVIEW_REGISTRY), 'utf8'));
+    return target?.schema === 'trainingos.tencent-lcic-probe-targets.v1'
+      && target?.policy === 'explicit-reviewed-isolated-non-production-only'
+      && Array.isArray(target?.targets)
+      && target.targets.length === 0
+      && review?.schema === 'trainingos.tencent-lcic-probe-target-reviews.v1'
+      && review?.policy === 'human-reviewed-isolation-evidence-required'
+      && Array.isArray(review?.reviews)
+      && review.reviews.length === 0;
   } catch {
     return false;
   }
@@ -130,10 +137,10 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isLiveClassroomTencentProbeTargetAttestationScope(files) {
+export function isLiveClassroomTencentTargetReviewEvidenceScope(files) {
   const names = [...files];
-  return names.length === LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES.size
-    && names.every((name) => LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES.has(name))
+  return names.length === LIVE_CLASSROOM_TENCENT_TARGET_REVIEW_EVIDENCE_EXACT_FILES.size
+    && names.every((name) => LIVE_CLASSROOM_TENCENT_TARGET_REVIEW_EVIDENCE_EXACT_FILES.has(name))
     && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
@@ -142,22 +149,20 @@ function failedResult(reason) {
     ok: false,
     status: `FAIL:${reason}`,
     failedLabels: Object.freeze([reason]),
-    stepCount: liveClassroomTencentProbeTargetAttestationCommands.length + 1,
+    stepCount: liveClassroomTencentTargetReviewEvidenceCommands.length + 1,
     passedStepCount: 0,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'live-classroom-tencent-probe-target-attestation',
+    selectedSuite: 'live-classroom-tencent-target-review-evidence',
   };
 }
 
-export async function maybeRunLiveClassroomTencentProbeTargetAttestationProfile(input) {
-  const targetReviewEvidence = await maybeRunLiveClassroomTencentTargetReviewEvidenceProfile(input);
-  if (targetReviewEvidence) return targetReviewEvidence;
+export async function maybeRunLiveClassroomTencentTargetReviewEvidenceProfile(input) {
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
-  if (!isLiveClassroomTencentProbeTargetAttestationScope(files)) return null;
+  if (!isLiveClassroomTencentTargetReviewEvidenceScope(files)) return null;
 
   const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
@@ -170,16 +175,16 @@ export async function maybeRunLiveClassroomTencentProbeTargetAttestationProfile(
     return failedResult('fixed-input-contract');
   }
 
-  const manifestPassed = await targetManifestIsEmpty(input.privateRepoPath);
-  let passedStepCount = manifestPassed ? 1 : 0;
+  const registriesPassed = await registriesAreEmpty(input.privateRepoPath);
+  let passedStepCount = registriesPassed ? 1 : 0;
   let nodeTests = 0;
   let nodePassed = 0;
   let pythonTests = 0;
   let dryRunPassed = false;
-  const failedLabels = manifestPassed ? [] : ['target-manifest-empty'];
+  const failedLabels = registriesPassed ? [] : ['target-review-registries-empty'];
 
   try {
-    for (const [index, item] of liveClassroomTencentProbeTargetAttestationCommands.entries()) {
+    for (const [index, item] of liveClassroomTencentTargetReviewEvidenceCommands.entries()) {
       const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const result = spawnSync(item.executable, item.args, {
@@ -207,11 +212,8 @@ export async function maybeRunLiveClassroomTencentProbeTargetAttestationProfile(
   const countsPassed = nodeTests === EXPECTED_NODE_COUNT
     && nodePassed === EXPECTED_NODE_COUNT
     && pythonTests === EXPECTED_PYTHON_COUNT;
-  const stepCount = liveClassroomTencentProbeTargetAttestationCommands.length + 1;
-  const ok = passedStepCount === stepCount
-    && countsPassed
-    && manifestPassed
-    && dryRunPassed;
+  const stepCount = liveClassroomTencentTargetReviewEvidenceCommands.length + 1;
+  const ok = passedStepCount === stepCount && countsPassed && registriesPassed && dryRunPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
     ok,
@@ -223,6 +225,6 @@ export async function maybeRunLiveClassroomTencentProbeTargetAttestationProfile(
     nodePassed,
     nodeFailed: nodeTests - nodePassed,
     pythonTests,
-    selectedSuite: 'live-classroom-tencent-probe-target-attestation',
+    selectedSuite: 'live-classroom-tencent-target-review-evidence',
   };
 }
