@@ -11,9 +11,20 @@ export const MARKETPLACE_DISCOVERY_CORE_EXACT_FILES = new Set([
   'packages/training-marketplace-core/test/marketplace-core.test.mjs',
 ]);
 
+export const MARKETPLACE_CONTRACTS_FINDER_CORE_EXACT_FILES = new Set([
+  'packages/training-marketplace-live-ingestion/package.json',
+  'packages/training-marketplace-live-ingestion/src/index.d.mts',
+  'packages/training-marketplace-live-ingestion/src/index.mjs',
+  'tests/training-marketplace-contracts-finder-source-trust-v1.test.mjs',
+  'tests/training-marketplace-live-ingestion-v1.test.mjs',
+]);
+
 const CANONICAL_MIGRATION_COUNT = 360;
 const EXPECTED_NODE_COUNT = 13;
 const EXPECTED_PYTHON_COUNT = 0;
+const CONTRACTS_FINDER_CANONICAL_MIGRATION_COUNT = 371;
+const CONTRACTS_FINDER_EXPECTED_NODE_COUNT = 7;
+const CONTRACTS_FINDER_EXPECTED_PYTHON_COUNT = 0;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -31,13 +42,27 @@ export const marketplaceDiscoveryCoreCommands = Object.freeze([
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
 ]);
 
+export const marketplaceContractsFinderCoreCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('contracts-finder-syntax', 'node', ['--check', 'packages/training-marketplace-live-ingestion/src/index.mjs']),
+  command('contracts-finder-tests', 'node', [
+    '--test',
+    'tests/training-marketplace-live-ingestion-v1.test.mjs',
+    'tests/training-marketplace-contracts-finder-source-trust-v1.test.mjs',
+  ], 'node'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 function parseNode(text) {
-  return [...text.matchAll(/^# tests\s+(\d+)$/gm)]
+  return [...String(text).matchAll(/^# tests\s+(\d+)$/gm)]
     .reduce((sum, match) => sum + Number(match[1]), 0);
 }
 
 function parseNodePassed(text) {
-  return [...text.matchAll(/^# pass\s+(\d+)$/gm)]
+  return [...String(text).matchAll(/^# pass\s+(\d+)$/gm)]
     .reduce((sum, match) => sum + Number(match[1]), 0);
 }
 
@@ -59,47 +84,51 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isMarketplaceDiscoveryCoreScope(files) {
+function exactSetMatch(files, allowed) {
   const names = [...files];
-  return names.length === MARKETPLACE_DISCOVERY_CORE_EXACT_FILES.size
-    && names.every((name) => MARKETPLACE_DISCOVERY_CORE_EXACT_FILES.has(name))
+  return names.length === allowed.size
+    && names.every((name) => allowed.has(name))
     && names.every((name) => !name.startsWith('supabase/migrations/'))
     && names.every((name) => !name.startsWith('apps/training-web/'))
     && names.every((name) => !name.startsWith('lib/trainingos-agent-gateway/'));
 }
 
-function fixedInputContract(input, scope) {
-  return Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
-    && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
-    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(CANONICAL_MIGRATION_COUNT)
-    && scope.expected_changed_file_count === '5'
+export function isMarketplaceDiscoveryCoreScope(files) {
+  return exactSetMatch(files, MARKETPLACE_DISCOVERY_CORE_EXACT_FILES);
+}
+
+export function isMarketplaceContractsFinderCoreScope(files) {
+  return exactSetMatch(files, MARKETPLACE_CONTRACTS_FINDER_CORE_EXACT_FILES);
+}
+
+function fixedInputContract(input, scope, config) {
+  return Number(input.expectedNodeCount) === config.nodeCount
+    && Number(input.expectedPythonCount) === config.pythonCount
+    && String(process.env.EXPECTED_MIGRATION_COUNT) === String(config.migrationCount)
+    && scope.expected_changed_file_count === String(config.changedFileCount)
     && scope.migration_start === 'none'
     && scope.migration_end === 'none';
 }
 
-function failedContractResult() {
+function failedContractResult(config) {
   return {
     ok: false,
     status: 'FAIL:fixed-input-contract',
     failedLabels: Object.freeze(['fixed-input-contract']),
-    stepCount: marketplaceDiscoveryCoreCommands.length,
+    stepCount: config.commands.length,
     passedStepCount: 0,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'marketplace-discovery-core',
+    selectedSuite: config.selectedSuite,
   };
 }
 
-export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
-  if (input.profile !== 'generic-owned') return null;
-  const { files, scope } = await exactChangedFiles(input);
-  if (!isMarketplaceDiscoveryCoreScope(files)) return null;
-
-  if (!fixedInputContract(input, scope)) {
+async function runFixedScope(input, scope, config) {
+  if (!fixedInputContract(input, scope, config)) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
-    return failedContractResult();
+    return failedContractResult(config);
   }
 
   await mkdir(input.runnerTemp, { recursive: true });
@@ -109,7 +138,7 @@ export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
   const failedLabels = [];
 
   try {
-    for (const [index, item] of marketplaceDiscoveryCoreCommands.entries()) {
+    for (const [index, item] of config.commands.entries()) {
       const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const result = spawnSync(item.executable, item.args, {
@@ -118,7 +147,7 @@ export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
           ...process.env,
           PRIVATE_REPO_PATH: input.privateRepoPath,
           PRIVATE_EXACT_SHA: input.privateExactSha,
-          EXPECTED_MIGRATION_COUNT: String(CANONICAL_MIGRATION_COUNT),
+          EXPECTED_MIGRATION_COUNT: String(config.migrationCount),
           RUNNER_TEMP: input.runnerTemp,
         },
         stdio: ['ignore', descriptor, descriptor],
@@ -137,20 +166,45 @@ export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const countsPassed = nodeTests === EXPECTED_NODE_COUNT
-    && nodePassed === EXPECTED_NODE_COUNT;
-  const ok = passedStepCount === marketplaceDiscoveryCoreCommands.length && countsPassed;
+  const countsPassed = nodeTests === config.nodeCount && nodePassed === config.nodeCount;
+  const ok = passedStepCount === config.commands.length && countsPassed;
   const failure = failedLabels.length ? failedLabels.join(',') : 'count-contract';
   return {
     ok,
     status: ok ? 'PASS' : `FAIL:${failure}`,
     failedLabels: Object.freeze([...failedLabels]),
-    stepCount: marketplaceDiscoveryCoreCommands.length,
+    stepCount: config.commands.length,
     passedStepCount,
     nodeTests,
     nodePassed,
     nodeFailed: nodeTests - nodePassed,
     pythonTests: 0,
-    selectedSuite: 'marketplace-discovery-core',
+    selectedSuite: config.selectedSuite,
   };
+}
+
+const historicalConfig = Object.freeze({
+  commands: marketplaceDiscoveryCoreCommands,
+  migrationCount: CANONICAL_MIGRATION_COUNT,
+  nodeCount: EXPECTED_NODE_COUNT,
+  pythonCount: EXPECTED_PYTHON_COUNT,
+  changedFileCount: 5,
+  selectedSuite: 'marketplace-discovery-core',
+});
+
+const contractsFinderConfig = Object.freeze({
+  commands: marketplaceContractsFinderCoreCommands,
+  migrationCount: CONTRACTS_FINDER_CANONICAL_MIGRATION_COUNT,
+  nodeCount: CONTRACTS_FINDER_EXPECTED_NODE_COUNT,
+  pythonCount: CONTRACTS_FINDER_EXPECTED_PYTHON_COUNT,
+  changedFileCount: 5,
+  selectedSuite: 'marketplace-contracts-finder-core',
+});
+
+export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
+  if (input.profile !== 'generic-owned') return null;
+  const { files, scope } = await exactChangedFiles(input);
+  if (isMarketplaceDiscoveryCoreScope(files)) return runFixedScope(input, scope, historicalConfig);
+  if (isMarketplaceContractsFinderCoreScope(files)) return runFixedScope(input, scope, contractsFinderConfig);
+  return null;
 }
