@@ -12,6 +12,7 @@ import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-li
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
 import { maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile } from './run-live-classroom-postclass-evidence-current-main-profile.mjs';
+import { maybeRunCourseDesignMcpReadV1Profile } from './run-course-design-mcp-read-v1-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -73,6 +74,8 @@ export async function runProfile(input) {
   if (canonicalNorthStar) return canonicalNorthStar;
   const liveClassroomPostclassEvidence = await maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile(input);
   if (liveClassroomPostclassEvidence) return liveClassroomPostclassEvidence;
+  const courseDesignMcpRead = await maybeRunCourseDesignMcpReadV1Profile(input);
+  if (courseDesignMcpRead) return courseDesignMcpRead;
   return runStage14Profile(input);
 }
 
