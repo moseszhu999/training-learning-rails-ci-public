@@ -11,11 +11,12 @@ export const LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES = new S
   'prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-readonly-probe.test.mjs',
   'scripts/trainingos-live-classroom-tencent-readonly-probe.mjs',
   'tests/test_trainingos_live_classroom_tencent_probe_target_attestation_v1.py',
+  'tests/test_trainingos_live_classroom_tencent_readonly_probe_v1.py',
 ]);
 
 const EXPECTED_NODE_COUNT = 79;
 const EXPECTED_PYTHON_COUNT = 77;
-const EXPECTED_CHANGED_FILE_COUNT = 7;
+const EXPECTED_CHANGED_FILE_COUNT = 8;
 const EXPECTED_MIGRATION_COUNT = 371;
 const TARGET_MANIFEST_RELATIVE_PATH = 'config/trainingos-live-classroom-tencent-probe-targets-v1.json';
 
