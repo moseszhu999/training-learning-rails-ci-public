@@ -5,6 +5,7 @@ import {
 } from './run-private-profile-stage14.mjs';
 import { maybeRunLiveClassroomACurrentMainProfile } from './run-live-classroom-a-current-main-profile.mjs';
 import { maybeRunEntitlementBillingProjectionProfile } from './run-entitlement-billing-projection-profile.mjs';
+import { maybeRunAgentSkillEvalFrameworkV2Profile } from './run-agent-skill-eval-framework-v2-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -64,6 +65,8 @@ export async function runProfile(input) {
   if (liveClassroomA) return liveClassroomA;
   const entitlementProjection = await maybeRunEntitlementBillingProjectionProfile(input);
   if (entitlementProjection) return entitlementProjection;
+  const agentSkillEvalFrameworkV2 = await maybeRunAgentSkillEvalFrameworkV2Profile(input);
+  if (agentSkillEvalFrameworkV2) return agentSkillEvalFrameworkV2;
   return runStage14Profile(input);
 }
 
