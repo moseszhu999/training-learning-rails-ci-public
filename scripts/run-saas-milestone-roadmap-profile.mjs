@@ -39,6 +39,14 @@ export const AGENT_SKILL_PILOT_EXACT_FILES = new Set([
   'tests/test_trainingos_agent_skill_pilot_v1.py',
 ]);
 
+export const AGENT_SKILL_EVAL_EXACT_FILES = new Set([
+  'docs/testing/trainingos-agent-skill-eval-pack-v1.md',
+  'lib/agent-skill-evals/trainingos-agent-skill-evals.mjs',
+  'tests/fixtures/trainingos_agent_skill_eval_cases_v1.json',
+  'tests/test_trainingos_agent_skill_eval_pack_v1.py',
+  'tests/trainingos-agent-skill-evals/agent-skill-evals.test.mjs',
+]);
+
 export const LIVE_CLASSROOM_CONTRACT_SHELL_EXACT_FILES = new Set([
   'apps/training-web/src/components/TrainingOsAdvancedOperations.tsx',
   'apps/training-web/src/components/TrainingOsLiveClassroomSurface.tsx',
@@ -169,6 +177,21 @@ export const agentSkillPilotCommands = Object.freeze([
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
 
+export const agentSkillEvalCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('focused-node-contracts', 'node', [
+    '--test', 'tests/trainingos-agent-skill-evals/agent-skill-evals.test.mjs',
+  ], 'node'),
+  command('focused-python-contracts', 'python', [
+    '-m', 'unittest', '-v',
+    'tests.test_trainingos_agent_skill_eval_pack_v1',
+  ], 'python'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
 export const liveClassroomContractShellCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('focused-python-contracts', 'python', [
@@ -242,6 +265,15 @@ const PROFILES = Object.freeze([
     expectedPythonCount: 8,
     expectedMigrationCount: 369,
     commands: agentSkillPilotCommands,
+  }),
+  Object.freeze({
+    suite: 'agent-skill-eval-pack',
+    files: AGENT_SKILL_EVAL_EXACT_FILES,
+    expectedChangedFileCount: 5,
+    expectedNodeCount: 10,
+    expectedPythonCount: 8,
+    expectedMigrationCount: 369,
+    commands: agentSkillEvalCommands,
   }),
   Object.freeze({
     suite: 'live-classroom-contract-shell',
@@ -324,6 +356,10 @@ export function isCourseVideoSharedMediaScope(files) {
 
 export function isAgentSkillPilotScope(files) {
   return isExactScope(files, AGENT_SKILL_PILOT_EXACT_FILES);
+}
+
+export function isAgentSkillEvalScope(files) {
+  return isExactScope(files, AGENT_SKILL_EVAL_EXACT_FILES);
 }
 
 export function isLiveClassroomContractShellScope(files) {
