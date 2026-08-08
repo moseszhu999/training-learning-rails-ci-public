@@ -1,0 +1,190 @@
+name: TrainingOS Agent cleanup fix validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/agent-cleanup-fix-validation-request.json
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: startsWith(github.head_ref, 'ci/agent-cleanup-fix-validation/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out public validation request
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate fixed one-file request
+        id: request
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, appendFile } from 'node:fs/promises';
+          const request = JSON.parse(await readFile('.github/agent-cleanup-fix-validation-request.json', 'utf8'));
+          const allowed = new Set(['requestId', 'privateExactSha', 'expectedBaseSha']);
+          const keys = Object.keys(request);
+          const sha = /^[0-9a-f]{40}$/;
+          const id = /^agent-cleanup-fix-[0-9a-f]{8}-v[1-9][0-9]*$/;
+          const ok = keys.length === allowed.size
+            && keys.every((key) => allowed.has(key))
+            && id.test(String(request.requestId || ''))
+            && sha.test(String(request.privateExactSha || ''))
+            && sha.test(String(request.expectedBaseSha || ''))
+            && request.privateExactSha !== request.expectedBaseSha;
+          await appendFile(process.env.GITHUB_OUTPUT, [
+            `status=${ok ? 'PASS' : 'FAIL'}`,
+            `private_exact_sha=${ok ? request.privateExactSha : ''}`,
+            `expected_base_sha=${ok ? request.expectedBaseSha : ''}`,
+          ].join('\n') + '\n', 'utf8');
+          console.log(`AGENT_CLEANUP_FIX_REQUEST status=${ok ? 'PASS' : 'FAIL'}`);
+          if (!ok) process.exitCode = 1;
+          NODE
+
+      - name: Validate read-only private credential presence
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: test -n "$PRIVATE_TOKEN"
+
+      - name: Check out exact private fix head
+        if: steps.request.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ steps.request.outputs.private_exact_sha }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Check out current private main
+        if: steps.request.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-main
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Verify exact base and exact one-file scope
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        env:
+          EXACT_SHA: ${{ steps.request.outputs.private_exact_sha }}
+          BASE_SHA: ${{ steps.request.outputs.expected_base_sha }}
+        run: |
+          exact="$(git -C private-repo rev-parse HEAD)"
+          current="$(git -C private-main rev-parse HEAD)"
+          test "$exact" = "$EXACT_SHA"
+          test "$current" = "$BASE_SHA"
+          test "$(git -C private-repo merge-base "$BASE_SHA" "$EXACT_SHA")" = "$BASE_SHA"
+          mapfile -t files < <(git -C private-repo diff --name-only "$BASE_SHA" "$EXACT_SHA")
+          test "${#files[@]}" -eq 1
+          test "${files[0]}" = 'prototypes/trainingos-agent-mvp-v1/tencent-daily-ops-cleanup.test.mjs'
+          echo 'AGENT_CLEANUP_FIX_SCOPE status=PASS changed_files=1 migrations=0'
+
+      - name: Install exact private dependencies
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        run: npm ci --prefix private-repo
+
+      - name: Run fixed validation with sealed output
+        id: validation
+        if: steps.request.outputs.status == 'PASS'
+        shell: bash
+        run: |
+          set +e
+          run_sealed() {
+            label="$1"; shift
+            "$@" > "$RUNNER_TEMP/agent-cleanup-${label}.log" 2>&1
+            code=$?
+            echo "${label}_code=$code" >> "$GITHUB_OUTPUT"
+          }
+          run_sealed focused node --test private-repo/prototypes/trainingos-agent-mvp-v1/tencent-daily-ops-cleanup.test.mjs
+          (cd private-repo && npm run test:agent) > "$RUNNER_TEMP/agent-cleanup-full-agent.log" 2>&1
+          echo "agent_code=$?" >> "$GITHUB_OUTPUT"
+          (cd private-repo && npm run typecheck) > "$RUNNER_TEMP/agent-cleanup-typecheck.log" 2>&1
+          echo "typecheck_code=$?" >> "$GITHUB_OUTPUT"
+          (cd private-repo && npx vite build --config vite.config.ts) > "$RUNNER_TEMP/agent-cleanup-build.log" 2>&1
+          echo "build_code=$?" >> "$GITHUB_OUTPUT"
+          (cd private-repo && node scripts/copy-trainingos-marketplace-web.mjs) > "$RUNNER_TEMP/agent-cleanup-postbuild.log" 2>&1
+          echo "postbuild_code=$?" >> "$GITHUB_OUTPUT"
+          (cd private-repo && npm run verify:build) > "$RUNNER_TEMP/agent-cleanup-verify-build.log" 2>&1
+          echo "verify_build_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish sanitized validation verdict
+        if: always() && steps.request.outputs.status == 'PASS'
+        shell: bash
+        env:
+          FOCUSED_CODE: ${{ steps.validation.outputs.focused_code }}
+          AGENT_CODE: ${{ steps.validation.outputs.agent_code }}
+          TYPECHECK_CODE: ${{ steps.validation.outputs.typecheck_code }}
+          BUILD_CODE: ${{ steps.validation.outputs.build_code }}
+          POSTBUILD_CODE: ${{ steps.validation.outputs.postbuild_code }}
+          VERIFY_BUILD_CODE: ${{ steps.validation.outputs.verify_build_code }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, appendFile, rm } from 'node:fs/promises';
+          const code = (name) => Number(process.env[name] || 999);
+          const agentLog = await readFile(`${process.env.RUNNER_TEMP}/agent-cleanup-full-agent.log`, 'utf8').catch(() => '');
+          const lastCount = (label) => {
+            const matches = [...agentLog.matchAll(new RegExp(`^# ${label}\\s+(\\d+)\\s*$`, 'gm'))];
+            return matches.length ? Number(matches.at(-1)[1]) : 0;
+          };
+          const tests = lastCount('tests');
+          const passed = lastCount('pass');
+          const failed = lastCount('fail');
+          const values = {
+            focused: code('FOCUSED_CODE'),
+            agent: code('AGENT_CODE'),
+            typecheck: code('TYPECHECK_CODE'),
+            build: code('BUILD_CODE'),
+            postbuild: code('POSTBUILD_CODE'),
+            verifyBuild: code('VERIFY_BUILD_CODE'),
+          };
+          const ok = Object.values(values).every((value) => value === 0) && failed === 0 && tests > 0 && passed === tests;
+          console.log(`AGENT_CLEANUP_FIX_VALIDATION status=${ok ? 'PASS' : 'FAIL'} tests=${tests} passed=${passed} failed=${failed} focused=${values.focused} agent=${values.agent} typecheck=${values.typecheck} build=${values.build} postbuild=${values.postbuild} verify_build=${values.verifyBuild}`);
+          await appendFile(process.env.GITHUB_STEP_SUMMARY, [
+            '## TrainingOS Agent cleanup fix exact-head validation',
+            '',
+            '- Exact base/current-main equality: **PASS**',
+            '- Changed files: **1**',
+            '- Migrations: **0**',
+            `- Full Agent tests: **${tests}**`,
+            `- Full Agent passed: **${passed}**`,
+            `- Full Agent failed: **${failed}**`,
+            `- Focused cleanup test: **${values.focused === 0 ? 'PASS' : 'FAIL'}**`,
+            `- Typecheck: **${values.typecheck === 0 ? 'PASS' : 'FAIL'}**`,
+            `- Vite production build: **${values.build === 0 ? 'PASS' : 'FAIL'}**`,
+            `- Postbuild: **${values.postbuild === 0 ? 'PASS' : 'FAIL'}**`,
+            `- Bundle verification: **${values.verifyBuild === 0 ? 'PASS' : 'FAIL'}**`,
+            `- Final verdict: **${ok ? 'PASS' : 'FAIL'}**`,
+            '',
+            'Raw private test/build logs, source, assertion payloads, environment variables, and secrets are not published.'
+          ].join('\n') + '\n', 'utf8');
+          for (const name of ['focused','full-agent','typecheck','build','postbuild','verify-build']) {
+            await rm(`${process.env.RUNNER_TEMP}/agent-cleanup-${name}.log`, { force: true });
+          }
+          if (!ok) process.exitCode = 1;
+          NODE
+
+      - name: Remove private checkouts
+        if: always()
+        shell: bash
+        run: rm -rf private-repo private-main
