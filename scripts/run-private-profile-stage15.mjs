@@ -17,6 +17,7 @@ import { maybeRunJavaPilotCourseSourceReadinessProfile } from './run-java-pilot-
 import { maybeRunJavaCourseCanonicalizationProfile } from './run-java-course-source-canonicalization-profile.mjs';
 import { maybeRunCapabilityInitiativeProfile } from './run-capability-initiative-profile.mjs';
 import { maybeRunDemandScopeDeliveryReviewProfile } from './run-demand-scope-delivery-review-profile.mjs';
+import { maybeRunJavaEngagementReconstructionProfile } from './run-java-engagement-reconstruction-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
@@ -27,43 +28,23 @@ import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
-if (roleContractsIndex < 0) {
-  throw new Error('teacher-hub role-contracts command is required');
-}
+if (roleContractsIndex < 0) throw new Error('teacher-hub role-contracts command is required');
 
-const todayMasterDetail = {
-  label: 'python-today-master-detail',
-  moduleName: 'tests.test_trainingos_today_master_detail_v1',
-};
-
+const todayMasterDetail = { label: 'python-today-master-detail', moduleName: 'tests.test_trainingos_today_master_detail_v1' };
 const permissionContracts = [
   { label: 'python-role-menu-content', moduleName: 'tests.test_trainingos_role_menu_content_permissions_v1' },
-  { label: 'python-advanced-settings', moduleName: 'tests.test_trainingos_advanced_settings', },
-  { label: 'python-risk-intervention', moduleName: 'tests.test_trainingos_risk_intervention_ui_contract', },
-  { label: 'python-zero-permission-core', moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract', },
+  { label: 'python-advanced-settings', moduleName: 'tests.test_trainingos_advanced_settings' },
+  { label: 'python-risk-intervention', moduleName: 'tests.test_trainingos_risk_intervention_ui_contract' },
+  { label: 'python-zero-permission-core', moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract' },
 ];
-
 for (const { label } of [todayMasterDetail, ...permissionContracts]) {
-  if (teacherHubCommands.some((item) => item.label === label)) {
-    throw new Error(`duplicate teacher-hub contract label: ${label}`);
-  }
+  if (teacherHubCommands.some((item) => item.label === label)) throw new Error(`duplicate teacher-hub contract label: ${label}`);
 }
-
 teacherHubCommands.splice(
   roleContractsIndex,
   0,
-  {
-    label: todayMasterDetail.label,
-    executable: 'python',
-    args: ['-m', 'unittest', '-v', todayMasterDetail.moduleName],
-    kind: 'python',
-  },
-  ...permissionContracts.map(({ label, moduleName }) => ({
-    label,
-    executable: 'python',
-    args: ['-m', 'unittest', '-v', moduleName],
-    kind: 'python',
-  })),
+  { label: todayMasterDetail.label, executable: 'python', args: ['-m', 'unittest', '-v', todayMasterDetail.moduleName], kind: 'python' },
+  ...permissionContracts.map(({ label, moduleName }) => ({ label, executable: 'python', args: ['-m', 'unittest', '-v', moduleName], kind: 'python' })),
 );
 
 export async function runProfile(input) {
@@ -95,6 +76,8 @@ export async function runProfile(input) {
   if (capabilityInitiative) return capabilityInitiative;
   const demandScopeDeliveryReview = await maybeRunDemandScopeDeliveryReviewProfile(input);
   if (demandScopeDeliveryReview) return demandScopeDeliveryReview;
+  const javaEngagementReconstruction = await maybeRunJavaEngagementReconstructionProfile(input);
+  if (javaEngagementReconstruction) return javaEngagementReconstruction;
   const liveClassroomTencentProvider = await maybeRunLiveClassroomTencentProviderCurrentMainProfile(input);
   if (liveClassroomTencentProvider) return liveClassroomTencentProvider;
   const liveClassroomTeachingInteractions = await maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile(input);
