@@ -14,7 +14,7 @@ export const AGENT_SKILL_EVAL_FRAMEWORK_V2_EXACT_FILES = new Set([
 const EXPECTED_CHANGED_FILE_COUNT = 5;
 const EXPECTED_NODE_COUNT = 14;
 const EXPECTED_PYTHON_COUNT = 10;
-const EXPECTED_MIGRATION_COUNT = 369;
+const EXPECTED_MIGRATION_COUNT = 371;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
