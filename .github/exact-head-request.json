@@ -1,5 +1,5 @@
 {
-  "requestId": "netlify-release-gate-5fc60f1e-v1",
+  "requestId": "netlify-release-gate-5fc60f1e-v2",
   "reportIssueNumber": 728,
   "privateExactSha": "5fc60f1e0ba360153c014a8e9220d5d150611d0a",
   "expectedBaseSha": "db1cfbb2e02bdcb5f9ead35e81833829e9f00238",
@@ -8,7 +8,7 @@
   "expectedChangedFileCount": "5",
   "expectedMigrationRange": "none",
   "expectedFocusedTestCounts": "node=10;python=12",
-  "expectedMigrationCount": "368",
+  "expectedMigrationCount": "369",
   "runFreshReplay": false,
   "runUpgradeReplay": false,
   "runApplicationContracts": false,
