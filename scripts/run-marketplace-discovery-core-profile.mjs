@@ -19,12 +19,25 @@ export const MARKETPLACE_CONTRACTS_FINDER_CORE_EXACT_FILES = new Set([
   'tests/training-marketplace-live-ingestion-v1.test.mjs',
 ]);
 
+export const MARKETPLACE_FIND_A_TENDER_REGISTRY_EXACT_FILES = new Set([
+  'packages/training-marketplace-live-ingestion/package.json',
+  'packages/training-marketplace-live-ingestion/src/find-a-tender.d.mts',
+  'packages/training-marketplace-live-ingestion/src/find-a-tender.mjs',
+  'packages/training-marketplace-live-ingestion/src/sources.d.mts',
+  'packages/training-marketplace-live-ingestion/src/sources.mjs',
+  'tests/training-marketplace-find-a-tender-v1.test.mjs',
+  'tests/training-marketplace-live-ingestion-sources-v1.test.mjs',
+]);
+
 const CANONICAL_MIGRATION_COUNT = 360;
 const EXPECTED_NODE_COUNT = 13;
 const EXPECTED_PYTHON_COUNT = 0;
 const CONTRACTS_FINDER_CANONICAL_MIGRATION_COUNT = 371;
 const CONTRACTS_FINDER_EXPECTED_NODE_COUNT = 7;
 const CONTRACTS_FINDER_EXPECTED_PYTHON_COUNT = 0;
+const FIND_A_TENDER_CANONICAL_MIGRATION_COUNT = 371;
+const FIND_A_TENDER_EXPECTED_NODE_COUNT = 10;
+const FIND_A_TENDER_EXPECTED_PYTHON_COUNT = 0;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -49,6 +62,21 @@ export const marketplaceContractsFinderCoreCommands = Object.freeze([
     '--test',
     'tests/training-marketplace-live-ingestion-v1.test.mjs',
     'tests/training-marketplace-contracts-finder-source-trust-v1.test.mjs',
+  ], 'node'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
+export const marketplaceFindATenderRegistryCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('find-a-tender-syntax', 'node', ['--check', 'packages/training-marketplace-live-ingestion/src/find-a-tender.mjs']),
+  command('source-registry-syntax', 'node', ['--check', 'packages/training-marketplace-live-ingestion/src/sources.mjs']),
+  command('find-a-tender-registry-tests', 'node', [
+    '--test',
+    'tests/training-marketplace-find-a-tender-v1.test.mjs',
+    'tests/training-marketplace-live-ingestion-sources-v1.test.mjs',
   ], 'node'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
@@ -99,6 +127,10 @@ export function isMarketplaceDiscoveryCoreScope(files) {
 
 export function isMarketplaceContractsFinderCoreScope(files) {
   return exactSetMatch(files, MARKETPLACE_CONTRACTS_FINDER_CORE_EXACT_FILES);
+}
+
+export function isMarketplaceFindATenderRegistryScope(files) {
+  return exactSetMatch(files, MARKETPLACE_FIND_A_TENDER_REGISTRY_EXACT_FILES);
 }
 
 function fixedInputContract(input, scope, config) {
@@ -201,10 +233,20 @@ const contractsFinderConfig = Object.freeze({
   selectedSuite: 'marketplace-contracts-finder-core',
 });
 
+const findATenderRegistryConfig = Object.freeze({
+  commands: marketplaceFindATenderRegistryCommands,
+  migrationCount: FIND_A_TENDER_CANONICAL_MIGRATION_COUNT,
+  nodeCount: FIND_A_TENDER_EXPECTED_NODE_COUNT,
+  pythonCount: FIND_A_TENDER_EXPECTED_PYTHON_COUNT,
+  changedFileCount: 7,
+  selectedSuite: 'marketplace-find-a-tender-registry',
+});
+
 export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
   if (isMarketplaceDiscoveryCoreScope(files)) return runFixedScope(input, scope, historicalConfig);
   if (isMarketplaceContractsFinderCoreScope(files)) return runFixedScope(input, scope, contractsFinderConfig);
+  if (isMarketplaceFindATenderRegistryScope(files)) return runFixedScope(input, scope, findATenderRegistryConfig);
   return null;
 }
