@@ -7,8 +7,14 @@ import {
   liveClassroomTencentProbeTargetAttestationCommands,
 } from '../scripts/run-live-classroom-tencent-probe-target-attestation-profile.mjs';
 
-test('F7 selector accepts exactly seven no-migration owned files', () => {
-  assert.equal(LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES.size, 7);
+test('F7 selector accepts exactly eight no-migration owned files', () => {
+  assert.equal(LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES.size, 8);
+  assert.equal(
+    LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES.has(
+      'tests/test_trainingos_live_classroom_tencent_readonly_probe_v1.py',
+    ),
+    true,
+  );
   assert.equal(
     isLiveClassroomTencentProbeTargetAttestationScope(
       LIVE_CLASSROOM_TENCENT_PROBE_TARGET_ATTESTATION_EXACT_FILES,
@@ -53,7 +59,7 @@ test('F7 profile hard-locks files, migration count and combined F2-F7 counts', (
   for (const token of [
     'const EXPECTED_NODE_COUNT = 79;',
     'const EXPECTED_PYTHON_COUNT = 77;',
-    'const EXPECTED_CHANGED_FILE_COUNT = 7;',
+    'const EXPECTED_CHANGED_FILE_COUNT = 8;',
     'const EXPECTED_MIGRATION_COUNT = 371;',
     "scope.migration_start === 'none'",
     "scope.migration_end === 'none'",
