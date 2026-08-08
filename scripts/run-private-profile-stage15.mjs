@@ -4,6 +4,7 @@ import {
   runProfile as runStage14Profile,
 } from './run-private-profile-stage14.mjs';
 import { maybeRunLiveClassroomACurrentMainProfile } from './run-live-classroom-a-current-main-profile.mjs';
+import { maybeRunEntitlementBillingProjectionProfile } from './run-entitlement-billing-projection-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -61,6 +62,8 @@ teacherHubCommands.splice(
 export async function runProfile(input) {
   const liveClassroomA = await maybeRunLiveClassroomACurrentMainProfile(input);
   if (liveClassroomA) return liveClassroomA;
+  const entitlementProjection = await maybeRunEntitlementBillingProjectionProfile(input);
+  if (entitlementProjection) return entitlementProjection;
   return runStage14Profile(input);
 }
 
