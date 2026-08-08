@@ -14,6 +14,7 @@ import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-no
 import { maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile } from './run-live-classroom-postclass-evidence-current-main-profile.mjs';
 import { maybeRunCourseDesignMcpReadV1Profile } from './run-course-design-mcp-read-v1-profile.mjs';
 import { maybeRunLiveClassroomBrowserMatrixCurrentMainProfile } from './run-live-classroom-browser-matrix-current-main-profile.mjs';
+import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live-classroom-runtime-wiring-current-main-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -79,6 +80,8 @@ export async function runProfile(input) {
   if (courseDesignMcpRead) return courseDesignMcpRead;
   const liveClassroomBrowserMatrix = await maybeRunLiveClassroomBrowserMatrixCurrentMainProfile(input);
   if (liveClassroomBrowserMatrix) return liveClassroomBrowserMatrix;
+  const liveClassroomRuntimeWiring = await maybeRunLiveClassroomRuntimeWiringCurrentMainProfile(input);
+  if (liveClassroomRuntimeWiring) return liveClassroomRuntimeWiring;
   return runStage14Profile(input);
 }
 
