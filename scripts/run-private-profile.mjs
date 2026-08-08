@@ -26,6 +26,7 @@ export * from './run-live-classroom-tencent-server-authorization-profile.mjs';
 export * from './run-live-classroom-tencent-binding-db-profile.mjs';
 export * from './run-live-classroom-tencent-readonly-probe-profile.mjs';
 export * from './run-live-classroom-tencent-probe-target-attestation-profile.mjs';
+export * from './run-netlify-production-release-gate-profile.mjs';
 
 import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -57,6 +58,7 @@ import { maybeRunLiveClassroomTencentServerAuthorizationProfile } from './run-li
 import { maybeRunLiveClassroomTencentBindingDbProfile } from './run-live-classroom-tencent-binding-db-profile.mjs';
 import { maybeRunLiveClassroomTencentReadonlyProbeProfile } from './run-live-classroom-tencent-readonly-probe-profile.mjs';
 import { maybeRunLiveClassroomTencentProbeTargetAttestationProfile } from './run-live-classroom-tencent-probe-target-attestation-profile.mjs';
+import { maybeRunNetlifyProductionReleaseGateProfile } from './run-netlify-production-release-gate-profile.mjs';
 import {
   applyYouthGuardianReleaseGate,
   runYouthGuardianReleaseGate,
@@ -116,6 +118,9 @@ export async function runProfile(input) {
   if (input.profile === 'source-audit-action-receipt') {
     return runSourceAuditActionReceiptProfile(input);
   }
+
+  const netlifyProductionReleaseGate = await maybeRunNetlifyProductionReleaseGateProfile(input);
+  if (netlifyProductionReleaseGate) return netlifyProductionReleaseGate;
 
   const workspaceIaDensity = await maybeRunWorkspaceIaDensityProfile(input);
   if (workspaceIaDensity) return workspaceIaDensity;
