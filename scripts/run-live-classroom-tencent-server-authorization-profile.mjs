@@ -3,6 +3,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live-classroom-runtime-wiring-current-main-profile.mjs';
+import { maybeRunLiveClassroomF2CurrentMainProfile } from './run-live-classroom-tencent-server-authorization-current-main-profile.mjs';
 import { maybeRunLiveClassroomTencentProvisioningProfile } from './run-live-classroom-tencent-provisioning-profile.mjs';
 
 export const LIVE_CLASSROOM_TENCENT_SERVER_AUTH_EXACT_FILES = new Set([
@@ -103,11 +104,13 @@ function failedResult(reason, stepCount = liveClassroomTencentServerAuthorizatio
 }
 
 export async function maybeRunLiveClassroomTencentServerAuthorizationProfile(input) {
-  // Current-main F1 must be considered here because this high-level router is
-  // invoked before stage15 and before the historical SaaS roadmap F1 selector.
-  // Exact file-set matching keeps F1 and F2/F4 ownership disjoint.
+  // Current-main wrappers must run before historical fixed-input contracts.
+  // Exact file-set matching keeps F1, F2 and F4 ownership disjoint.
   const currentRuntimeWiring = await maybeRunLiveClassroomRuntimeWiringCurrentMainProfile(input);
   if (currentRuntimeWiring) return currentRuntimeWiring;
+
+  const currentServerAuthorization = await maybeRunLiveClassroomF2CurrentMainProfile(input);
+  if (currentServerAuthorization) return currentServerAuthorization;
 
   const provisioning = await maybeRunLiveClassroomTencentProvisioningProfile(input);
   if (provisioning) return provisioning;
