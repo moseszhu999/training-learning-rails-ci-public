@@ -43,12 +43,10 @@ test('focused contract count stays A-only', () => {
   ]) assert.equal(source.includes(token), true, token);
 });
 
-test('central router invokes current-main A before broader generic scopes', () => {
-  const router = readFileSync(new URL('../scripts/run-private-profile.mjs', import.meta.url), 'utf8');
-  assert.equal(router.includes("export * from './run-live-classroom-a-current-main-profile.mjs';"), true);
+test('stage15 invokes current-main A before inherited generic fallback', () => {
+  const router = readFileSync(new URL('../scripts/run-private-profile-stage15.mjs', import.meta.url), 'utf8');
   assert.equal(router.includes("import { maybeRunLiveClassroomACurrentMainProfile } from './run-live-classroom-a-current-main-profile.mjs';"), true);
   const currentA = router.indexOf('maybeRunLiveClassroomACurrentMainProfile(input)');
-  const workspace = router.indexOf('maybeRunWorkspaceIaDensityProfile(input)');
-  const roadmap = router.indexOf('maybeRunSaasMilestoneRoadmapProfile(input)');
-  assert.ok(currentA >= 0 && workspace > currentA && roadmap > currentA);
+  const fallback = router.indexOf('runStage14Profile(input)');
+  assert.ok(currentA >= 0 && fallback > currentA);
 });
