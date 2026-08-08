@@ -8,6 +8,7 @@ import { maybeRunEntitlementBillingProjectionProfile } from './run-entitlement-b
 import { maybeRunAgentSkillEvalFrameworkV2Profile } from './run-agent-skill-eval-framework-v2-profile.mjs';
 import { maybeRunIndustryRolePackFoundationProfile } from './run-industry-role-pack-foundation-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
+import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -21,22 +22,10 @@ const todayMasterDetail = {
 };
 
 const permissionContracts = [
-  {
-    label: 'python-role-menu-content',
-    moduleName: 'tests.test_trainingos_role_menu_content_permissions_v1',
-  },
-  {
-    label: 'python-advanced-settings',
-    moduleName: 'tests.test_trainingos_advanced_settings',
-  },
-  {
-    label: 'python-risk-intervention',
-    moduleName: 'tests.test_trainingos_risk_intervention_ui_contract',
-  },
-  {
-    label: 'python-zero-permission-core',
-    moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract',
-  },
+  { label: 'python-role-menu-content', moduleName: 'tests.test_trainingos_role_menu_content_permissions_v1' },
+  { label: 'python-advanced-settings', moduleName: 'tests.test_trainingos_advanced_settings' },
+  { label: 'python-risk-intervention', moduleName: 'tests.test_trainingos_risk_intervention_ui_contract' },
+  { label: 'python-zero-permission-core', moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract' },
 ];
 
 for (const { label } of [todayMasterDetail, ...permissionContracts]) {
@@ -73,6 +62,8 @@ export async function runProfile(input) {
   if (industryRolePack) return industryRolePack;
   const liveClassroomTencentProvider = await maybeRunLiveClassroomTencentProviderCurrentMainProfile(input);
   if (liveClassroomTencentProvider) return liveClassroomTencentProvider;
+  const liveClassroomTeachingInteractions = await maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile(input);
+  if (liveClassroomTeachingInteractions) return liveClassroomTeachingInteractions;
   return runStage14Profile(input);
 }
 
