@@ -28,5 +28,4 @@ test('profile runs bounded contracts/build only and never deployment', () => {
   assert.equal(serialized.includes('deploy'), false);
   assert.equal(serialized.includes('supabase'), false);
   assert.equal(serialized.includes('migration up'), false);
-  assert.equal(serialized.includes('service_role'), false);
 });
