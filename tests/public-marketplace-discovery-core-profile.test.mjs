@@ -6,12 +6,15 @@ import {
   MARKETPLACE_DISCOVERY_CORE_EXACT_FILES,
   MARKETPLACE_CONTRACTS_FINDER_CORE_EXACT_FILES,
   MARKETPLACE_FIND_A_TENDER_REGISTRY_EXACT_FILES,
+  MARKETPLACE_SOURCE_HEALTH_CORE_EXACT_FILES,
   isMarketplaceDiscoveryCoreScope,
   isMarketplaceContractsFinderCoreScope,
   isMarketplaceFindATenderRegistryScope,
+  isMarketplaceSourceHealthCoreScope,
   marketplaceDiscoveryCoreCommands,
   marketplaceContractsFinderCoreCommands,
   marketplaceFindATenderRegistryCommands,
+  marketplaceSourceHealthCoreCommands,
 } from '../scripts/run-marketplace-discovery-core-profile.mjs';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
@@ -42,11 +45,19 @@ const findATenderFiles = [
   'tests/training-marketplace-live-ingestion-sources-v1.test.mjs',
 ];
 
+const sourceHealthFiles = [
+  'packages/training-marketplace-source-health/package.json',
+  'packages/training-marketplace-source-health/src/index.d.ts',
+  'packages/training-marketplace-source-health/src/index.mjs',
+  'packages/training-marketplace-source-health/test/source-health.test.mjs',
+];
+
 test('historical Marketplace discovery core remains exact and unchanged', () => {
   assert.deepEqual([...MARKETPLACE_DISCOVERY_CORE_EXACT_FILES].sort(), historicalFiles.sort());
   assert.equal(isMarketplaceDiscoveryCoreScope(historicalFiles), true);
   assert.equal(isMarketplaceContractsFinderCoreScope(historicalFiles), false);
   assert.equal(isMarketplaceFindATenderRegistryScope(historicalFiles), false);
+  assert.equal(isMarketplaceSourceHealthCoreScope(historicalFiles), false);
   assert.deepEqual(marketplaceDiscoveryCoreCommands.map((item) => item.label), [
     'install', 'package-syntax', 'package-tests', 'package-demo', 'typecheck', 'production-build',
   ]);
@@ -57,6 +68,7 @@ test('Contracts Finder child remains exact and disjoint', () => {
   assert.equal(isMarketplaceContractsFinderCoreScope(contractsFinderFiles), true);
   assert.equal(isMarketplaceDiscoveryCoreScope(contractsFinderFiles), false);
   assert.equal(isMarketplaceFindATenderRegistryScope(contractsFinderFiles), false);
+  assert.equal(isMarketplaceSourceHealthCoreScope(contractsFinderFiles), false);
   assert.deepEqual(marketplaceContractsFinderCoreCommands.map((item) => item.label), [
     'install', 'contracts-finder-syntax', 'contracts-finder-tests', 'typecheck',
     'production-build', 'postbuild-copy', 'bundle-verification',
@@ -68,6 +80,7 @@ test('Find-a-Tender registry child locks exact seven-file zero-migration scope',
   assert.equal(isMarketplaceFindATenderRegistryScope(findATenderFiles), true);
   assert.equal(isMarketplaceDiscoveryCoreScope(findATenderFiles), false);
   assert.equal(isMarketplaceContractsFinderCoreScope(findATenderFiles), false);
+  assert.equal(isMarketplaceSourceHealthCoreScope(findATenderFiles), false);
   assert.equal(isMarketplaceFindATenderRegistryScope([...findATenderFiles, 'netlify.toml']), false);
   assert.equal(isMarketplaceFindATenderRegistryScope(findATenderFiles.slice(1)), false);
 });
@@ -89,7 +102,32 @@ test('Find-a-Tender registry profile runs exactly eight bounded stages', () => {
   assert.doesNotMatch(serialized, /curl|wget|playwright|supabase|psql/i);
 });
 
-test('all three metadata contracts remain independently fixed', async () => {
+test('Source Health child locks exact four-file zero-migration scope', () => {
+  assert.deepEqual([...MARKETPLACE_SOURCE_HEALTH_CORE_EXACT_FILES].sort(), sourceHealthFiles.sort());
+  assert.equal(isMarketplaceSourceHealthCoreScope(sourceHealthFiles), true);
+  assert.equal(isMarketplaceDiscoveryCoreScope(sourceHealthFiles), false);
+  assert.equal(isMarketplaceContractsFinderCoreScope(sourceHealthFiles), false);
+  assert.equal(isMarketplaceFindATenderRegistryScope(sourceHealthFiles), false);
+  assert.equal(isMarketplaceSourceHealthCoreScope([...sourceHealthFiles, 'netlify.toml']), false);
+  assert.equal(isMarketplaceSourceHealthCoreScope(sourceHealthFiles.slice(1)), false);
+});
+
+test('Source Health profile runs exactly seven bounded stages', () => {
+  assert.deepEqual(marketplaceSourceHealthCoreCommands.map((item) => item.label), [
+    'install',
+    'source-health-syntax',
+    'source-health-tests',
+    'typecheck',
+    'production-build',
+    'postbuild-copy',
+    'bundle-verification',
+  ]);
+  const serialized = JSON.stringify(marketplaceSourceHealthCoreCommands);
+  assert.match(serialized, /training-marketplace-source-health/);
+  assert.doesNotMatch(serialized, /curl|wget|playwright|supabase|psql/i);
+});
+
+test('all four metadata contracts remain independently fixed', async () => {
   const source = await read('../scripts/run-marketplace-discovery-core-profile.mjs');
   assert.match(source, /CANONICAL_MIGRATION_COUNT = 360/);
   assert.match(source, /EXPECTED_NODE_COUNT = 13/);
@@ -97,9 +135,12 @@ test('all three metadata contracts remain independently fixed', async () => {
   assert.match(source, /CONTRACTS_FINDER_EXPECTED_NODE_COUNT = 7/);
   assert.match(source, /FIND_A_TENDER_CANONICAL_MIGRATION_COUNT = 371/);
   assert.match(source, /FIND_A_TENDER_EXPECTED_NODE_COUNT = 10/);
+  assert.match(source, /SOURCE_HEALTH_CANONICAL_MIGRATION_COUNT = 371/);
+  assert.match(source, /SOURCE_HEALTH_EXPECTED_NODE_COUNT = 5/);
   assert.match(source, /selectedSuite: 'marketplace-discovery-core'/);
   assert.match(source, /selectedSuite: 'marketplace-contracts-finder-core'/);
   assert.match(source, /selectedSuite: 'marketplace-find-a-tender-registry'/);
+  assert.match(source, /selectedSuite: 'marketplace-source-health-core'/);
   assert.doesNotMatch(source, /db reset|migration up|psql|supabase start/i);
   assert.doesNotMatch(source, /crawler|scrape|fetch\(|upload-artifact/i);
 });
@@ -113,6 +154,7 @@ test('all scopes reject migration, product UI and gateway expansion', () => {
     assert.equal(isMarketplaceDiscoveryCoreScope([...historicalFiles, suffix]), false);
     assert.equal(isMarketplaceContractsFinderCoreScope([...contractsFinderFiles, suffix]), false);
     assert.equal(isMarketplaceFindATenderRegistryScope([...findATenderFiles, suffix]), false);
+    assert.equal(isMarketplaceSourceHealthCoreScope([...sourceHealthFiles, suffix]), false);
   }
 });
 
