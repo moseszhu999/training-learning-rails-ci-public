@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunMarketplaceBrowserLiveCoreProfile } from './run-marketplace-browser-live-core-profile.mjs';
 
 export const MARKETPLACE_LIVE_RUNTIME_ADAPTER_EXACT_FILES = new Set([
   'lib/trainingos-marketplace-live-ingestion/supabase.mjs',
@@ -82,6 +83,9 @@ function failedContractResult() {
 
 export async function maybeRunMarketplaceLiveRuntimeAdapterProfile(input) {
   if (input.profile !== 'generic-owned') return null;
+  const browserLiveCore = await maybeRunMarketplaceBrowserLiveCoreProfile(input);
+  if (browserLiveCore) return browserLiveCore;
+
   const { files, scope } = await exactChangedFiles(input);
   if (!isMarketplaceLiveRuntimeAdapterScope(files)) return null;
 
