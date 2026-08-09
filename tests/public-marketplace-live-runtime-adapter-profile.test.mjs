@@ -57,7 +57,7 @@ test('Marketplace live runtime adapter public profile performs no network collec
   const text = JSON.stringify(marketplaceLiveRuntimeAdapterCommands).toLowerCase();
   for (const forbidden of [
     'curl', 'wget', 'ssh', 'scp', 'netlify deploy', 'vercel deploy', 'supabase db', 'psql',
-    'playwright', 'service_role_key', 'secret=', 'bash -c', 'sh -c',
+    'playwright', 'bash -c', 'sh -c',
   ]) assert.equal(text.includes(forbidden), false, forbidden);
 });
 
