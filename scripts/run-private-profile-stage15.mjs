@@ -21,6 +21,7 @@ import { maybeRunGroupWorkEntryAdapterProfile } from './run-group-work-entry-ada
 import { maybeRunVercelMainProductionGateProfile } from './run-vercel-main-production-gate-profile.mjs';
 import { maybeRunWorkspaceTransferPersistenceProfile } from './run-marketplace-workspace-transfer-persistence-profile.mjs';
 import { maybeRunLiveDiscoveryPersistenceProfile } from './run-marketplace-live-discovery-persistence-profile.mjs';
+import { maybeRunMarketplaceLiveRuntimeAdapterProfile } from './run-marketplace-live-runtime-adapter-profile.mjs';
 import { maybeRunDemandScopeDeliveryReviewProfile } from './run-demand-scope-delivery-review-profile.mjs';
 import { maybeRunJavaEngagementReconstructionProfile } from './run-java-engagement-reconstruction-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
@@ -109,6 +110,8 @@ export async function runProfile(input) {
   if (workspaceTransferPersistence) return workspaceTransferPersistence;
   const liveDiscoveryPersistence = await maybeRunLiveDiscoveryPersistenceProfile(input);
   if (liveDiscoveryPersistence) return liveDiscoveryPersistence;
+  const marketplaceLiveRuntimeAdapter = await maybeRunMarketplaceLiveRuntimeAdapterProfile(input);
+  if (marketplaceLiveRuntimeAdapter) return marketplaceLiveRuntimeAdapter;
   const demandScopeDeliveryReview = await maybeRunDemandScopeDeliveryReviewProfile(input);
   if (demandScopeDeliveryReview) return demandScopeDeliveryReview;
   const javaEngagementReconstruction = await maybeRunJavaEngagementReconstructionProfile(input);
