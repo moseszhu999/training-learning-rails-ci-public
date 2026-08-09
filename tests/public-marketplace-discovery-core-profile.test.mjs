@@ -21,7 +21,6 @@ import {
 } from '../scripts/run-marketplace-discovery-core-profile.mjs';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
-
 const historicalFiles = [
   'docs/architecture/trainingos-marketplace-discovery-core-v1.md',
   'packages/training-marketplace-core/examples/marketplace-demo.mjs',
@@ -29,7 +28,6 @@ const historicalFiles = [
   'packages/training-marketplace-core/src/index.mjs',
   'packages/training-marketplace-core/test/marketplace-core.test.mjs',
 ];
-
 const contractsFinderFiles = [
   'packages/training-marketplace-live-ingestion/package.json',
   'packages/training-marketplace-live-ingestion/src/index.d.mts',
@@ -37,7 +35,6 @@ const contractsFinderFiles = [
   'tests/training-marketplace-contracts-finder-source-trust-v1.test.mjs',
   'tests/training-marketplace-live-ingestion-v1.test.mjs',
 ];
-
 const findATenderFiles = [
   'packages/training-marketplace-live-ingestion/package.json',
   'packages/training-marketplace-live-ingestion/src/find-a-tender.d.mts',
@@ -47,14 +44,12 @@ const findATenderFiles = [
   'tests/training-marketplace-find-a-tender-v1.test.mjs',
   'tests/training-marketplace-live-ingestion-sources-v1.test.mjs',
 ];
-
 const sourceHealthFiles = [
   'packages/training-marketplace-source-health/package.json',
   'packages/training-marketplace-source-health/src/index.d.ts',
   'packages/training-marketplace-source-health/src/index.mjs',
   'packages/training-marketplace-source-health/test/source-health.test.mjs',
 ];
-
 const workspaceTransferFiles = [
   'packages/training-marketplace-workspace-transfer/package.json',
   'packages/training-marketplace-workspace-transfer/src/index.d.mts',
@@ -140,13 +135,8 @@ test('Workspace Transfer child locks exact five-file zero-migration scope', () =
 
 test('Workspace Transfer profile runs exactly seven bounded stages and no execution tools', () => {
   assert.deepEqual(marketplaceWorkspaceTransferCoreCommands.map((item) => item.label), [
-    'install',
-    'workspace-transfer-syntax',
-    'workspace-transfer-tests',
-    'typecheck',
-    'production-build',
-    'postbuild-copy',
-    'bundle-verification',
+    'install', 'workspace-transfer-syntax', 'workspace-transfer-tests', 'typecheck',
+    'production-build', 'postbuild-copy', 'bundle-verification',
   ]);
   const serialized = JSON.stringify(marketplaceWorkspaceTransferCoreCommands);
   assert.match(serialized, /training-marketplace-workspace-agent-bridge-v1/);
@@ -164,7 +154,7 @@ test('all five metadata contracts remain independently fixed', async () => {
   assert.match(source, /SOURCE_HEALTH_CANONICAL_MIGRATION_COUNT = 371/);
   assert.match(source, /SOURCE_HEALTH_EXPECTED_NODE_COUNT = 5/);
   assert.match(source, /WORKSPACE_TRANSFER_CANONICAL_MIGRATION_COUNT = 371/);
-  assert.match(source, /WORKSPACE_TRANSFER_EXPECTED_NODE_COUNT = 8/);
+  assert.match(source, /WORKSPACE_TRANSFER_EXPECTED_NODE_COUNT = 9/);
   assert.match(source, /selectedSuite: 'marketplace-discovery-core'/);
   assert.match(source, /selectedSuite: 'marketplace-contracts-finder-core'/);
   assert.match(source, /selectedSuite: 'marketplace-find-a-tender-registry'/);
