@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   COURSE_VIDEO_SHARED_MEDIA_EXACT_FILES,
   courseVideoSharedMediaCommands,
@@ -39,6 +40,12 @@ test('fixed command map runs only bounded validation stages', () => {
   assert.deepEqual(courseVideoSharedMediaCommands.find((item) => item.label === 'focused-python-contracts').args, [
     'tests/test_trainingos_course_video_shared_media_adapter_v1.py', '-v',
   ]);
+});
+
+test('course video profile locks current canonical migration compatibility at 371', () => {
+  const source = readFileSync(new URL('../scripts/run-saas-milestone-roadmap-profile.mjs', import.meta.url), 'utf8');
+  const courseProfile = source.slice(source.indexOf("suite: 'course-video-shared-media-adapter'"), source.indexOf("suite: 'agent-skill-pilot'"));
+  assert.match(courseProfile, /expectedMigrationCount:\s*371/);
 });
 
 test('profile contains no network, deployment, render, or arbitrary shell command', () => {
