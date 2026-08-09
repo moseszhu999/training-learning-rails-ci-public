@@ -255,6 +255,7 @@ const PROFILES = Object.freeze([
     expectedChangedFileCount: 6,
     expectedNodeCount: 12,
     expectedPythonCount: 9,
+    expectedMigrationCount: 371,
     commands: courseVideoSharedMediaCommands,
   }),
   Object.freeze({
