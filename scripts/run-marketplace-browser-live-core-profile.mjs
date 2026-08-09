@@ -2,19 +2,17 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { maybeRunMarketplaceBrowserLiveCoreProfile } from './run-marketplace-browser-live-core-profile.mjs';
 
-export const MARKETPLACE_LIVE_RUNTIME_ADAPTER_EXACT_FILES = new Set([
-  'lib/trainingos-marketplace-live-ingestion/supabase.mjs',
-  'netlify/functions/trainingos-marketplace-catalog.mjs',
-  'netlify/functions/trainingos-marketplace-live-ingestion.mjs',
-  'tests/test_trainingos_marketplace_live_runtime_adapter_v1.py',
-  'tests/training-marketplace-catalog-preview-routing-v1.test.mjs',
+export const MARKETPLACE_BROWSER_LIVE_CORE_EXACT_FILES = new Set([
+  'apps/training-marketplace-web/src/live-data.mjs',
+  'apps/training-marketplace-web/src/source-health.mjs',
+  'tests/training-marketplace-browser-live-core-v1.test.mjs',
+  'tests/training-marketplace-source-health-v1.test.mjs',
 ]);
 
-const EXPECTED_CHANGED_FILE_COUNT = 5;
-const EXPECTED_NODE_COUNT = 2;
-const EXPECTED_PYTHON_COUNT = 5;
+const EXPECTED_CHANGED_FILE_COUNT = 4;
+const EXPECTED_NODE_COUNT = 8;
+const EXPECTED_PYTHON_COUNT = 0;
 const EXPECTED_MIGRATION_COUNT = 373;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
@@ -24,13 +22,15 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
-export const marketplaceLiveRuntimeAdapterCommands = Object.freeze([
+export const marketplaceBrowserLiveCoreCommands = Object.freeze([
   command('install', 'npm', ['ci']),
-  command('runtime-adapter-syntax', 'node', ['--check', 'lib/trainingos-marketplace-live-ingestion/supabase.mjs']),
-  command('catalog-function-syntax', 'node', ['--check', 'netlify/functions/trainingos-marketplace-catalog.mjs']),
-  command('ingestion-function-syntax', 'node', ['--check', 'netlify/functions/trainingos-marketplace-live-ingestion.mjs']),
-  command('focused-node-contracts', 'node', ['--test', 'tests/training-marketplace-catalog-preview-routing-v1.test.mjs'], 'node'),
-  command('focused-python-contracts', 'python', ['-m', 'unittest', '-v', 'tests.test_trainingos_marketplace_live_runtime_adapter_v1'], 'python'),
+  command('live-data-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/live-data.mjs']),
+  command('source-health-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/source-health.mjs']),
+  command('focused-node-contracts', 'node', [
+    '--test',
+    'tests/training-marketplace-browser-live-core-v1.test.mjs',
+    'tests/training-marketplace-source-health-v1.test.mjs',
+  ], 'node'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
   command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
@@ -59,10 +59,10 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isMarketplaceLiveRuntimeAdapterScope(files) {
+export function isMarketplaceBrowserLiveCoreScope(files) {
   const names = [...files];
-  return names.length === MARKETPLACE_LIVE_RUNTIME_ADAPTER_EXACT_FILES.size
-    && names.every((name) => MARKETPLACE_LIVE_RUNTIME_ADAPTER_EXACT_FILES.has(name))
+  return names.length === MARKETPLACE_BROWSER_LIVE_CORE_EXACT_FILES.size
+    && names.every((name) => MARKETPLACE_BROWSER_LIVE_CORE_EXACT_FILES.has(name))
     && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
@@ -71,23 +71,20 @@ function failedContractResult() {
     ok: false,
     status: 'FAIL:fixed-input-contract',
     failedLabels: Object.freeze(['fixed-input-contract']),
-    stepCount: marketplaceLiveRuntimeAdapterCommands.length,
+    stepCount: marketplaceBrowserLiveCoreCommands.length,
     passedStepCount: 0,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'marketplace-live-runtime-adapter',
+    selectedSuite: 'marketplace-browser-live-core',
   };
 }
 
-export async function maybeRunMarketplaceLiveRuntimeAdapterProfile(input) {
+export async function maybeRunMarketplaceBrowserLiveCoreProfile(input) {
   if (input.profile !== 'generic-owned') return null;
-  const browserLiveCore = await maybeRunMarketplaceBrowserLiveCoreProfile(input);
-  if (browserLiveCore) return browserLiveCore;
-
   const { files, scope } = await exactChangedFiles(input);
-  if (!isMarketplaceLiveRuntimeAdapterScope(files)) return null;
+  if (!isMarketplaceBrowserLiveCoreScope(files)) return null;
 
   const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
@@ -108,8 +105,8 @@ export async function maybeRunMarketplaceLiveRuntimeAdapterProfile(input) {
   const failedLabels = [];
 
   try {
-    for (const [index, item] of marketplaceLiveRuntimeAdapterCommands.entries()) {
-      const logPath = path.join(input.runnerTemp, `trainingos-marketplace-live-runtime-adapter-${index + 1}.log`);
+    for (const [index, item] of marketplaceBrowserLiveCoreCommands.entries()) {
+      const logPath = path.join(input.runnerTemp, `trainingos-marketplace-browser-live-core-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const commandResult = spawnSync(item.executable, item.args, {
         cwd: input.privateRepoPath,
@@ -132,7 +129,7 @@ export async function maybeRunMarketplaceLiveRuntimeAdapterProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const stepCount = marketplaceLiveRuntimeAdapterCommands.length;
+  const stepCount = marketplaceBrowserLiveCoreCommands.length;
   const countsPassed = nodeTests === EXPECTED_NODE_COUNT
     && nodePassed === EXPECTED_NODE_COUNT
     && nodeFailed === 0
@@ -149,6 +146,6 @@ export async function maybeRunMarketplaceLiveRuntimeAdapterProfile(input) {
     nodePassed,
     nodeFailed,
     pythonTests,
-    selectedSuite: 'marketplace-live-runtime-adapter',
+    selectedSuite: 'marketplace-browser-live-core',
   };
 }
