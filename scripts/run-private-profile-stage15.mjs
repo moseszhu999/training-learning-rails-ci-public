@@ -17,6 +17,7 @@ import { maybeRunJavaPilotCourseSourceReadinessProfile } from './run-java-pilot-
 import { maybeRunJavaCourseCanonicalizationProfile } from './run-java-course-source-canonicalization-profile.mjs';
 import { maybeRunCapabilityInitiativeProfile } from './run-capability-initiative-profile.mjs';
 import { maybeRunCapabilityCredentialCoreProfile } from './run-capability-credential-core-profile.mjs';
+import { maybeRunVercelMainProductionGateProfile } from './run-vercel-main-production-gate-profile.mjs';
 import { maybeRunDemandScopeDeliveryReviewProfile } from './run-demand-scope-delivery-review-profile.mjs';
 import { maybeRunJavaEngagementReconstructionProfile } from './run-java-engagement-reconstruction-profile.mjs';
 import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-live-classroom-tencent-provider-current-main-profile.mjs';
@@ -97,6 +98,8 @@ export async function runProfile(input) {
   if (capabilityInitiative) return capabilityInitiative;
   const capabilityCredentialCore = await maybeRunCapabilityCredentialCoreProfile(input);
   if (capabilityCredentialCore) return capabilityCredentialCore;
+  const vercelMainProductionGate = await maybeRunVercelMainProductionGateProfile(input);
+  if (vercelMainProductionGate) return vercelMainProductionGate;
   const demandScopeDeliveryReview = await maybeRunDemandScopeDeliveryReviewProfile(input);
   if (demandScopeDeliveryReview) return demandScopeDeliveryReview;
   const javaEngagementReconstruction = await maybeRunJavaEngagementReconstructionProfile(input);
