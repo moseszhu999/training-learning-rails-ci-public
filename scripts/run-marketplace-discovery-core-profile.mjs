@@ -36,6 +36,14 @@ export const MARKETPLACE_SOURCE_HEALTH_CORE_EXACT_FILES = new Set([
   'packages/training-marketplace-source-health/test/source-health.test.mjs',
 ]);
 
+export const MARKETPLACE_WORKSPACE_TRANSFER_CORE_EXACT_FILES = new Set([
+  'packages/training-marketplace-workspace-transfer/package.json',
+  'packages/training-marketplace-workspace-transfer/src/index.d.mts',
+  'packages/training-marketplace-workspace-transfer/src/index.d.ts',
+  'packages/training-marketplace-workspace-transfer/src/index.mjs',
+  'tests/training-marketplace-workspace-agent-bridge-v1.test.mjs',
+]);
+
 const CANONICAL_MIGRATION_COUNT = 360;
 const EXPECTED_NODE_COUNT = 13;
 const EXPECTED_PYTHON_COUNT = 0;
@@ -48,6 +56,9 @@ const FIND_A_TENDER_EXPECTED_PYTHON_COUNT = 0;
 const SOURCE_HEALTH_CANONICAL_MIGRATION_COUNT = 371;
 const SOURCE_HEALTH_EXPECTED_NODE_COUNT = 5;
 const SOURCE_HEALTH_EXPECTED_PYTHON_COUNT = 0;
+const WORKSPACE_TRANSFER_CANONICAL_MIGRATION_COUNT = 371;
+const WORKSPACE_TRANSFER_EXPECTED_NODE_COUNT = 8;
+const WORKSPACE_TRANSFER_EXPECTED_PYTHON_COUNT = 0;
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -98,6 +109,16 @@ export const marketplaceSourceHealthCoreCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('source-health-syntax', 'npm', ['--prefix', 'packages/training-marketplace-source-health', 'run', 'syntax']),
   command('source-health-tests', 'npm', ['--prefix', 'packages/training-marketplace-source-health', 'test'], 'node'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+  command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+  command('bundle-verification', 'npm', ['run', 'verify:build']),
+]);
+
+export const marketplaceWorkspaceTransferCoreCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('workspace-transfer-syntax', 'node', ['--check', 'packages/training-marketplace-workspace-transfer/src/index.mjs']),
+  command('workspace-transfer-tests', 'node', ['--test', 'tests/training-marketplace-workspace-agent-bridge-v1.test.mjs'], 'node'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
   command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
@@ -155,6 +176,10 @@ export function isMarketplaceFindATenderRegistryScope(files) {
 
 export function isMarketplaceSourceHealthCoreScope(files) {
   return exactSetMatch(files, MARKETPLACE_SOURCE_HEALTH_CORE_EXACT_FILES);
+}
+
+export function isMarketplaceWorkspaceTransferCoreScope(files) {
+  return exactSetMatch(files, MARKETPLACE_WORKSPACE_TRANSFER_CORE_EXACT_FILES);
 }
 
 function fixedInputContract(input, scope, config) {
@@ -275,6 +300,15 @@ const sourceHealthConfig = Object.freeze({
   selectedSuite: 'marketplace-source-health-core',
 });
 
+const workspaceTransferConfig = Object.freeze({
+  commands: marketplaceWorkspaceTransferCoreCommands,
+  migrationCount: WORKSPACE_TRANSFER_CANONICAL_MIGRATION_COUNT,
+  nodeCount: WORKSPACE_TRANSFER_EXPECTED_NODE_COUNT,
+  pythonCount: WORKSPACE_TRANSFER_EXPECTED_PYTHON_COUNT,
+  changedFileCount: 5,
+  selectedSuite: 'marketplace-workspace-transfer-core',
+});
+
 export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
   if (input.profile !== 'generic-owned') return null;
   const { files, scope } = await exactChangedFiles(input);
@@ -282,5 +316,6 @@ export async function maybeRunMarketplaceDiscoveryCoreProfile(input) {
   if (isMarketplaceContractsFinderCoreScope(files)) return runFixedScope(input, scope, contractsFinderConfig);
   if (isMarketplaceFindATenderRegistryScope(files)) return runFixedScope(input, scope, findATenderRegistryConfig);
   if (isMarketplaceSourceHealthCoreScope(files)) return runFixedScope(input, scope, sourceHealthConfig);
+  if (isMarketplaceWorkspaceTransferCoreScope(files)) return runFixedScope(input, scope, workspaceTransferConfig);
   return null;
 }
