@@ -59,11 +59,12 @@ test('Marketplace browser live core public profile performs no browser, network,
   ]) assert.equal(text.includes(forbidden), false, forbidden);
 });
 
-test('stage15 routes Marketplace browser live core before generic fallback', () => {
+test('existing Marketplace stage15 route delegates to browser live core before runtime scope matching', () => {
   const router = readFileSync(new URL('../scripts/run-private-profile-stage15.mjs', import.meta.url), 'utf8');
-  assert.equal(router.includes("import { maybeRunMarketplaceBrowserLiveCoreProfile } from './run-marketplace-browser-live-core-profile.mjs';"), true);
-  const liveRuntime = router.indexOf('maybeRunMarketplaceLiveRuntimeAdapterProfile(input)');
-  const browserCore = router.indexOf('maybeRunMarketplaceBrowserLiveCoreProfile(input)');
-  const fallback = router.indexOf('runStage14Profile(input)');
-  assert.ok(liveRuntime >= 0 && browserCore > liveRuntime && fallback > browserCore);
+  const liveRouter = readFileSync(new URL('../scripts/run-marketplace-live-runtime-adapter-profile.mjs', import.meta.url), 'utf8');
+  assert.equal(router.includes('maybeRunMarketplaceLiveRuntimeAdapterProfile(input)'), true);
+  assert.equal(liveRouter.includes("import { maybeRunMarketplaceBrowserLiveCoreProfile } from './run-marketplace-browser-live-core-profile.mjs';"), true);
+  const browserCore = liveRouter.indexOf('maybeRunMarketplaceBrowserLiveCoreProfile(input)');
+  const runtimeScope = liveRouter.indexOf('isMarketplaceLiveRuntimeAdapterScope(files)');
+  assert.ok(browserCore >= 0 && runtimeScope > browserCore);
 });
