@@ -6,7 +6,7 @@
   "expectedMainSha": "1f1550c58866eb9f49d6041a8b5e7ed459374ff7",
   "validationProfile": "generic-owned",
   "expectedChangedFileCount": "4",
-  "expectedMigrationRange": "20260810004120..20260810004120",
+  "expectedMigrationRange": "20260810004120-20260810004120",
   "expectedFocusedTestCounts": "node=8;python=0",
   "expectedMigrationCount": "374",
   "runFreshReplay": false,
