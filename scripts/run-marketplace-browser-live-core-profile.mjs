@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunMarketplaceLivePageWiringProfile } from './run-marketplace-live-page-wiring-profile.mjs';
 
 export const MARKETPLACE_BROWSER_LIVE_CORE_EXACT_FILES = new Set([
   'apps/training-marketplace-web/src/live-data.mjs',
@@ -83,6 +84,9 @@ function failedContractResult() {
 
 export async function maybeRunMarketplaceBrowserLiveCoreProfile(input) {
   if (input.profile !== 'generic-owned') return null;
+  const livePageWiring = await maybeRunMarketplaceLivePageWiringProfile(input);
+  if (livePageWiring) return livePageWiring;
+
   const { files, scope } = await exactChangedFiles(input);
   if (!isMarketplaceBrowserLiveCoreScope(files)) return null;
 
