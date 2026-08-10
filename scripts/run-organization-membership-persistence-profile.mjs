@@ -7,14 +7,16 @@ export const ORGANIZATION_MEMBERSHIP_PERSISTENCE_EXACT_FILES = new Set([
   'docs/architecture/trainingos-organization-membership-persistence-v1.md',
   'docs/architecture/trainingos-organization-membership-preview-acceptance-v1.md',
   'supabase/migrations/20260810004120_trainingos_organization_membership_v1.sql',
+  'supabase/migrations/20260810051911_trainingos_organization_membership_private_helper_acl_hardening_v1.sql',
   'tests/training-organization-membership-persistence-v1.test.mjs',
 ]);
 
-const EXPECTED_CHANGED_FILE_COUNT = 4;
+const EXPECTED_CHANGED_FILE_COUNT = 5;
 const EXPECTED_NODE_COUNT = 8;
 const EXPECTED_PYTHON_COUNT = 0;
-const EXPECTED_MIGRATION_COUNT = 374;
-const EXPECTED_MIGRATION = '20260810004120';
+const EXPECTED_MIGRATION_COUNT = 375;
+const EXPECTED_MIGRATION_START = '20260810004120';
+const EXPECTED_MIGRATION_END = '20260810051911';
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -84,8 +86,8 @@ export async function maybeRunOrganizationMembershipPersistenceProfile(input) {
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
     && String(process.env.EXPECTED_MIGRATION_COUNT) === String(EXPECTED_MIGRATION_COUNT)
     && scope.expected_changed_file_count === String(EXPECTED_CHANGED_FILE_COUNT)
-    && scope.migration_start === EXPECTED_MIGRATION
-    && scope.migration_end === EXPECTED_MIGRATION;
+    && scope.migration_start === EXPECTED_MIGRATION_START
+    && scope.migration_end === EXPECTED_MIGRATION_END;
   if (!fixedInputs) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
     return failedContractResult();
