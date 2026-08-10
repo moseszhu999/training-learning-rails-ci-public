@@ -25,6 +25,11 @@ export const marketplaceWorkspaceTransferServerCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('gateway-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/marketplace-workspace-transfer.mjs']),
   command('function-syntax', 'node', ['--check', 'netlify/functions/trainingos-marketplace-workspace-transfer.mjs']),
+  command('function-module-load', 'node', [
+    '--input-type=module',
+    '--eval',
+    "await import('./netlify/functions/trainingos-marketplace-workspace-transfer.mjs')",
+  ]),
   command('focused-node-contracts', 'node', ['--test', 'tests/training-marketplace-workspace-transfer-server-v1.test.mjs'], 'node'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
