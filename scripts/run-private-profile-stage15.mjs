@@ -20,6 +20,7 @@ import { maybeRunCapabilityCredentialCoreProfile } from './run-capability-creden
 import { maybeRunGroupWorkEntryAdapterProfile } from './run-group-work-entry-adapter-profile.mjs';
 import { maybeRunOrganizationMembershipCoreProfile } from './run-organization-membership-core-profile.mjs';
 import { maybeRunOrganizationMembershipPersistenceProfile } from './run-organization-membership-persistence-profile.mjs';
+import { maybeRunCurrentCapabilityCredentialReadProfile } from './run-current-capability-credential-read-profile.mjs';
 import { maybeRunVercelMainProductionGateProfile } from './run-vercel-main-production-gate-profile.mjs';
 import { maybeRunWorkspaceTransferPersistenceProfile } from './run-marketplace-workspace-transfer-persistence-profile.mjs';
 import { maybeRunLiveDiscoveryPersistenceProfile } from './run-marketplace-live-discovery-persistence-profile.mjs';
@@ -72,6 +73,7 @@ export async function runProfile(input) {
     maybeRunGroupWorkEntryAdapterProfile,
     maybeRunOrganizationMembershipCoreProfile,
     maybeRunOrganizationMembershipPersistenceProfile,
+    maybeRunCurrentCapabilityCredentialReadProfile,
     maybeRunVercelMainProductionGateProfile,
     maybeRunWorkspaceTransferPersistenceProfile,
     maybeRunLiveDiscoveryPersistenceProfile,
