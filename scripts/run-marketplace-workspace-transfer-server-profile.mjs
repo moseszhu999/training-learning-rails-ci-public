@@ -2,17 +2,15 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { maybeRunMarketplaceWorkspaceTransferServerProfile } from './run-marketplace-workspace-transfer-server-profile.mjs';
 
-export const MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES = new Set([
-  'apps/training-marketplace-web/src/app.mjs',
-  'apps/training-marketplace-web/src/live-page-ui.mjs',
-  'tests/training-marketplace-live-page-wiring-v1.test.mjs',
-  'tests/trainingos-ui-e2e/marketplace-live-page-v1.spec.ts',
+export const MARKETPLACE_WORKSPACE_TRANSFER_SERVER_EXACT_FILES = new Set([
+  'lib/trainingos-agent-gateway/marketplace-workspace-transfer.mjs',
+  'netlify/functions/trainingos-marketplace-workspace-transfer.mjs',
+  'tests/training-marketplace-workspace-transfer-server-v1.test.mjs',
 ]);
 
-const EXPECTED_CHANGED_FILE_COUNT = 4;
-const EXPECTED_NODE_COUNT = 4;
+const EXPECTED_CHANGED_FILE_COUNT = 3;
+const EXPECTED_NODE_COUNT = 6;
 const EXPECTED_PYTHON_COUNT = 0;
 const EXPECTED_MIGRATION_COUNT = 373;
 
@@ -23,11 +21,11 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
-export const marketplaceLivePageWiringCommands = Object.freeze([
+export const marketplaceWorkspaceTransferServerCommands = Object.freeze([
   command('install', 'npm', ['ci']),
-  command('app-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/app.mjs']),
-  command('live-page-ui-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/live-page-ui.mjs']),
-  command('focused-node-contracts', 'node', ['--test', 'tests/training-marketplace-live-page-wiring-v1.test.mjs'], 'node'),
+  command('gateway-syntax', 'node', ['--check', 'lib/trainingos-agent-gateway/marketplace-workspace-transfer.mjs']),
+  command('function-syntax', 'node', ['--check', 'netlify/functions/trainingos-marketplace-workspace-transfer.mjs']),
+  command('focused-node-contracts', 'node', ['--test', 'tests/training-marketplace-workspace-transfer-server-v1.test.mjs'], 'node'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
   command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
@@ -50,16 +48,13 @@ async function exactChangedFiles(input) {
     { encoding: 'utf8', shell: false },
   );
   if (result.status !== 0) throw new Error('git scope failed');
-  return {
-    files: result.stdout.trim() ? result.stdout.trim().split('\n').sort() : [],
-    scope,
-  };
+  return { files: result.stdout.trim() ? result.stdout.trim().split('\n').sort() : [], scope };
 }
 
-export function isMarketplaceLivePageWiringScope(files) {
+export function isMarketplaceWorkspaceTransferServerScope(files) {
   const names = [...files];
-  return names.length === MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES.size
-    && names.every((name) => MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES.has(name))
+  return names.length === MARKETPLACE_WORKSPACE_TRANSFER_SERVER_EXACT_FILES.size
+    && names.every((name) => MARKETPLACE_WORKSPACE_TRANSFER_SERVER_EXACT_FILES.has(name))
     && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
@@ -68,23 +63,20 @@ function failedContractResult() {
     ok: false,
     status: 'FAIL:fixed-input-contract',
     failedLabels: Object.freeze(['fixed-input-contract']),
-    stepCount: marketplaceLivePageWiringCommands.length,
+    stepCount: marketplaceWorkspaceTransferServerCommands.length,
     passedStepCount: 0,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'marketplace-live-page-wiring',
+    selectedSuite: 'marketplace-workspace-transfer-server',
   };
 }
 
-export async function maybeRunMarketplaceLivePageWiringProfile(input) {
+export async function maybeRunMarketplaceWorkspaceTransferServerProfile(input) {
   if (input.profile !== 'generic-owned') return null;
-  const transferServer = await maybeRunMarketplaceWorkspaceTransferServerProfile(input);
-  if (transferServer) return transferServer;
-
   const { files, scope } = await exactChangedFiles(input);
-  if (!isMarketplaceLivePageWiringScope(files)) return null;
+  if (!isMarketplaceWorkspaceTransferServerScope(files)) return null;
 
   const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
@@ -105,8 +97,8 @@ export async function maybeRunMarketplaceLivePageWiringProfile(input) {
   const failedLabels = [];
 
   try {
-    for (const [index, item] of marketplaceLivePageWiringCommands.entries()) {
-      const logPath = path.join(input.runnerTemp, `trainingos-marketplace-live-page-wiring-${index + 1}.log`);
+    for (const [index, item] of marketplaceWorkspaceTransferServerCommands.entries()) {
+      const logPath = path.join(input.runnerTemp, `trainingos-marketplace-workspace-transfer-server-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const commandResult = spawnSync(item.executable, item.args, {
         cwd: input.privateRepoPath,
@@ -129,7 +121,7 @@ export async function maybeRunMarketplaceLivePageWiringProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const stepCount = marketplaceLivePageWiringCommands.length;
+  const stepCount = marketplaceWorkspaceTransferServerCommands.length;
   const countsPassed = nodeTests === EXPECTED_NODE_COUNT
     && nodePassed === EXPECTED_NODE_COUNT
     && nodeFailed === 0
@@ -146,6 +138,6 @@ export async function maybeRunMarketplaceLivePageWiringProfile(input) {
     nodePassed,
     nodeFailed,
     pythonTests,
-    selectedSuite: 'marketplace-live-page-wiring',
+    selectedSuite: 'marketplace-workspace-transfer-server',
   };
 }
