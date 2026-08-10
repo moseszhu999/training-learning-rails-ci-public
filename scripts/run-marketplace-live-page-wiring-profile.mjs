@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunMarketplaceWorkspaceTransferServerProfile } from './run-marketplace-workspace-transfer-server-profile.mjs';
 
 export const MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES = new Set([
   'apps/training-marketplace-web/src/app.mjs',
@@ -79,6 +80,9 @@ function failedContractResult() {
 
 export async function maybeRunMarketplaceLivePageWiringProfile(input) {
   if (input.profile !== 'generic-owned') return null;
+  const transferServer = await maybeRunMarketplaceWorkspaceTransferServerProfile(input);
+  if (transferServer) return transferServer;
+
   const { files, scope } = await exactChangedFiles(input);
   if (!isMarketplaceLivePageWiringScope(files)) return null;
 
