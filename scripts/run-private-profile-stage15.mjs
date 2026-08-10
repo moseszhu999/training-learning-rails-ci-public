@@ -18,6 +18,7 @@ import { maybeRunJavaCourseCanonicalizationProfile } from './run-java-course-sou
 import { maybeRunCapabilityInitiativeProfile } from './run-capability-initiative-profile.mjs';
 import { maybeRunCapabilityCredentialCoreProfile } from './run-capability-credential-core-profile.mjs';
 import { maybeRunGroupWorkEntryAdapterProfile } from './run-group-work-entry-adapter-profile.mjs';
+import { maybeRunOrganizationMembershipCoreProfile } from './run-organization-membership-core-profile.mjs';
 import { maybeRunVercelMainProductionGateProfile } from './run-vercel-main-production-gate-profile.mjs';
 import { maybeRunWorkspaceTransferPersistenceProfile } from './run-marketplace-workspace-transfer-persistence-profile.mjs';
 import { maybeRunLiveDiscoveryPersistenceProfile } from './run-marketplace-live-discovery-persistence-profile.mjs';
@@ -104,6 +105,8 @@ export async function runProfile(input) {
   if (capabilityCredentialCore) return capabilityCredentialCore;
   const groupWorkEntryAdapter = await maybeRunGroupWorkEntryAdapterProfile(input);
   if (groupWorkEntryAdapter) return groupWorkEntryAdapter;
+  const organizationMembershipCore = await maybeRunOrganizationMembershipCoreProfile(input);
+  if (organizationMembershipCore) return organizationMembershipCore;
   const vercelMainProductionGate = await maybeRunVercelMainProductionGateProfile(input);
   if (vercelMainProductionGate) return vercelMainProductionGate;
   const workspaceTransferPersistence = await maybeRunWorkspaceTransferPersistenceProfile(input);
