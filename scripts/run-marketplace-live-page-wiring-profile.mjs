@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunMarketplaceWorkspaceTransferUiProfile } from './run-marketplace-workspace-transfer-ui-profile.mjs';
 import { maybeRunMarketplaceWorkspaceTransferServerProfile } from './run-marketplace-workspace-transfer-server-profile.mjs';
 
 export const MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES = new Set([
@@ -80,6 +81,8 @@ function failedContractResult() {
 
 export async function maybeRunMarketplaceLivePageWiringProfile(input) {
   if (input.profile !== 'generic-owned') return null;
+  const transferUi = await maybeRunMarketplaceWorkspaceTransferUiProfile(input);
+  if (transferUi) return transferUi;
   const transferServer = await maybeRunMarketplaceWorkspaceTransferServerProfile(input);
   if (transferServer) return transferServer;
 
