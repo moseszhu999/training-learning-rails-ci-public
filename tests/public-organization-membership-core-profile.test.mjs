@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   ORGANIZATION_MEMBERSHIP_CORE_EXACT_FILES,
+  ORGANIZATION_MEMBERSHIP_CORE_NODE_CASES,
   organizationMembershipCoreCommands,
   isOrganizationMembershipCoreScope,
 } from '../scripts/run-organization-membership-core-profile.mjs';
@@ -17,21 +18,37 @@ test('organization membership selector accepts exactly the five private owner fi
   assert.equal(isOrganizationMembershipCoreScope(replaced), false);
 });
 
-test('organization membership profile runs only fixed contract and repository build gates', () => {
-  assert.deepEqual(organizationMembershipCoreCommands.map((item) => item.label), [
-    'install',
-    'contract-syntax',
-    'focused-node-contracts',
-    'declaration-typecheck',
-    'typecheck',
-    'direct-vite-production-build',
-    'postbuild-copy',
-    'bundle-verification',
+test('organization membership profile isolates eight fixed private contract cases', () => {
+  assert.equal(ORGANIZATION_MEMBERSHIP_CORE_NODE_CASES.length, 8);
+  assert.deepEqual(ORGANIZATION_MEMBERSHIP_CORE_NODE_CASES.map((item) => item.label), [
+    'node-case-01-organization',
+    'node-case-02-membership-boundary',
+    'node-case-03-lifecycle',
+    'node-case-04-class-rejection',
+    'node-case-05-private-ref-rejection',
+    'node-case-06-shape-role-rejection',
+    'node-case-07-validity-evidence-rejection',
+    'node-case-08-status-boundary',
   ]);
-  assert.deepEqual(
-    organizationMembershipCoreCommands.find((item) => item.label === 'focused-node-contracts')?.args,
-    ['--test', 'tests/training-organization-membership-core-v1.test.mjs'],
-  );
+  for (const item of ORGANIZATION_MEMBERSHIP_CORE_NODE_CASES) {
+    const command = organizationMembershipCoreCommands.find((entry) => entry.label === item.label);
+    assert.equal(command?.executable, 'node');
+    assert.equal(command?.kind, 'node-case');
+    assert.equal(command?.args[0], '--test');
+    assert.equal(command?.args.at(-1), 'tests/training-organization-membership-core-v1.test.mjs');
+  }
+});
+
+test('organization membership profile retains fixed build and type gates around isolated tests', () => {
+  const labels = organizationMembershipCoreCommands.map((item) => item.label);
+  assert.equal(labels[0], 'install');
+  assert.equal(labels[1], 'contract-syntax');
+  assert.equal(labels.includes('declaration-typecheck'), true);
+  assert.equal(labels.includes('typecheck'), true);
+  assert.equal(labels.includes('direct-vite-production-build'), true);
+  assert.equal(labels.includes('postbuild-copy'), true);
+  assert.equal(labels.at(-1), 'bundle-verification');
+  assert.equal(labels.length, 15);
 });
 
 test('organization membership profile locks exact counts and migration compatibility input', () => {
