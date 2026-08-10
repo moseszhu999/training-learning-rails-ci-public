@@ -15,6 +15,7 @@ const EXPECTED_CHANGED_FILE_COUNT = 5;
 const EXPECTED_NODE_COUNT = 8;
 const EXPECTED_PYTHON_COUNT = 0;
 const EXPECTED_MIGRATION_COUNT = 373;
+const PRIVATE_TEST_FILE = 'tests/training-organization-membership-core-v1.test.mjs';
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
@@ -23,10 +24,22 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
+export const ORGANIZATION_MEMBERSHIP_CORE_NODE_CASES = Object.freeze([
+  Object.freeze({ label: 'node-case-01-organization', pattern: 'creates deterministic privacy-safe organization truth without creating authority' }),
+  Object.freeze({ label: 'node-case-02-membership-boundary', pattern: 'creates organization membership without collapsing class, login, role, capability or authority' }),
+  Object.freeze({ label: 'node-case-03-lifecycle', pattern: 'projects active, suspended, revoked, expired and not-yet-valid states deterministically' }),
+  Object.freeze({ label: 'node-case-04-class-rejection', pattern: 'rejects class identity as organization identity' }),
+  Object.freeze({ label: 'node-case-05-private-ref-rejection', pattern: 'rejects email-like PII and secret-shaped refs' }),
+  Object.freeze({ label: 'node-case-06-shape-role-rejection', pattern: 'rejects unknown fields and unsupported organization roles' }),
+  Object.freeze({ label: 'node-case-07-validity-evidence-rejection', pattern: 'rejects invalid validity windows and duplicate evidence refs' }),
+  Object.freeze({ label: 'node-case-08-status-boundary', pattern: 'membership status remains non-authorizing in every lifecycle state' }),
+]);
+
 export const organizationMembershipCoreCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('contract-syntax', 'node', ['--check', 'packages/training-organization-core/src/index.mjs']),
-  command('focused-node-contracts', 'node', ['--test', 'tests/training-organization-membership-core-v1.test.mjs'], 'node'),
+  ...ORGANIZATION_MEMBERSHIP_CORE_NODE_CASES.map(({ label, pattern }) =>
+    command(label, 'node', ['--test', `--test-name-pattern=${pattern}`, PRIVATE_TEST_FILE], 'node-case')),
   command('declaration-typecheck', 'npx', [
     'tsc', '--noEmit', '--strict', '--skipLibCheck', 'false',
     '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2022',
@@ -37,9 +50,6 @@ export const organizationMembershipCoreCommands = Object.freeze([
   command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
   command('bundle-verification', 'npm', ['run', 'verify:build']),
 ]);
-
-const sumMatches = (text, regex) => [...String(text).matchAll(regex)]
-  .reduce((sum, match) => sum + Number(match[1]), 0);
 
 async function exactChangedFiles(input) {
   const scopePath = path.join(input.runnerTemp, 'trainingos-scope-contract.env');
@@ -116,11 +126,11 @@ export async function maybeRunOrganizationMembershipCoreProfile(input) {
         shell: false,
       });
       closeSync(descriptor);
-      const output = await readFile(logPath, 'utf8');
-      if (item.kind === 'node') {
-        nodeTests += sumMatches(output, /^# tests\s+(\d+)$/gm);
-        nodePassed += sumMatches(output, /^# pass\s+(\d+)$/gm);
-        nodeFailed += sumMatches(output, /^# fail\s+(\d+)$/gm);
+      await readFile(logPath, 'utf8');
+      if (item.kind === 'node-case') {
+        nodeTests += 1;
+        if (commandResult.status === 0) nodePassed += 1;
+        else nodeFailed += 1;
       }
       if (commandResult.status === 0) passedStepCount += 1;
       else failedLabels.push(item.label);
