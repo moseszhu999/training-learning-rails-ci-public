@@ -9,14 +9,16 @@ export const CAPABILITY_CREDENTIAL_ISSUANCE_EXACT_FILES = new Set([
   'packages/training-capability-credential-issuance-adapter/package.json',
   'packages/training-capability-credential-issuance-adapter/src/index.mjs',
   'supabase/migrations/20260810093000_trainingos_capability_credential_issuance_v1.sql',
+  'supabase/migrations/20260810094500_trainingos_capability_credential_issuance_fk_indexes_v1.sql',
   'tests/training-capability-credential-issuance-v1.test.mjs',
 ]);
 
-const EXPECTED_CHANGED_FILE_COUNT = 6;
+const EXPECTED_CHANGED_FILE_COUNT = 7;
 const EXPECTED_NODE_COUNT = 10;
 const EXPECTED_PYTHON_COUNT = 0;
-const EXPECTED_MIGRATION_COUNT = 375;
-const MIGRATION = '20260810093000';
+const EXPECTED_MIGRATION_COUNT = 376;
+const MIGRATION_START = '20260810093000';
+const MIGRATION_END = '20260810094500';
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({ label, executable, args: Object.freeze(args), kind });
 
@@ -62,8 +64,8 @@ export async function maybeRunCapabilityCredentialIssuanceProfile(input) {
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
     && String(process.env.EXPECTED_MIGRATION_COUNT) === String(EXPECTED_MIGRATION_COUNT)
     && scope.expected_changed_file_count === String(EXPECTED_CHANGED_FILE_COUNT)
-    && scope.migration_start === MIGRATION
-    && scope.migration_end === MIGRATION;
+    && scope.migration_start === MIGRATION_START
+    && scope.migration_end === MIGRATION_END;
   if (!fixedInputs) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
     return failedContractResult();
