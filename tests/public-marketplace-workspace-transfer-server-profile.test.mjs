@@ -22,12 +22,21 @@ test('Marketplace transfer server profile runs fixed non-runtime validation gate
     'install',
     'gateway-syntax',
     'function-syntax',
+    'function-module-load',
     'focused-node-contracts',
     'typecheck',
     'direct-vite-production-build',
     'postbuild-copy',
     'bundle-verification',
   ]);
+  assert.deepEqual(
+    marketplaceWorkspaceTransferServerCommands.find((item) => item.label === 'function-module-load')?.args,
+    [
+      '--input-type=module',
+      '--eval',
+      "await import('./netlify/functions/trainingos-marketplace-workspace-transfer.mjs')",
+    ],
+  );
   assert.deepEqual(
     marketplaceWorkspaceTransferServerCommands.find((item) => item.label === 'focused-node-contracts')?.args,
     ['--test', 'tests/training-marketplace-workspace-transfer-server-v1.test.mjs'],
