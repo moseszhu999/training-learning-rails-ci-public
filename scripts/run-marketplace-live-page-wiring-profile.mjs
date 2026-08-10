@@ -2,17 +2,16 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { maybeRunMarketplaceLivePageWiringProfile } from './run-marketplace-live-page-wiring-profile.mjs';
 
-export const MARKETPLACE_BROWSER_LIVE_CORE_EXACT_FILES = new Set([
-  'apps/training-marketplace-web/src/live-data.mjs',
-  'apps/training-marketplace-web/src/source-health.mjs',
-  'tests/training-marketplace-browser-live-core-v1.test.mjs',
-  'tests/training-marketplace-source-health-v1.test.mjs',
+export const MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES = new Set([
+  'apps/training-marketplace-web/src/app.mjs',
+  'apps/training-marketplace-web/src/live-page-ui.mjs',
+  'tests/training-marketplace-live-page-wiring-v1.test.mjs',
+  'tests/trainingos-ui-e2e/marketplace-live-page-v1.spec.ts',
 ]);
 
 const EXPECTED_CHANGED_FILE_COUNT = 4;
-const EXPECTED_NODE_COUNT = 8;
+const EXPECTED_NODE_COUNT = 4;
 const EXPECTED_PYTHON_COUNT = 0;
 const EXPECTED_MIGRATION_COUNT = 373;
 
@@ -23,15 +22,11 @@ const command = (label, executable, args, kind = 'status') => Object.freeze({
   kind,
 });
 
-export const marketplaceBrowserLiveCoreCommands = Object.freeze([
+export const marketplaceLivePageWiringCommands = Object.freeze([
   command('install', 'npm', ['ci']),
-  command('live-data-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/live-data.mjs']),
-  command('source-health-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/source-health.mjs']),
-  command('focused-node-contracts', 'node', [
-    '--test',
-    'tests/training-marketplace-browser-live-core-v1.test.mjs',
-    'tests/training-marketplace-source-health-v1.test.mjs',
-  ], 'node'),
+  command('app-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/app.mjs']),
+  command('live-page-ui-syntax', 'node', ['--check', 'apps/training-marketplace-web/src/live-page-ui.mjs']),
+  command('focused-node-contracts', 'node', ['--test', 'tests/training-marketplace-live-page-wiring-v1.test.mjs'], 'node'),
   command('typecheck', 'npm', ['run', 'typecheck']),
   command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
   command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
@@ -60,10 +55,10 @@ async function exactChangedFiles(input) {
   };
 }
 
-export function isMarketplaceBrowserLiveCoreScope(files) {
+export function isMarketplaceLivePageWiringScope(files) {
   const names = [...files];
-  return names.length === MARKETPLACE_BROWSER_LIVE_CORE_EXACT_FILES.size
-    && names.every((name) => MARKETPLACE_BROWSER_LIVE_CORE_EXACT_FILES.has(name))
+  return names.length === MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES.size
+    && names.every((name) => MARKETPLACE_LIVE_PAGE_WIRING_EXACT_FILES.has(name))
     && names.every((name) => !name.startsWith('supabase/migrations/'));
 }
 
@@ -72,23 +67,20 @@ function failedContractResult() {
     ok: false,
     status: 'FAIL:fixed-input-contract',
     failedLabels: Object.freeze(['fixed-input-contract']),
-    stepCount: marketplaceBrowserLiveCoreCommands.length,
+    stepCount: marketplaceLivePageWiringCommands.length,
     passedStepCount: 0,
     nodeTests: 0,
     nodePassed: 0,
     nodeFailed: 0,
     pythonTests: 0,
-    selectedSuite: 'marketplace-browser-live-core',
+    selectedSuite: 'marketplace-live-page-wiring',
   };
 }
 
-export async function maybeRunMarketplaceBrowserLiveCoreProfile(input) {
+export async function maybeRunMarketplaceLivePageWiringProfile(input) {
   if (input.profile !== 'generic-owned') return null;
-  const livePageWiring = await maybeRunMarketplaceLivePageWiringProfile(input);
-  if (livePageWiring) return livePageWiring;
-
   const { files, scope } = await exactChangedFiles(input);
-  if (!isMarketplaceBrowserLiveCoreScope(files)) return null;
+  if (!isMarketplaceLivePageWiringScope(files)) return null;
 
   const fixedInputs = Number(input.expectedNodeCount) === EXPECTED_NODE_COUNT
     && Number(input.expectedPythonCount) === EXPECTED_PYTHON_COUNT
@@ -109,8 +101,8 @@ export async function maybeRunMarketplaceBrowserLiveCoreProfile(input) {
   const failedLabels = [];
 
   try {
-    for (const [index, item] of marketplaceBrowserLiveCoreCommands.entries()) {
-      const logPath = path.join(input.runnerTemp, `trainingos-marketplace-browser-live-core-${index + 1}.log`);
+    for (const [index, item] of marketplaceLivePageWiringCommands.entries()) {
+      const logPath = path.join(input.runnerTemp, `trainingos-marketplace-live-page-wiring-${index + 1}.log`);
       const descriptor = openSync(logPath, 'w', 0o600);
       const commandResult = spawnSync(item.executable, item.args, {
         cwd: input.privateRepoPath,
@@ -133,7 +125,7 @@ export async function maybeRunMarketplaceBrowserLiveCoreProfile(input) {
     await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
   }
 
-  const stepCount = marketplaceBrowserLiveCoreCommands.length;
+  const stepCount = marketplaceLivePageWiringCommands.length;
   const countsPassed = nodeTests === EXPECTED_NODE_COUNT
     && nodePassed === EXPECTED_NODE_COUNT
     && nodeFailed === 0
@@ -150,6 +142,6 @@ export async function maybeRunMarketplaceBrowserLiveCoreProfile(input) {
     nodePassed,
     nodeFailed,
     pythonTests,
-    selectedSuite: 'marketplace-browser-live-core',
+    selectedSuite: 'marketplace-live-page-wiring',
   };
 }
