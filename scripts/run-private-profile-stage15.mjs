@@ -19,6 +19,7 @@ import { maybeRunCapabilityInitiativeProfile } from './run-capability-initiative
 import { maybeRunCapabilityCredentialCoreProfile } from './run-capability-credential-core-profile.mjs';
 import { maybeRunGroupWorkEntryAdapterProfile } from './run-group-work-entry-adapter-profile.mjs';
 import { maybeRunOrganizationMembershipCoreProfile } from './run-organization-membership-core-profile.mjs';
+import { maybeRunOrganizationMembershipPersistenceProfile } from './run-organization-membership-persistence-profile.mjs';
 import { maybeRunVercelMainProductionGateProfile } from './run-vercel-main-production-gate-profile.mjs';
 import { maybeRunWorkspaceTransferPersistenceProfile } from './run-marketplace-workspace-transfer-persistence-profile.mjs';
 import { maybeRunLiveDiscoveryPersistenceProfile } from './run-marketplace-live-discovery-persistence-profile.mjs';
@@ -35,104 +36,60 @@ import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
-if (roleContractsIndex < 0) {
-  throw new Error('teacher-hub role-contracts command is required');
-}
+if (roleContractsIndex < 0) throw new Error('teacher-hub role-contracts command is required');
 
-const todayMasterDetail = {
-  label: 'python-today-master-detail',
-  moduleName: 'tests.test_trainingos_today_master_detail_v1',
-};
-
+const todayMasterDetail = { label: 'python-today-master-detail', moduleName: 'tests.test_trainingos_today_master_detail_v1' };
 const permissionContracts = [
   { label: 'python-role-menu-content', moduleName: 'tests.test_trainingos_role_menu_content_permissions_v1' },
-  { label: 'python-advanced-settings', moduleName: 'tests.test_trainingos_advanced_settings', },
-  { label: 'python-risk-intervention', moduleName: 'tests.test_trainingos_risk_intervention_ui_contract', },
-  { label: 'python-zero-permission-core', moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract', },
+  { label: 'python-advanced-settings', moduleName: 'tests.test_trainingos_advanced_settings' },
+  { label: 'python-risk-intervention', moduleName: 'tests.test_trainingos_risk_intervention_ui_contract' },
+  { label: 'python-zero-permission-core', moduleName: 'tests.test_trainingos_zero_permission_bridge_core_contract' },
 ];
-
 for (const { label } of [todayMasterDetail, ...permissionContracts]) {
-  if (teacherHubCommands.some((item) => item.label === label)) {
-    throw new Error(`duplicate teacher-hub contract label: ${label}`);
-  }
+  if (teacherHubCommands.some((item) => item.label === label)) throw new Error(`duplicate teacher-hub contract label: ${label}`);
 }
-
-teacherHubCommands.splice(
-  roleContractsIndex,
-  0,
-  {
-    label: todayMasterDetail.label,
-    executable: 'python',
-    args: ['-m', 'unittest', '-v', todayMasterDetail.moduleName],
-    kind: 'python',
-  },
-  ...permissionContracts.map(({ label, moduleName }) => ({
-    label,
-    executable: 'python',
-    args: ['-m', 'unittest', '-v', moduleName],
-    kind: 'python',
-  })),
+teacherHubCommands.splice(roleContractsIndex, 0,
+  { label: todayMasterDetail.label, executable: 'python', args: ['-m', 'unittest', '-v', todayMasterDetail.moduleName], kind: 'python' },
+  ...permissionContracts.map(({ label, moduleName }) => ({ label, executable: 'python', args: ['-m', 'unittest', '-v', moduleName], kind: 'python' })),
 );
 
 export async function runProfile(input) {
-  const liveClassroomA = await maybeRunLiveClassroomACurrentMainProfile(input);
-  if (liveClassroomA) return liveClassroomA;
-  const entitlementProjection = await maybeRunEntitlementBillingProjectionProfile(input);
-  if (entitlementProjection) return entitlementProjection;
-  const providerNeutralBillingIntent = await maybeRunProviderNeutralBillingIntentProfile(input);
-  if (providerNeutralBillingIntent) return providerNeutralBillingIntent;
-  const stripeTestAdapter = await maybeRunStripeTestAdapterWebhookProfile(input);
-  if (stripeTestAdapter) return stripeTestAdapter;
-  const agentSkillEvalFrameworkV2 = await maybeRunAgentSkillEvalFrameworkV2Profile(input);
-  if (agentSkillEvalFrameworkV2) return agentSkillEvalFrameworkV2;
-  const industryRolePack = await maybeRunIndustryRolePackFoundationProfile(input);
-  if (industryRolePack) return industryRolePack;
-  const industryRolePackRegistry = await maybeRunIndustryRolePackRegistryProfile(input);
-  if (industryRolePackRegistry) return industryRolePackRegistry;
-  const trainingBlueprintDraftCompiler = await maybeRunTrainingBlueprintDraftCompilerProfile(input);
-  if (trainingBlueprintDraftCompiler) return trainingBlueprintDraftCompiler;
-  const javaDeveloperNewHirePilot = await maybeRunJavaDeveloperNewHirePilotProfile(input);
-  if (javaDeveloperNewHirePilot) return javaDeveloperNewHirePilot;
-  const trainingBlueprintCourseAlignment = await maybeRunTrainingBlueprintCourseAlignmentProfile(input);
-  if (trainingBlueprintCourseAlignment) return trainingBlueprintCourseAlignment;
-  const javaPilotCourseSourceReadiness = await maybeRunJavaPilotCourseSourceReadinessProfile(input);
-  if (javaPilotCourseSourceReadiness) return javaPilotCourseSourceReadiness;
-  const javaCourseCanonicalization = await maybeRunJavaCourseCanonicalizationProfile(input);
-  if (javaCourseCanonicalization) return javaCourseCanonicalization;
-  const capabilityInitiative = await maybeRunCapabilityInitiativeProfile(input);
-  if (capabilityInitiative) return capabilityInitiative;
-  const capabilityCredentialCore = await maybeRunCapabilityCredentialCoreProfile(input);
-  if (capabilityCredentialCore) return capabilityCredentialCore;
-  const groupWorkEntryAdapter = await maybeRunGroupWorkEntryAdapterProfile(input);
-  if (groupWorkEntryAdapter) return groupWorkEntryAdapter;
-  const organizationMembershipCore = await maybeRunOrganizationMembershipCoreProfile(input);
-  if (organizationMembershipCore) return organizationMembershipCore;
-  const vercelMainProductionGate = await maybeRunVercelMainProductionGateProfile(input);
-  if (vercelMainProductionGate) return vercelMainProductionGate;
-  const workspaceTransferPersistence = await maybeRunWorkspaceTransferPersistenceProfile(input);
-  if (workspaceTransferPersistence) return workspaceTransferPersistence;
-  const liveDiscoveryPersistence = await maybeRunLiveDiscoveryPersistenceProfile(input);
-  if (liveDiscoveryPersistence) return liveDiscoveryPersistence;
-  const marketplaceLiveRuntimeAdapter = await maybeRunMarketplaceLiveRuntimeAdapterProfile(input);
-  if (marketplaceLiveRuntimeAdapter) return marketplaceLiveRuntimeAdapter;
-  const demandScopeDeliveryReview = await maybeRunDemandScopeDeliveryReviewProfile(input);
-  if (demandScopeDeliveryReview) return demandScopeDeliveryReview;
-  const javaEngagementReconstruction = await maybeRunJavaEngagementReconstructionProfile(input);
-  if (javaEngagementReconstruction) return javaEngagementReconstruction;
-  const liveClassroomTencentProvider = await maybeRunLiveClassroomTencentProviderCurrentMainProfile(input);
-  if (liveClassroomTencentProvider) return liveClassroomTencentProvider;
-  const liveClassroomTeachingInteractions = await maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile(input);
-  if (liveClassroomTeachingInteractions) return liveClassroomTeachingInteractions;
-  const canonicalNorthStar = await maybeRunCanonicalNorthStarCurrentMainProfile(input);
-  if (canonicalNorthStar) return canonicalNorthStar;
-  const liveClassroomPostclassEvidence = await maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile(input);
-  if (liveClassroomPostclassEvidence) return liveClassroomPostclassEvidence;
-  const courseDesignMcpRead = await maybeRunCourseDesignMcpReadV1Profile(input);
-  if (courseDesignMcpRead) return courseDesignMcpRead;
-  const liveClassroomBrowserMatrix = await maybeRunLiveClassroomBrowserMatrixCurrentMainProfile(input);
-  if (liveClassroomBrowserMatrix) return liveClassroomBrowserMatrix;
-  const liveClassroomRuntimeWiring = await maybeRunLiveClassroomRuntimeWiringCurrentMainProfile(input);
-  if (liveClassroomRuntimeWiring) return liveClassroomRuntimeWiring;
+  const runners = [
+    maybeRunLiveClassroomACurrentMainProfile,
+    maybeRunEntitlementBillingProjectionProfile,
+    maybeRunProviderNeutralBillingIntentProfile,
+    maybeRunStripeTestAdapterWebhookProfile,
+    maybeRunAgentSkillEvalFrameworkV2Profile,
+    maybeRunIndustryRolePackFoundationProfile,
+    maybeRunIndustryRolePackRegistryProfile,
+    maybeRunTrainingBlueprintDraftCompilerProfile,
+    maybeRunJavaDeveloperNewHirePilotProfile,
+    maybeRunTrainingBlueprintCourseAlignmentProfile,
+    maybeRunJavaPilotCourseSourceReadinessProfile,
+    maybeRunJavaCourseCanonicalizationProfile,
+    maybeRunCapabilityInitiativeProfile,
+    maybeRunCapabilityCredentialCoreProfile,
+    maybeRunGroupWorkEntryAdapterProfile,
+    maybeRunOrganizationMembershipCoreProfile,
+    maybeRunOrganizationMembershipPersistenceProfile,
+    maybeRunVercelMainProductionGateProfile,
+    maybeRunWorkspaceTransferPersistenceProfile,
+    maybeRunLiveDiscoveryPersistenceProfile,
+    maybeRunMarketplaceLiveRuntimeAdapterProfile,
+    maybeRunDemandScopeDeliveryReviewProfile,
+    maybeRunJavaEngagementReconstructionProfile,
+    maybeRunLiveClassroomTencentProviderCurrentMainProfile,
+    maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile,
+    maybeRunCanonicalNorthStarCurrentMainProfile,
+    maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile,
+    maybeRunCourseDesignMcpReadV1Profile,
+    maybeRunLiveClassroomBrowserMatrixCurrentMainProfile,
+    maybeRunLiveClassroomRuntimeWiringCurrentMainProfile,
+  ];
+  for (const runner of runners) {
+    const result = await runner(input);
+    if (result) return result;
+  }
   return runStage14Profile(input);
 }
 
