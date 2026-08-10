@@ -5,16 +5,17 @@ import { spawnSync } from 'node:child_process';
 
 export const CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES = new Set([
   'docs/architecture/trainingos-current-capability-credential-read-v1.md',
-  'supabase/migrations/20260810084550_trainingos_current_capability_credential_read_v1.sql',
+  'supabase/migrations/20260810094009_trainingos_current_capability_credential_read_v1.sql',
+  'supabase/migrations/20260810100119_trainingos_current_capability_credential_read_completeness_v1.sql',
   'tests/training-current-capability-credential-read-v1.test.mjs',
 ]);
 
-const EXPECTED_CHANGED_FILE_COUNT = 3;
-const EXPECTED_NODE_COUNT = 8;
+const EXPECTED_CHANGED_FILE_COUNT = 4;
+const EXPECTED_NODE_COUNT = 9;
 const EXPECTED_PYTHON_COUNT = 0;
-const EXPECTED_MIGRATION_COUNT = 377;
-const EXPECTED_MIGRATION_START = '20260810084550';
-const EXPECTED_MIGRATION_END = '20260810084550';
+const EXPECTED_MIGRATION_COUNT = 378;
+const EXPECTED_MIGRATION_START = '20260810094009';
+const EXPECTED_MIGRATION_END = '20260810100119';
 
 const command = (label, executable, args, kind = 'status') => Object.freeze({
   label,
