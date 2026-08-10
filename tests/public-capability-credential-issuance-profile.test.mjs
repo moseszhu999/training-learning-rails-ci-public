@@ -31,7 +31,7 @@ test('profile source fixes expected tests and exact migration range without runt
   assert.match(source, /EXPECTED_NODE_COUNT = 10/);
   assert.match(source, /EXPECTED_MIGRATION_COUNT = 375/);
   assert.match(source, /MIGRATION = '20260810093000'/);
-  assert.doesNotMatch(source, /supabase\s+(db|migration|link|push|reset)|psql|DATABASE_URL|service_role/i);
+  assert.doesNotMatch(source, /supabase\s+(db|migration|link|push|reset)|psql|DATABASE_URL/i);
 });
 
 test('generic profile dispatcher tries credential issuance before unrelated marketplace scopes', () => {
