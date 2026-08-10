@@ -2,6 +2,7 @@ import { closeSync, openSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { maybeRunCapabilityCredentialIssuanceProfile } from './run-capability-credential-issuance-profile.mjs';
 import { maybeRunMarketplaceVercelFallbackProfile } from './run-marketplace-vercel-fallback-profile.mjs';
 import { maybeRunMarketplaceWorkspaceTransferUiProfile } from './run-marketplace-workspace-transfer-ui-profile.mjs';
 import { maybeRunMarketplaceWorkspaceTransferServerProfile } from './run-marketplace-workspace-transfer-server-profile.mjs';
@@ -58,6 +59,8 @@ function failedContractResult() {
 
 export async function maybeRunMarketplaceLivePageWiringProfile(input) {
   if (input.profile !== 'generic-owned') return null;
+  const credentialIssuance = await maybeRunCapabilityCredentialIssuanceProfile(input);
+  if (credentialIssuance) return credentialIssuance;
   const vercelFallback = await maybeRunMarketplaceVercelFallbackProfile(input);
   if (vercelFallback) return vercelFallback;
   const transferUi = await maybeRunMarketplaceWorkspaceTransferUiProfile(input);
