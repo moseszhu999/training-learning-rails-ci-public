@@ -7,9 +7,10 @@ import {
   isCurrentCapabilityCredentialReadScope,
 } from '../scripts/run-current-capability-credential-read-profile.mjs';
 
-test('selector accepts exactly three private owner files', () => {
-  assert.equal(CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES.size, 3);
-  assert.equal(CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES.has('supabase/migrations/20260810084550_trainingos_current_capability_credential_read_v1.sql'), true);
+test('selector accepts exactly four corrected private owner files', () => {
+  assert.equal(CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES.size, 4);
+  assert.equal(CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES.has('supabase/migrations/20260810094009_trainingos_current_capability_credential_read_v1.sql'), true);
+  assert.equal(CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES.has('supabase/migrations/20260810100119_trainingos_current_capability_credential_read_completeness_v1.sql'), true);
   assert.equal(isCurrentCapabilityCredentialReadScope(CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES), true);
   assert.equal(isCurrentCapabilityCredentialReadScope([...CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES, 'netlify.toml']), false);
   assert.equal(isCurrentCapabilityCredentialReadScope([...CURRENT_CAPABILITY_CREDENTIAL_READ_EXACT_FILES].slice(1)), false);
@@ -30,15 +31,15 @@ test('profile runs focused contracts then repository build gates only', () => {
   );
 });
 
-test('profile locks Preview-generated migration and fixed counts', () => {
+test('profile locks corrected Preview history and fixed counts', () => {
   const source = readFileSync(new URL('../scripts/run-current-capability-credential-read-profile.mjs', import.meta.url), 'utf8');
   for (const token of [
-    'const EXPECTED_CHANGED_FILE_COUNT = 3;',
-    'const EXPECTED_NODE_COUNT = 8;',
+    'const EXPECTED_CHANGED_FILE_COUNT = 4;',
+    'const EXPECTED_NODE_COUNT = 9;',
     'const EXPECTED_PYTHON_COUNT = 0;',
-    'const EXPECTED_MIGRATION_COUNT = 377;',
-    "const EXPECTED_MIGRATION_START = '20260810084550';",
-    "const EXPECTED_MIGRATION_END = '20260810084550';",
+    'const EXPECTED_MIGRATION_COUNT = 378;',
+    "const EXPECTED_MIGRATION_START = '20260810094009';",
+    "const EXPECTED_MIGRATION_END = '20260810100119';",
     'scope.migration_start === EXPECTED_MIGRATION_START',
     'scope.migration_end === EXPECTED_MIGRATION_END',
     "selectedSuite: 'current-capability-credential-read'",
