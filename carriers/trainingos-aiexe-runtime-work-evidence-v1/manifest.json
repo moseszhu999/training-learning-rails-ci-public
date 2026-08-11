@@ -1,0 +1,23 @@
+{
+  "schema": "trainingos.public-contract-carrier.v1",
+  "privateRepository": "moseszhu999/training-learning-rails",
+  "privatePullRequest": 760,
+  "privateExactHead": "1cdd2bbd0bfe48cba11931eeee5dc61aa1d571d1",
+  "upstreamRuntimeRepository": "moseszhu999/ai_exe_os",
+  "upstreamRuntimeExactHead": "28c7dd539a4a5f340a715a230bd05ce1c386d925",
+  "profile": "trainingos-aiexe-runtime-work-evidence-v1",
+  "proofMode": "PUBLIC_CONTRACT_CARRIER",
+  "privateSourcePublished": false,
+  "expectedCases": 10,
+  "boundaries": {
+    "workEvidenceOnly": true,
+    "formalLearningResultCreated": false,
+    "capabilityCredentialIssued": false,
+    "competencySatisfied": false,
+    "learningPlanMutated": false,
+    "authorityGrantCreated": false,
+    "humanGateCreated": false,
+    "externalActionPerformed": false,
+    "liveRuntimeInvoked": false
+  }
+}
