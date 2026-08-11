@@ -19,6 +19,7 @@ import { maybeRunCapabilityInitiativeProfile } from './run-capability-initiative
 import { maybeRunCapabilityCredentialCoreProfile } from './run-capability-credential-core-profile.mjs';
 import { maybeRunCapabilityLearningProfileCoreProfile } from './run-capability-learning-profile-core-profile.mjs';
 import { maybeRunMarketplaceCapabilityExperienceProfile } from './run-marketplace-capability-experience-profile.mjs';
+import { maybeRunSkillLibrarySeedProfile } from './run-skill-library-seed-profile.mjs';
 import { maybeRunGroupWorkEntryAdapterProfile } from './run-group-work-entry-adapter-profile.mjs';
 import { maybeRunOrganizationMembershipCoreProfile } from './run-organization-membership-core-profile.mjs';
 import { maybeRunOrganizationMembershipPersistenceProfile } from './run-organization-membership-persistence-profile.mjs';
@@ -75,6 +76,7 @@ export async function runProfile(input) {
     maybeRunCapabilityCredentialCoreProfile,
     maybeRunCapabilityLearningProfileCoreProfile,
     maybeRunMarketplaceCapabilityExperienceProfile,
+    maybeRunSkillLibrarySeedProfile,
     maybeRunGroupWorkEntryAdapterProfile,
     maybeRunOrganizationMembershipCoreProfile,
     maybeRunOrganizationMembershipPersistenceProfile,
