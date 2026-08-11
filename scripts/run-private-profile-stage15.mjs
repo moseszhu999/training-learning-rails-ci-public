@@ -17,6 +17,7 @@ import { maybeRunJavaPilotCourseSourceReadinessProfile } from './run-java-pilot-
 import { maybeRunJavaCourseCanonicalizationProfile } from './run-java-course-source-canonicalization-profile.mjs';
 import { maybeRunCapabilityInitiativeProfile } from './run-capability-initiative-profile.mjs';
 import { maybeRunCapabilityCredentialCoreProfile } from './run-capability-credential-core-profile.mjs';
+import { maybeRunCapabilityLearningProfileCoreProfile } from './run-capability-learning-profile-core-profile.mjs';
 import { maybeRunGroupWorkEntryAdapterProfile } from './run-group-work-entry-adapter-profile.mjs';
 import { maybeRunOrganizationMembershipCoreProfile } from './run-organization-membership-core-profile.mjs';
 import { maybeRunOrganizationMembershipPersistenceProfile } from './run-organization-membership-persistence-profile.mjs';
@@ -71,6 +72,7 @@ export async function runProfile(input) {
     maybeRunJavaCourseCanonicalizationProfile,
     maybeRunCapabilityInitiativeProfile,
     maybeRunCapabilityCredentialCoreProfile,
+    maybeRunCapabilityLearningProfileCoreProfile,
     maybeRunGroupWorkEntryAdapterProfile,
     maybeRunOrganizationMembershipCoreProfile,
     maybeRunOrganizationMembershipPersistenceProfile,
