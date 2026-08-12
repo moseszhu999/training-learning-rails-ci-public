@@ -39,7 +39,12 @@ export const professionalLearningLoopCommands = Object.freeze([
   command('install', 'npm', ['ci']),
   command('core-syntax', 'node', ['--check', 'packages/training-professional-learning-loop-core/src/index.mjs']),
   command('verified-learning-syntax', 'node', ['--check', 'packages/training-professional-learning-loop-core/src/verified-learning.mjs']),
-  command('focused-node-contracts', 'node', ['--test', 'packages/training-professional-learning-loop-core/test/*.test.mjs'], 'node'),
+  command('focused-node-contracts', 'node', [
+    '--test',
+    'packages/training-professional-learning-loop-core/test/professional-learning-loop.test.mjs',
+    'packages/training-professional-learning-loop-core/test/verified-learning.test.mjs',
+    'packages/training-professional-learning-loop-core/test/verified-learning-lineage.test.mjs',
+  ], 'node'),
   command('core-declaration-typecheck', 'npx', [
     'tsc', '--noEmit', '--strict', '--skipLibCheck', 'false',
     '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2022',
