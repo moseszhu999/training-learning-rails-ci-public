@@ -29,10 +29,11 @@ for name in "${required[@]}"; do
 done
 write_status inputs
 
-canonical_migration_count=380
+canonical_migration_count=381
 base_migration_count=378
 migration_one=20260812200600_trainingos_portable_professional_learning_state_v1.sql
 migration_two=20260812200700_trainingos_portable_professional_learning_state_v1_hardening.sql
+migration_three=20260812200800_trainingos_portable_professional_learning_state_v1_truth_hardening.sql
 
 CURRENT_STAGE="scope-contract"
 scope_file="$RUNNER_TEMP/trainingos-scope-contract.env"
@@ -157,6 +158,7 @@ sealed upgrade-base-reset supabase --workdir "$upgrade" db reset --local --no-se
 CURRENT_STAGE="upgrade-copy-migrations"
 cp "$PRIVATE_REPO_PATH/supabase/migrations/$migration_one" "$upgrade/supabase/migrations/"
 cp "$PRIVATE_REPO_PATH/supabase/migrations/$migration_two" "$upgrade/supabase/migrations/"
+cp "$PRIVATE_REPO_PATH/supabase/migrations/$migration_three" "$upgrade/supabase/migrations/"
 CURRENT_STAGE="upgrade-apply"
 sealed upgrade-apply supabase --workdir "$upgrade" migration up --local
 run_e2e "$upgrade" upgrade
