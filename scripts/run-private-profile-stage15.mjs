@@ -35,8 +35,10 @@ import { maybeRunLiveClassroomTencentProviderCurrentMainProfile } from './run-li
 import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './run-live-classroom-teaching-interactions-current-main-profile.mjs';
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
 import { maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile } from './run-live-classroom-postclass-evidence-current-main-profile.mjs';
-import { maybeRunCourseDesignMcpReadV1Profile } from './run-course-design-mcp-read-v1-profile.mjs';
-import { maybeRunGroupTrainingDemandW3bProfile } from './run-group-training-demand-loop-w3b-profile.mjs';
+import {
+  maybeRunCourseDesignMcpReadV1Profile,
+  maybeRunGroupTrainingDemandW3bProfile,
+} from './run-course-design-mcp-read-v1-profile.mjs';
 import { maybeRunLiveClassroomBrowserMatrixCurrentMainProfile } from './run-live-classroom-browser-matrix-current-main-profile.mjs';
 import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live-classroom-runtime-wiring-current-main-profile.mjs';
 
@@ -62,7 +64,7 @@ teacherHubCommands.splice(roleContractsIndex, 0,
 export async function runProfile(input) {
   const runners = [
     maybeRunLiveClassroomACurrentMainProfile,
-    maybeRunEntitlementBillingProjectionProfile,
+    maybeRunEntitlementBillingIntentProfile,
     maybeRunProviderNeutralBillingIntentProfile,
     maybeRunStripeTestAdapterWebhookProfile,
     maybeRunAgentSkillEvalFrameworkV2Profile,
