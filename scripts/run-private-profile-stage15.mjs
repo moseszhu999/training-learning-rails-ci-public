@@ -36,6 +36,7 @@ import { maybeRunLiveClassroomTeachingInteractionsCurrentMainProfile } from './r
 import { maybeRunCanonicalNorthStarCurrentMainProfile } from './run-canonical-north-star-current-main-profile.mjs';
 import { maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile } from './run-live-classroom-postclass-evidence-current-main-profile.mjs';
 import { maybeRunCourseDesignMcpReadV1Profile } from './run-course-design-mcp-read-v1-profile.mjs';
+import { maybeRunGroupTrainingDemandW3bProfile } from './run-group-training-demand-loop-w3b-profile.mjs';
 import { maybeRunLiveClassroomBrowserMatrixCurrentMainProfile } from './run-live-classroom-browser-matrix-current-main-profile.mjs';
 import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live-classroom-runtime-wiring-current-main-profile.mjs';
 
@@ -93,6 +94,7 @@ export async function runProfile(input) {
     maybeRunCanonicalNorthStarCurrentMainProfile,
     maybeRunLiveClassroomPostclassEvidenceCurrentMainProfile,
     maybeRunCourseDesignMcpReadV1Profile,
+    maybeRunGroupTrainingDemandW3bProfile,
     maybeRunLiveClassroomBrowserMatrixCurrentMainProfile,
     maybeRunLiveClassroomRuntimeWiringCurrentMainProfile,
   ];
