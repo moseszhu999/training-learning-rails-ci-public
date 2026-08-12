@@ -9,20 +9,21 @@ import {
   sanitizePortableProfessionalLearningDatabaseStatusFile,
 } from '../scripts/run-portable-professional-learning-db-profile.mjs';
 
-test('locks the exact five-file P1 persistence scope', () => {
+test('locks the exact six-file P1 persistence scope', () => {
   const files = [...PORTABLE_PROFESSIONAL_LEARNING_DB_EXACT_FILES];
-  assert.equal(files.length, 5);
+  assert.equal(files.length, 6);
   assert.equal(isPortableProfessionalLearningDbScope(files), true);
   assert.equal(isPortableProfessionalLearningDbScope(files.slice(1)), false);
   assert.equal(isPortableProfessionalLearningDbScope([...files, 'README.md']), false);
 });
 
-test('scope includes exactly two P1 migrations and the SQL E2E', () => {
+test('scope includes exactly three P1 migrations and the SQL E2E', () => {
   const files = [...PORTABLE_PROFESSIONAL_LEARNING_DB_EXACT_FILES];
   const migrations = files.filter((name) => name.startsWith('supabase/migrations/'));
   assert.deepEqual(migrations.sort(), [
     'supabase/migrations/20260812200600_trainingos_portable_professional_learning_state_v1.sql',
     'supabase/migrations/20260812200700_trainingos_portable_professional_learning_state_v1_hardening.sql',
+    'supabase/migrations/20260812200800_trainingos_portable_professional_learning_state_v1_truth_hardening.sql',
   ]);
   assert.ok(files.includes('tests/sql/trainingos_portable_professional_learning_state_v1_e2e.sql'));
 });
