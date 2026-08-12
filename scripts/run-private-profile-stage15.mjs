@@ -41,6 +41,7 @@ import {
 } from './run-course-design-mcp-read-v1-profile.mjs';
 import { maybeRunLiveClassroomBrowserMatrixCurrentMainProfile } from './run-live-classroom-browser-matrix-current-main-profile.mjs';
 import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live-classroom-runtime-wiring-current-main-profile.mjs';
+import { maybeRunProfessionalLearningLoopProfile } from './run-professional-learning-loop-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -99,6 +100,7 @@ export async function runProfile(input) {
     maybeRunGroupTrainingDemandW3bProfile,
     maybeRunLiveClassroomBrowserMatrixCurrentMainProfile,
     maybeRunLiveClassroomRuntimeWiringCurrentMainProfile,
+    maybeRunProfessionalLearningLoopProfile,
   ];
   for (const runner of runners) {
     const result = await runner(input);
