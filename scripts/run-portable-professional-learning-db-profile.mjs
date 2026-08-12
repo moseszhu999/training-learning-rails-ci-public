@@ -14,16 +14,17 @@ export const PORTABLE_PROFESSIONAL_LEARNING_DB_EXACT_FILES = new Set([
   'docs/architecture/trainingos-portable-professional-learning-state-v1.md',
   'supabase/migrations/20260812200600_trainingos_portable_professional_learning_state_v1.sql',
   'supabase/migrations/20260812200700_trainingos_portable_professional_learning_state_v1_hardening.sql',
+  'supabase/migrations/20260812200800_trainingos_portable_professional_learning_state_v1_truth_hardening.sql',
   'tests/sql/trainingos_portable_professional_learning_state_v1_e2e.sql',
   'tests/training-portable-professional-learning-state-v1.test.mjs',
 ]);
 
 const EXPECTED_NODE_COUNT = 17;
 const EXPECTED_PYTHON_COUNT = 0;
-const EXPECTED_CHANGED_FILE_COUNT = 5;
-const EXPECTED_MIGRATION_COUNT = 380;
+const EXPECTED_CHANGED_FILE_COUNT = 6;
+const EXPECTED_MIGRATION_COUNT = 381;
 const MIGRATION_START = '20260812200600';
-const MIGRATION_END = '20260812200700';
+const MIGRATION_END = '20260812200800';
 const SAFE_STATUS_BASENAME = 'trainingos-portable-professional-learning-db-safe-status.txt';
 
 const SAFE_DATABASE_STAGES = new Set([
