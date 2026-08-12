@@ -43,6 +43,7 @@ import { maybeRunLiveClassroomBrowserMatrixCurrentMainProfile } from './run-live
 import { maybeRunLiveClassroomRuntimeWiringCurrentMainProfile } from './run-live-classroom-runtime-wiring-current-main-profile.mjs';
 import { maybeRunProfessionalLearningLoopProfile } from './run-professional-learning-loop-profile.mjs';
 import { maybeRunPortableProfessionalLearningDbProfile } from './run-portable-professional-learning-db-profile.mjs';
+import { maybeRunCompetitorExperimentsProfile } from './run-competitor-experiments-profile.mjs';
 
 const teacherHubCommands = profileCommands['teacher-hub'];
 const roleContractsIndex = teacherHubCommands.findIndex((item) => item.label === 'role-contracts');
@@ -101,6 +102,7 @@ export async function runProfile(input) {
     maybeRunGroupTrainingDemandW3bProfile,
     maybeRunLiveClassroomBrowserMatrixCurrentMainProfile,
     maybeRunLiveClassroomRuntimeWiringCurrentMainProfile,
+    maybeRunCompetitorExperimentsProfile,
     maybeRunProfessionalLearningLoopProfile,
     maybeRunPortableProfessionalLearningDbProfile,
   ];
