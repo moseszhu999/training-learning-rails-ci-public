@@ -64,7 +64,7 @@ teacherHubCommands.splice(roleContractsIndex, 0,
 export async function runProfile(input) {
   const runners = [
     maybeRunLiveClassroomACurrentMainProfile,
-    maybeRunEntitlementBillingIntentProfile,
+    maybeRunEntitlementBillingProjectionProfile,
     maybeRunProviderNeutralBillingIntentProfile,
     maybeRunStripeTestAdapterWebhookProfile,
     maybeRunAgentSkillEvalFrameworkV2Profile,
