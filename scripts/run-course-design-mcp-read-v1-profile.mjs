@@ -165,3 +165,112 @@ export async function maybeRunCourseDesignMcpReadV1Profile(input) {
     selectedSuite: 'course-design-mcp-read-v1',
   };
 }
+
+// W3B is intentionally co-located in this pre-existing profile module.
+// The exact-head runner experienced a module-resolution failure for a newly-added
+// standalone profile file after the private checkout stage even though public unit CI
+// could see that file. Keeping the bounded W3B dispatcher in an already-established
+// module removes that checkout-composition dependency without changing private scope.
+export const GROUP_TRAINING_DEMAND_W3B_EXACT_FILES = new Set([
+  'docs/product/trainingos-group-training-demand-loop-v1.md',
+  'src/lib/trainingos-group-training-demand-loop-v1.mjs',
+  'tests/trainingos-group-training-demand-loop-v1.test.mjs',
+]);
+
+const W3B_EXPECTED_CHANGED_FILE_COUNT = 3;
+const W3B_EXPECTED_NODE_COUNT = 12;
+const W3B_EXPECTED_PYTHON_COUNT = 0;
+
+export const groupTrainingDemandW3bCommands = Object.freeze([
+  command('install', 'npm', ['ci']),
+  command('module-syntax', 'node', ['--check', 'src/lib/trainingos-group-training-demand-loop-v1.mjs']),
+  command('focused-node-contracts', 'node', ['--test', 'tests/trainingos-group-training-demand-loop-v1.test.mjs'], 'node'),
+  command('typecheck', 'npm', ['run', 'typecheck']),
+  command('production-build', 'npm', ['run', 'build']),
+]);
+
+export function isGroupTrainingDemandW3bScope(files) {
+  const names = [...files];
+  return names.length === GROUP_TRAINING_DEMAND_W3B_EXACT_FILES.size
+    && names.every((name) => GROUP_TRAINING_DEMAND_W3B_EXACT_FILES.has(name))
+    && names.every((name) => !name.startsWith('supabase/migrations/'));
+}
+
+function failedW3bContractResult() {
+  return {
+    ok: false,
+    status: 'FAIL:fixed-input-contract',
+    failedLabels: Object.freeze(['fixed-input-contract']),
+    stepCount: groupTrainingDemandW3bCommands.length,
+    passedStepCount: 0,
+    nodeTests: 0,
+    nodePassed: 0,
+    nodeFailed: 0,
+    pythonTests: 0,
+    selectedSuite: 'group-training-demand-loop-w3b',
+  };
+}
+
+export async function maybeRunGroupTrainingDemandW3bProfile(input) {
+  if (input.profile !== 'generic-owned') return null;
+  const { files, scope } = await exactChangedFiles(input);
+  if (!isGroupTrainingDemandW3bScope(files)) return null;
+
+  const fixedInputs = Number(input.expectedNodeCount) === W3B_EXPECTED_NODE_COUNT
+    && Number(input.expectedPythonCount) === W3B_EXPECTED_PYTHON_COUNT
+    && scope.expected_changed_file_count === String(W3B_EXPECTED_CHANGED_FILE_COUNT)
+    && scope.migration_start === 'none'
+    && scope.migration_end === 'none';
+  if (!fixedInputs) {
+    await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
+    return failedW3bContractResult();
+  }
+
+  let passedStepCount = 0;
+  let nodeTests = 0;
+  let nodePassed = 0;
+  let nodeFailed = 0;
+  const failedLabels = [];
+
+  try {
+    for (const [index, item] of groupTrainingDemandW3bCommands.entries()) {
+      const logPath = path.join(input.runnerTemp, `trainingos-profile-${index + 1}.log`);
+      const descriptor = openSync(logPath, 'w', 0o600);
+      const commandResult = spawnSync(item.executable, item.args, {
+        cwd: input.privateRepoPath,
+        env: process.env,
+        stdio: ['ignore', descriptor, descriptor],
+        shell: false,
+      });
+      closeSync(descriptor);
+      const output = await readFile(logPath, 'utf8');
+      if (item.kind === 'node') {
+        nodeTests += parseNode(output);
+        nodePassed += parseNodePassed(output);
+        nodeFailed += parseNodeFailed(output);
+      }
+      if (commandResult.status === 0) passedStepCount += 1;
+      else failedLabels.push(item.label);
+    }
+  } finally {
+    await rm(path.join(input.runnerTemp, 'trainingos-scope-contract.env'), { force: true });
+  }
+
+  const countsPassed = nodeTests === W3B_EXPECTED_NODE_COUNT
+    && nodePassed === W3B_EXPECTED_NODE_COUNT
+    && nodeFailed === 0;
+  const stepCount = groupTrainingDemandW3bCommands.length;
+  const ok = passedStepCount === stepCount && countsPassed;
+  return {
+    ok,
+    status: ok ? 'PASS' : `FAIL:${failedLabels.length ? failedLabels.join(',') : 'count-contract'}`,
+    failedLabels: Object.freeze([...failedLabels]),
+    stepCount,
+    passedStepCount,
+    nodeTests,
+    nodePassed,
+    nodeFailed,
+    pythonTests: 0,
+    selectedSuite: 'group-training-demand-loop-w3b',
+  };
+}
