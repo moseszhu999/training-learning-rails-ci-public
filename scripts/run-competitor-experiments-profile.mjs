@@ -33,6 +33,26 @@ export const COMPETITOR_EXPERIMENT_PROFILES = Object.freeze([
     ]),
   }),
   Object.freeze({
+    id: 'roleplay-experience',
+    expectedNodeCount: 10,
+    exactFiles: Object.freeze(new Set([
+      'docs/product/previews/trainingos-roleplay-experience-v1.html',
+      'docs/product/trainingos-roleplay-experience-v1.md',
+      'packages/training-roleplay-experience-core/package.json',
+      'packages/training-roleplay-experience-core/src/index.mjs',
+      'packages/training-roleplay-experience-core/test/roleplay-experience.test.mjs',
+    ])),
+    commands: Object.freeze([
+      command('install', 'npm', ['ci']),
+      command('roleplay-experience-syntax', 'node', ['--check', 'packages/training-roleplay-experience-core/src/index.mjs']),
+      command('focused-node-contracts', 'node', ['--test', 'packages/training-roleplay-experience-core/test/roleplay-experience.test.mjs'], 'node'),
+      command('repository-typecheck', 'npm', ['run', 'typecheck']),
+      command('direct-vite-production-build', 'npx', ['vite', 'build', '--config', 'vite.config.ts']),
+      command('postbuild-copy', 'node', ['scripts/copy-trainingos-marketplace-web.mjs']),
+      command('bundle-verification', 'npm', ['run', 'verify:build']),
+    ]),
+  }),
+  Object.freeze({
     id: 'verified-skill-evidence',
     expectedNodeCount: 9,
     exactFiles: Object.freeze(new Set([
