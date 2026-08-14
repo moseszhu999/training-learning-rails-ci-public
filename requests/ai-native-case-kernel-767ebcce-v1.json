@@ -1,0 +1,19 @@
+{
+  "requestId": "ai-native-case-kernel-767ebcce-v1",
+  "privateRepository": "moseszhu999/ai-native-platform",
+  "privateExactSha": "767ebcced7e59be3fcef3d79587a2bb54d0ee0d7",
+  "expectedBaseSha": "9606df102dff142c0947636213d79a73befea4c9",
+  "expectedChangedFileCount": 14,
+  "expectedScopeDigest": "a522beac54516ed16601cd5fd20c49c9b76b6c709fb888f8717c8ea68eb377d2",
+  "fixedProfile": [
+    "npm ci",
+    "vitest platform-case-kernel",
+    "full tests",
+    "lint",
+    "typecheck",
+    "build"
+  ],
+  "privateSourcePublished": false,
+  "rawPrivateLogsPublished": false,
+  "productionMutation": false
+}
