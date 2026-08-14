@@ -1,0 +1,145 @@
+name: AI Native Platform Case Kernel exact 767ebcce
+
+on:
+  push:
+    branches:
+      - ci/ai-native-case-kernel-767ebcce-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-native-case-kernel-767ebcce-v1
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PRIVATE_HEAD: 767ebcced7e59be3fcef3d79587a2bb54d0ee0d7
+      EXPECTED_BASE: 9606df102dff142c0947636213d79a73befea4c9
+      EXPECTED_CHANGED_FILE_COUNT: '14'
+      EXPECTED_SCOPE_DIGEST: a522beac54516ed16601cd5fd20c49c9b76b6c709fb888f8717c8ea68eb377d2
+    steps:
+      - name: Check out public carrier
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate read-only private credential presence
+        id: credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          if [[ -n "$PRIVATE_TOKEN" ]]; then
+            echo 'status=PASS' >> "$GITHUB_OUTPUT"
+          else
+            echo 'status=FAIL' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out exact private AI Native Platform head
+        id: checkout_private
+        if: steps.credential.outputs.status == 'PASS'
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/ai-native-platform
+          ref: ${{ env.PRIVATE_HEAD }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify immutable head/base/scope commitment
+        id: scope
+        if: steps.checkout_private.outcome == 'success'
+        shell: bash
+        run: |
+          set +e
+          status=PASS
+          cd private-repo
+          actual_head="$(git rev-parse HEAD 2>/dev/null)"
+          [[ "$actual_head" == "$PRIVATE_HEAD" ]] || status=FAIL
+          git cat-file -e "$EXPECTED_BASE^{commit}" >/dev/null 2>&1 || status=FAIL
+          changed_file_count="$(git diff --name-only "$EXPECTED_BASE" "$PRIVATE_HEAD" 2>/dev/null | sed '/^$/d' | wc -l | tr -d ' ')"
+          [[ "$changed_file_count" == "$EXPECTED_CHANGED_FILE_COUNT" ]] || status=FAIL
+          scope_digest="$(git diff --name-only "$EXPECTED_BASE" "$PRIVATE_HEAD" 2>/dev/null | sed '/^$/d' | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+          [[ "$scope_digest" == "$EXPECTED_SCOPE_DIGEST" ]] || status=FAIL
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "changed_file_count=$changed_file_count" >> "$GITHUB_OUTPUT"
+          cd ..
+          exit 0
+
+      - name: Set up Node.js
+        if: steps.scope.outputs.status == 'PASS'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Run sealed fixed validation profile
+        id: validate
+        if: steps.scope.outputs.status == 'PASS'
+        shell: bash
+        run: |
+          set +e
+          repo="$GITHUB_WORKSPACE/private-repo"
+          tmp="$RUNNER_TEMP/ai-native-case-kernel"
+          mkdir -p "$tmp"
+
+          run_stage() {
+            label="$1"
+            shift
+            (cd "$repo" && "$@") >"$tmp/$label.log" 2>&1
+            code=$?
+            if [[ "$code" == 0 ]]; then
+              echo "$label=PASS" >> "$GITHUB_OUTPUT"
+            else
+              echo "$label=FAIL" >> "$GITHUB_OUTPUT"
+            fi
+            return 0
+          }
+
+          run_stage install npm ci
+          run_stage focused npx vitest run packages/platform-case-kernel/tests
+          run_stage full_tests npm test
+          run_stage lint npm run lint
+          run_stage typecheck npm run typecheck
+          run_stage build npm run build
+
+          final=PASS
+          for key in install focused full_tests lint typecheck build; do
+            value="$(grep "^${key}=" "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)"
+            [[ "$value" == 'PASS' ]] || final=FAIL
+          done
+          echo "status=$final" >> "$GITHUB_OUTPUT"
+          rm -rf "$tmp"
+          exit 0
+
+      - name: Sanitized verdict
+        if: always()
+        shell: bash
+        run: |
+          credential='${{ steps.credential.outputs.status }}'
+          scope='${{ steps.scope.outputs.status }}'
+          validation='${{ steps.validate.outputs.status }}'
+          if [[ "$credential" == 'PASS' && "$scope" == 'PASS' && "$validation" == 'PASS' ]]; then
+            echo 'AI_NATIVE_CASE_KERNEL_EXACT_HEAD=PASS'
+            echo "private_exact_sha=$PRIVATE_HEAD"
+            echo "expected_base_sha=$EXPECTED_BASE"
+            echo "changed_file_count=${{ steps.scope.outputs.changed_file_count }}"
+            echo "scope_digest=$EXPECTED_SCOPE_DIGEST"
+            echo 'private_source_published=false'
+            echo 'raw_private_logs_published=false'
+            exit 0
+          fi
+          echo 'AI_NATIVE_CASE_KERNEL_EXACT_HEAD=FAIL'
+          echo "credential=${credential:-NOT_RUN}"
+          echo "scope=${scope:-NOT_RUN}"
+          echo "validation=${validation:-NOT_RUN}"
+          exit 1
