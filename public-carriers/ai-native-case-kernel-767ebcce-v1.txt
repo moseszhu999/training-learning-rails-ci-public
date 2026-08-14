@@ -1,0 +1,7 @@
+DISPOSABLE_PUBLIC_CARRIER
+request=ai-native-case-kernel-767ebcce-v1
+private_repo=moseszhu999/ai-native-platform
+private_exact_sha=767ebcced7e59be3fcef3d79587a2bb54d0ee0d7
+expected_base_sha=9606df102dff142c0947636213d79a73befea4c9
+merge=NO
+close_after_evidence=YES
