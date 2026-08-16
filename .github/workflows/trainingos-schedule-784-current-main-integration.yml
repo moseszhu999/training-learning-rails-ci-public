@@ -1,0 +1,105 @@
+name: TrainingOS Schedule #784 current-main integration carrier
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/trainingos-schedule-784-current-main-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trainingos-schedule-784-current-main-integration-v1
+  cancel-in-progress: false
+
+jobs:
+  exact-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_HEAD: a516e3745b1a67d8a310cd288abf0f081ed0950a
+      EXPECTED_MAIN: 73221fccb8c042427561229f6981f27a7708a439
+    steps:
+      - name: Validate private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          test -n "$PRIVATE_TOKEN"
+
+      - name: Checkout exact TrainingOS head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.EXPECTED_HEAD }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact head and current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git fetch origin main --quiet
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          mapfile -t files < <(git diff --name-only "$(git merge-base "$EXPECTED_HEAD" "$EXPECTED_MAIN")" "$EXPECTED_HEAD")
+          test "${#files[@]}" -eq 3
+          printf '%s\n' "${files[@]}" | sort > "$RUNNER_TEMP/actual-files.txt"
+          cat > "$RUNNER_TEMP/expected-files.txt" <<'EOF'
+          docs/evidence/trainingos-schedule-main-hardening-v1.md
+          lib/trainingos-agent-gateway/schedule-ops.mjs
+          tests/test_trainingos_schedule_main_hardening_v1.py
+          EOF
+          diff -u "$RUNNER_TEMP/expected-files.txt" "$RUNNER_TEMP/actual-files.txt"
+          if printf '%s\n' "${files[@]}" | grep -q '^supabase/migrations/'; then exit 7; fi
+
+      - name: Prove clean merge with current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'trainingos-public-ci'
+          git config user.email 'trainingos-public-ci@users.noreply.github.com'
+          git merge --no-commit --no-ff "$EXPECTED_MAIN" > "$RUNNER_TEMP/merge.log" 2>&1
+          test -z "$(git ls-files -u)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run focused Schedule regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest -v tests.test_trainingos_schedule_main_hardening_v1 > "$RUNNER_TEMP/schedule-python.log" 2>&1
+          grep -Eq '^Ran 2 tests in ' "$RUNNER_TEMP/schedule-python.log"
+          grep -Eq '^OK$' "$RUNNER_TEMP/schedule-python.log"
+          node --check lib/trainingos-agent-gateway/schedule-ops.mjs
+
+      - name: Run repository typecheck and production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck > "$RUNNER_TEMP/typecheck.log" 2>&1
+          npm run build > "$RUNNER_TEMP/build.log" 2>&1
+          npm run verify:build > "$RUNNER_TEMP/verify-build.log" 2>&1
+
+      - name: Final immutable integration gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test -z "$(git ls-files -u)"
+          test -f docs/evidence/trainingos-schedule-main-hardening-v1.md
+          echo 'TRAININGOS_SCHEDULE_784_CURRENT_MAIN_INTEGRATION=PASS'
