@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_HEAD: a516e3745b1a67d8a310cd288abf0f081ed0950a
-      EXPECTED_MAIN: 73221fccb8c042427561229f6981f27a7708a439
+      EXPECTED_MAIN: a7db83e53ca41a3e2fbcfea1f99409ef19d2926d
     steps:
       - name: Validate private read credential
         shell: bash
