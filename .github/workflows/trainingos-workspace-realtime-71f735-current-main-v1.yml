@@ -182,14 +182,19 @@ jobs:
           BUILD: ${{ steps.build.outputs.status }}
           VERIFY: ${{ steps.verify.outputs.status }}
         run: |
-          set -euo pipefail
-          [[ "$SCOPE" == PASS ]]
-          [[ "$INTEGRATE" == PASS ]]
-          [[ "$INSTALL" == PASS ]]
-          [[ "$FOCUSED" == PASS ]]
-          [[ "$TYPECHECK" == PASS ]]
-          [[ "$BUILD" == PASS ]]
-          [[ "$VERIFY" == PASS ]]
+          set +e
+          failed=0
+          for pair in "scope:$SCOPE" "integrate:$INTEGRATE" "install:$INSTALL" "focused:$FOCUSED" "typecheck:$TYPECHECK" "build:$BUILD" "verify:$VERIFY"; do
+            key="${pair%%:*}"
+            value="${pair#*:}"
+            if [[ "$value" == PASS ]]; then
+              echo "::notice title=TrainingOS exact-head gate::$key=PASS"
+            else
+              echo "::error title=TrainingOS exact-head gate::$key=${value:-EMPTY}"
+              failed=1
+            fi
+          done
+          exit "$failed"
 
       - name: Cleanup sealed private output
         if: always()
