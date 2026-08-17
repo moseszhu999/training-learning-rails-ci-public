@@ -1,0 +1,132 @@
+name: TrainingOS Workspace Realtime 440dc current-main CI
+
+on:
+  push:
+    branches:
+      - ci/trainingos-workspace-realtime-440dc-current-main-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-current-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PRIVATE_SHA: 440dcdd097891b873fbda3a43220708af5b23e9c
+      CURRENT_MAIN_SHA: b5695921f9fba668b431b22cee454cc7d54537a6
+      MERGE_BASE_SHA: b5f25d56ab8f69968e047c1323cdcc68d31d7c0f
+    steps:
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Verify exact head and bounded scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
+          actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected=$'apps/training-web/src/lib/trainingos-live-classroom-tencent-provider.ts\napps/training-web/src/lib/trainingos-workspace-realtime-contribution-core.ts\napps/training-web/src/lib/trainingos-workspace-realtime-contribution.ts\napps/training-web/src/workspace-domain-contribution.ts\npackage.json\nscripts/run-trainingos-workspace-realtime-client-validation.ts\nscripts/run-trainingos-workspace-realtime-leave-contract.ts\ntests/test_trainingos_live_classroom_tencent_provider_v1.py\nvite.config.ts'
+          test "$actual" = "$expected"
+          ! printf '%s\n' "$actual" | grep -q '^supabase/migrations/'
+          ! printf '%s\n' "$actual" | grep -q '^.github/workflows/'
+
+      - name: Install dependencies
+        working-directory: private-repo
+        shell: bash
+        run: npm ci >/dev/null 2>&1
+
+      - name: Exact-head Workspace Realtime validation
+        working-directory: private-repo
+        shell: bash
+        run: npm run validate:workspace-realtime-client
+
+      - name: Exact-head leave contract
+        working-directory: private-repo
+        shell: bash
+        run: npm run test:trainingos-workspace-realtime-leave-contract
+
+      - name: Exact-head Tencent provider Python contract
+        working-directory: private-repo
+        shell: bash
+        run: python -m unittest tests.test_trainingos_live_classroom_tencent_provider_v1 -v
+
+      - name: Exact-head typecheck
+        working-directory: private-repo
+        shell: bash
+        run: npm run typecheck
+
+      - name: Exact-head production build
+        working-directory: private-repo
+        shell: bash
+        run: npm run build
+
+      - name: Exact-head verify build
+        working-directory: private-repo
+        shell: bash
+        run: npm run verify:build
+
+      - name: Integrate current main without commit
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trainingos-public-ci
+          git config user.email trainingos-public-ci@users.noreply.github.com
+          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA"
+
+      - name: Integrated Workspace Realtime validation
+        working-directory: private-repo
+        shell: bash
+        run: npm run validate:workspace-realtime-client
+
+      - name: Integrated leave contract
+        working-directory: private-repo
+        shell: bash
+        run: npm run test:trainingos-workspace-realtime-leave-contract
+
+      - name: Integrated Tencent provider Python contract
+        working-directory: private-repo
+        shell: bash
+        run: python -m unittest tests.test_trainingos_live_classroom_tencent_provider_v1 -v
+
+      - name: Integrated typecheck
+        working-directory: private-repo
+        shell: bash
+        run: npm run typecheck
+
+      - name: Integrated production build
+        working-directory: private-repo
+        shell: bash
+        run: npm run build
+
+      - name: Integrated verify build
+        working-directory: private-repo
+        shell: bash
+        run: npm run verify:build
+
+      - name: Prove immutable source head and expected merge state
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
