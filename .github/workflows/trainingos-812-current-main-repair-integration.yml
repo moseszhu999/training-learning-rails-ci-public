@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      EXPECTED_HEAD: da267ca1869def910a79baf473335f0817164edb
-      EXPECTED_MAIN: 0c887d57b11cca2cd637b72066868aad6e981d30
-      EXPECTED_MERGE_BASE: 3a313df8af09d74a1f28b56f6c230d26bc522f85
+      EXPECTED_HEAD: e84edacef854685d388fd01f8dad0ef36801b8c2
+      EXPECTED_MAIN: 8e44d06a1ffe8a6f559dade1dcd8dbe0694924e5
+      EXPECTED_MERGE_BASE: 511b9ea2f665c797aba5846e36c26dc14888f9f1
     steps:
       - name: Validate private read credential
         env:
