@@ -1,0 +1,109 @@
+name: TrainingOS Tencent E2E target gate current-main CI
+
+on:
+  push:
+    branches:
+      - ci/trainingos-tencent-e2e-target-gate-b0b9e-current-main-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-current-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PRIVATE_SHA: b0b9e42442cf0f7ae079dabd33252f5fa796137e
+      CURRENT_MAIN_SHA: b5695921f9fba668b431b22cee454cc7d54537a6
+      MERGE_BASE_SHA: b5695921f9fba668b431b22cee454cc7d54537a6
+    steps:
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - name: Verify exact head and bounded scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
+          actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected=$'config/trainingos-live-classroom-tencent-e2e-targets-v1.json\ndocs/architecture/trainingos-live-classroom-tencent-e2e-target-gate-v1.md\nlib/trainingos-agent-gateway/tencent-live-classroom-e2e-operator.mjs\nlib/trainingos-agent-gateway/tencent-live-classroom-e2e-targets.mjs\nprototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-e2e-targets.test.mjs\nscripts/trainingos-live-classroom-tencent-e2e-provision.mjs'
+          test "$actual" = "$expected"
+          ! printf '%s\n' "$actual" | grep -q '^supabase/migrations/'
+          ! printf '%s\n' "$actual" | grep -q '^.github/workflows/'
+      - name: Verify default registry is fail closed
+        working-directory: private-repo
+        shell: bash
+        run: node -e 'const m=require("./config/trainingos-live-classroom-tencent-e2e-targets-v1.json"); if (!Array.isArray(m.targets) || m.targets.length !== 0) process.exit(1)'
+      - name: Syntax check target gate modules
+        working-directory: private-repo
+        shell: bash
+        run: |
+          node --check lib/trainingos-agent-gateway/tencent-live-classroom-e2e-targets.mjs
+          node --check lib/trainingos-agent-gateway/tencent-live-classroom-e2e-operator.mjs
+          node --check scripts/trainingos-live-classroom-tencent-e2e-provision.mjs
+      - name: Focused Tencent E2E target contracts
+        working-directory: private-repo
+        shell: bash
+        run: node --test prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-e2e-targets.test.mjs
+      - name: Install dependencies
+        working-directory: private-repo
+        shell: bash
+        run: npm ci >/dev/null 2>&1
+      - name: Exact-head typecheck
+        working-directory: private-repo
+        shell: bash
+        run: npm run typecheck
+      - name: Exact-head production build
+        working-directory: private-repo
+        shell: bash
+        run: npm run build
+      - name: Exact-head verify build
+        working-directory: private-repo
+        shell: bash
+        run: npm run verify:build
+      - name: Integrate current main without commit
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trainingos-public-ci
+          git config user.email trainingos-public-ci@users.noreply.github.com
+          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA"
+      - name: Integrated focused contracts
+        working-directory: private-repo
+        shell: bash
+        run: node --test prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-e2e-targets.test.mjs
+      - name: Integrated typecheck
+        working-directory: private-repo
+        shell: bash
+        run: npm run typecheck
+      - name: Integrated production build
+        working-directory: private-repo
+        shell: bash
+        run: npm run build
+      - name: Integrated verify build
+        working-directory: private-repo
+        shell: bash
+        run: npm run verify:build
+      - name: Prove immutable source head and merge state
+        working-directory: private-repo
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
