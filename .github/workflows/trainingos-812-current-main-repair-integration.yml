@@ -20,6 +20,7 @@ jobs:
     env:
       EXPECTED_HEAD: da267ca1869def910a79baf473335f0817164edb
       EXPECTED_MAIN: 0c887d57b11cca2cd637b72066868aad6e981d30
+      EXPECTED_MERGE_BASE: 3a313df8af09d74a1f28b56f6c230d26bc522f85
     steps:
       - name: Validate private read credential
         env:
@@ -33,15 +34,16 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           fetch-depth: 0
           persist-credentials: true
-      - name: Verify exact repaired delta against current main
+      - name: Verify exact repaired delta and current main
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
-          test "$(git merge-base "$EXPECTED_HEAD" "$EXPECTED_MAIN")" = "3a313df8af09d74a1f28b56f6c230d26bc522f85"
-          git diff --name-only "$EXPECTED_MAIN" "$EXPECTED_HEAD" | sort > "$RUNNER_TEMP/actual-files.txt"
+          merge_base="$(git merge-base "$EXPECTED_HEAD" "$EXPECTED_MAIN")"
+          test "$merge_base" = "$EXPECTED_MERGE_BASE"
+          git diff --name-only "$EXPECTED_MERGE_BASE" "$EXPECTED_HEAD" | sort > "$RUNNER_TEMP/actual-files.txt"
           cat > "$RUNNER_TEMP/expected-files.txt" <<'EOF'
           docs/architecture/trainingos-live-classroom-livekit-server-authorization-v1.md
           lib/trainingos-agent-gateway/livekit-live-classroom-authorization.mjs
