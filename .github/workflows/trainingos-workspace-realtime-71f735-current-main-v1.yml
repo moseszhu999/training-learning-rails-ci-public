@@ -1,4 +1,4 @@
-name: TrainingOS Workspace Realtime 71f735 current-main CI
+name: TrainingOS Workspace Realtime current-head diagnostic
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
-      PRIVATE_SHA: 71f73563b01cbce58c07a2995151ef47bd3fcd04
+      PRIVATE_SHA: 0b3b520e5fed462057e2b4d972a05c372e0358d2
       MERGE_BASE_SHA: b5f25d56ab8f69968e047c1323cdcc68d31d7c0f
     steps:
       - name: Check out exact private head
@@ -51,51 +51,22 @@ jobs:
         shell: bash
         run: npm ci >/dev/null 2>&1
 
-      - name: Diagnose focused validation without source disclosure
-        id: focused
+      - name: Focused validation
         working-directory: private-repo
         shell: bash
-        run: |
-          set +e
-          npm run validate:workspace-realtime-client > "$RUNNER_TEMP/focused.log" 2>&1
-          code=$?
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          if [[ $code -ne 0 ]]; then
-            location="$(grep -oE 'run-trainingos-workspace-realtime-client-validation\.ts:[0-9]+:[0-9]+' "$RUNNER_TEMP/focused.log" | tail -n 1 || true)"
-            echo "::error title=TrainingOS focused diagnostic::exit=$code location=${location:-NOT_VERIFIED}"
-          else
-            echo "::notice title=TrainingOS focused diagnostic::PASS"
-          fi
-          exit 0
+        run: npm run validate:workspace-realtime-client
 
-      - name: Diagnose typecheck without error-text disclosure
-        id: typecheck
+      - name: Typecheck
         working-directory: private-repo
         shell: bash
-        run: |
-          set +e
-          npm run typecheck > "$RUNNER_TEMP/typecheck.log" 2>&1
-          code=$?
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          if [[ $code -ne 0 ]]; then
-            diag="$(grep -Eo '^[^(: ]+\([0-9]+,[0-9]+\): error TS[0-9]+' "$RUNNER_TEMP/typecheck.log" | head -n 12 | tr '\n' ';' || true)"
-            echo "::error title=TrainingOS typecheck diagnostic::exit=$code diagnostics=${diag:-NOT_VERIFIED}"
-          else
-            echo "::notice title=TrainingOS typecheck diagnostic::PASS"
-          fi
-          exit 0
+        run: npm run typecheck
 
-      - name: Enforce diagnostic result
+      - name: Production build
+        working-directory: private-repo
         shell: bash
-        env:
-          FOCUSED_CODE: ${{ steps.focused.outputs.exit_code }}
-          TYPECHECK_CODE: ${{ steps.typecheck.outputs.exit_code }}
-        run: |
-          set -euo pipefail
-          test "$FOCUSED_CODE" = 0
-          test "$TYPECHECK_CODE" = 0
+        run: npm run build
 
-      - name: Cleanup sealed logs
-        if: always()
+      - name: Verify build
+        working-directory: private-repo
         shell: bash
-        run: rm -f "$RUNNER_TEMP/focused.log" "$RUNNER_TEMP/typecheck.log"
+        run: npm run verify:build
