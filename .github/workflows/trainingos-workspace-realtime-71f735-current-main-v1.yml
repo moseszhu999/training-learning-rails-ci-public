@@ -21,7 +21,6 @@ jobs:
       PRIVATE_SHA: 71f73563b01cbce58c07a2995151ef47bd3fcd04
       CURRENT_MAIN_SHA: b5695921f9fba668b431b22cee454cc7d54537a6
       MERGE_BASE_SHA: b5f25d56ab8f69968e047c1323cdcc68d31d7c0f
-
     steps:
       - name: Validate immutable inputs
         shell: bash
@@ -52,7 +51,7 @@ jobs:
           cache: npm
           cache-dependency-path: private-repo/package-lock.json
 
-      - name: Verify exact head, current main, and bounded scope
+      - name: Verify exact head and bounded scope
         id: scope
         working-directory: private-repo
         shell: bash
@@ -66,12 +65,67 @@ jobs:
           expected_files=$'apps/training-web/src/lib/trainingos-live-classroom-tencent-provider.ts\napps/training-web/src/lib/trainingos-workspace-realtime-contribution-core.ts\napps/training-web/src/lib/trainingos-workspace-realtime-contribution.ts\napps/training-web/src/workspace-domain-contribution.ts\npackage.json\nscripts/run-trainingos-workspace-realtime-client-validation.ts\nvite.config.ts'
           [[ "$actual_files" == "$expected_files" ]] || status=FAIL
           if printf '%s\n' "$actual_files" | grep -q '^supabase/migrations/'; then status=FAIL; fi
-          file_count="$(printf '%s\n' "$actual_files" | sed '/^$/d' | wc -l | tr -d ' ')"
-          {
-            echo "status=$status"
-            echo "actual_sha=$actual_sha"
-            echo "file_count=$file_count"
-          } >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Install exact-head dependencies with sealed output
+        id: install_head
+        if: steps.scope.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm ci > "$RUNNER_TEMP/head-install.log" 2>&1
+          code=$?
+          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Exact-head focused validation
+        id: focused_head
+        if: steps.install_head.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run validate:workspace-realtime-client > "$RUNNER_TEMP/head-focused.log" 2>&1
+          code=$?
+          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Exact-head typecheck
+        id: typecheck_head
+        if: steps.install_head.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run typecheck > "$RUNNER_TEMP/head-typecheck.log" 2>&1
+          code=$?
+          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Exact-head production build
+        id: build_head
+        if: steps.install_head.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run build > "$RUNNER_TEMP/head-build.log" 2>&1
+          code=$?
+          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Exact-head verify build
+        id: verify_head
+        if: steps.install_head.outputs.status == 'PASS'
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set +e
+          npm run verify:build > "$RUNNER_TEMP/head-verify.log" 2>&1
+          code=$?
+          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
           exit 0
 
       - name: Prove zero-conflict integration with current main
@@ -83,114 +137,31 @@ jobs:
           set +e
           git config user.name trainingos-public-ci
           git config user.email trainingos-public-ci@users.noreply.github.com
-          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA" > "$RUNNER_TEMP/workspace-realtime-merge.log" 2>&1
+          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA" > "$RUNNER_TEMP/merge.log" 2>&1
           code=$?
           echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Install dependencies with sealed output
-        id: install
-        if: steps.integrate.outputs.status == 'PASS'
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          npm ci > "$RUNNER_TEMP/workspace-realtime-install.log" 2>&1
-          code=$?
-          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Run focused Workspace Realtime validation with sealed output
-        id: focused
-        if: steps.install.outputs.status == 'PASS'
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          npm run validate:workspace-realtime-client > "$RUNNER_TEMP/workspace-realtime-focused.log" 2>&1
-          code=$?
-          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Run repository typecheck with sealed output
-        id: typecheck
-        if: steps.install.outputs.status == 'PASS'
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          npm run typecheck > "$RUNNER_TEMP/workspace-realtime-typecheck.log" 2>&1
-          code=$?
-          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Run production build with sealed output
-        id: build
-        if: steps.install.outputs.status == 'PASS'
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          npm run build > "$RUNNER_TEMP/workspace-realtime-build.log" 2>&1
-          code=$?
-          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Run bundle verification with sealed output
-        id: verify
-        if: steps.install.outputs.status == 'PASS'
-        working-directory: private-repo
-        shell: bash
-        run: |
-          set +e
-          npm run verify:build > "$RUNNER_TEMP/workspace-realtime-verify.log" 2>&1
-          code=$?
-          echo "status=$([[ $code == 0 ]] && echo PASS || echo FAIL)" >> "$GITHUB_OUTPUT"
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: Publish sanitized result
+      - name: Publish sanitized diagnostic
         if: always()
         shell: bash
         env:
           SCOPE: ${{ steps.scope.outputs.status }}
-          FILE_COUNT: ${{ steps.scope.outputs.file_count }}
+          INSTALL_HEAD: ${{ steps.install_head.outputs.status }}
+          FOCUSED_HEAD: ${{ steps.focused_head.outputs.status }}
+          TYPECHECK_HEAD: ${{ steps.typecheck_head.outputs.status }}
+          BUILD_HEAD: ${{ steps.build_head.outputs.status }}
+          VERIFY_HEAD: ${{ steps.verify_head.outputs.status }}
           INTEGRATE: ${{ steps.integrate.outputs.status }}
-          INSTALL: ${{ steps.install.outputs.status }}
-          FOCUSED: ${{ steps.focused.outputs.status }}
-          TYPECHECK: ${{ steps.typecheck.outputs.status }}
-          BUILD: ${{ steps.build.outputs.status }}
-          VERIFY: ${{ steps.verify.outputs.status }}
         run: |
-          printf 'private_head=%s\ncurrent_main=%s\nfiles=%s\nscope=%s\nintegrate=%s\ninstall=%s\nfocused=%s\ntypecheck=%s\nbuild=%s\nverify=%s\n' \
-            "$PRIVATE_SHA" "$CURRENT_MAIN_SHA" "$FILE_COUNT" "$SCOPE" "$INTEGRATE" "$INSTALL" "$FOCUSED" "$TYPECHECK" "$BUILD" "$VERIFY"
-
-      - name: Enforce exact-head current-main result
-        if: always()
-        shell: bash
-        env:
-          SCOPE: ${{ steps.scope.outputs.status }}
-          INTEGRATE: ${{ steps.integrate.outputs.status }}
-          INSTALL: ${{ steps.install.outputs.status }}
-          FOCUSED: ${{ steps.focused.outputs.status }}
-          TYPECHECK: ${{ steps.typecheck.outputs.status }}
-          BUILD: ${{ steps.build.outputs.status }}
-          VERIFY: ${{ steps.verify.outputs.status }}
-        run: |
-          set +e
           failed=0
-          for pair in "scope:$SCOPE" "integrate:$INTEGRATE" "install:$INSTALL" "focused:$FOCUSED" "typecheck:$TYPECHECK" "build:$BUILD" "verify:$VERIFY"; do
+          for pair in "scope:$SCOPE" "install_head:$INSTALL_HEAD" "focused_head:$FOCUSED_HEAD" "typecheck_head:$TYPECHECK_HEAD" "build_head:$BUILD_HEAD" "verify_head:$VERIFY_HEAD" "integrate:$INTEGRATE"; do
             key="${pair%%:*}"
             value="${pair#*:}"
             if [[ "$value" == PASS ]]; then
-              echo "::notice title=TrainingOS exact-head gate::$key=PASS"
+              echo "::notice title=TrainingOS diagnostic::$key=PASS"
             else
-              echo "::error title=TrainingOS exact-head gate::$key=${value:-EMPTY}"
+              echo "::error title=TrainingOS diagnostic::$key=${value:-EMPTY}"
               failed=1
             fi
           done
@@ -200,4 +171,4 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "$RUNNER_TEMP"/workspace-realtime-*.log
+          rm -f "$RUNNER_TEMP"/head-*.log "$RUNNER_TEMP/merge.log
