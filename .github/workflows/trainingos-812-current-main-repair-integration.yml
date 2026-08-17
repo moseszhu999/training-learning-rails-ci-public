@@ -1,0 +1,118 @@
+name: TrainingOS #812 repaired-head current-main integration
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/trainingos-812-current-main-repair-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trainingos-812-current-main-repair-integration-v1
+  cancel-in-progress: false
+
+jobs:
+  exact-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_HEAD: da267ca1869def910a79baf473335f0817164edb
+      EXPECTED_MAIN: 0c887d57b11cca2cd637b72066868aad6e981d30
+    steps:
+      - name: Validate private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          test -n "$PRIVATE_TOKEN"
+
+      - name: Checkout exact repaired TrainingOS #812 head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.EXPECTED_HEAD }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact repaired delta against current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          merge_base="$(git merge-base "$EXPECTED_HEAD" "$EXPECTED_MAIN")"
+          test "$merge_base" = "3a313df8af09d74a1f28b56f6c230d26bc522f85"
+          mapfile -t files < <(git diff --name-only "$EXPECTED_MAIN" "$EXPECTED_HEAD" | sort)
+          test "${#files[@]}" -eq 4
+          cat > "$RUNNER_TEMP/expected-files.txt" <<'EOF'
+          docs/architecture/trainingos-live-classroom-livekit-server-authorization-v1.md
+          lib/trainingos-agent-gateway/livekit-live-classroom-authorization.mjs
+          prototypes/trainingos-agent-mvp-v1/test/livekit-live-classroom-server-authorization.test.mjs
+          tests/test_trainingos_live_classroom_livekit_server_authorization_v1.py
+          EOF
+          printf '%s\n' "${files[@]}" > "$RUNNER_TEMP/actual-files.txt"
+          diff -u "$RUNNER_TEMP/expected-files.txt" "$RUNNER_TEMP/actual-files.txt"
+          if printf '%s\n' "${files[@]}" | grep -q '^supabase/migrations/'; then exit 7; fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Exact repaired-head focused gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run validate:workspace-realtime-client
+          npm run test:trainingos-workspace-realtime-leave-contract
+          python -m unittest tests.test_trainingos_live_classroom_tencent_provider_v1 -v
+          node --test prototypes/trainingos-agent-mvp-v1/test/livekit-live-classroom-server-authorization.test.mjs
+          python -m unittest tests.test_trainingos_live_classroom_livekit_server_authorization_v1 -v
+          npm run typecheck
+          npm run build
+          npm run verify:build
+
+      - name: Prove clean no-commit integration with current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'trainingos-public-ci'
+          git config user.email 'trainingos-public-ci@users.noreply.github.com'
+          git merge --no-commit --no-ff "$EXPECTED_MAIN"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse MERGE_HEAD)" = "$EXPECTED_MAIN"
+          test -z "$(git ls-files -u)"
+
+      - name: Integrated focused and repository gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run validate:workspace-realtime-client
+          npm run test:trainingos-workspace-realtime-leave-contract
+          python -m unittest tests.test_trainingos_live_classroom_tencent_provider_v1 -v
+          node --test prototypes/trainingos-agent-mvp-v1/test/livekit-live-classroom-server-authorization.test.mjs
+          python -m unittest tests.test_trainingos_live_classroom_livekit_server_authorization_v1 -v
+          npm run typecheck
+          npm run build
+          npm run verify:build
+
+      - name: Final immutable integration gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse MERGE_HEAD)" = "$EXPECTED_MAIN"
+          test -z "$(git ls-files -u)"
+          git diff --check
+          echo 'TRAININGOS_812_CURRENT_MAIN_REPAIR_INTEGRATION=PASS'
