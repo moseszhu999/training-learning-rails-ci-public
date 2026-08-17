@@ -1,4 +1,5 @@
 name: TrainingOS #812 repaired-head current-main integration
+# Fresh binding: #812 e84edace against main 8e44d06.
 
 on:
   pull_request:
