@@ -1,5 +1,5 @@
-name: TrainingOS #812 repaired-head current-main integration
-# Fresh binding: #812 e84edace against main 8e44d06.
+name: TrainingOS #812 reconciled-head current-main validation
+# Fresh binding: reconciled #812 2240e045 contains current main 8e44d06.
 
 on:
   pull_request:
@@ -19,15 +19,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      EXPECTED_HEAD: e84edacef854685d388fd01f8dad0ef36801b8c2
+      EXPECTED_HEAD: 2240e0457d6bbac69c671c2a18a04b8feeb1e08d
       EXPECTED_MAIN: 8e44d06a1ffe8a6f559dade1dcd8dbe0694924e5
-      EXPECTED_MERGE_BASE: 511b9ea2f665c797aba5846e36c26dc14888f9f1
     steps:
       - name: Validate private read credential
         env:
           PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
         run: test -n "$PRIVATE_TOKEN"
-      - name: Checkout exact repaired TrainingOS #812 head
+      - name: Checkout exact reconciled TrainingOS #812 head
         uses: actions/checkout@v4
         with:
           repository: moseszhu999/training-learning-rails
@@ -35,16 +34,16 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           fetch-depth: 0
           persist-credentials: true
-      - name: Verify exact repaired delta and current main
+      - name: Verify exact head contains exact current main and bounded scope
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
           test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
-          merge_base="$(git merge-base "$EXPECTED_HEAD" "$EXPECTED_MAIN")"
-          test "$merge_base" = "$EXPECTED_MERGE_BASE"
-          git diff --name-only "$EXPECTED_MERGE_BASE" "$EXPECTED_HEAD" | sort > "$RUNNER_TEMP/actual-files.txt"
+          git merge-base --is-ancestor "$EXPECTED_MAIN" "$EXPECTED_HEAD"
+          test "$(git merge-base "$EXPECTED_MAIN" "$EXPECTED_HEAD")" = "$EXPECTED_MAIN"
+          git diff --name-only "$EXPECTED_MAIN" "$EXPECTED_HEAD" | sort > "$RUNNER_TEMP/actual-files.txt"
           cat > "$RUNNER_TEMP/expected-files.txt" <<'EOF'
           docs/architecture/trainingos-live-classroom-livekit-server-authorization-v1.md
           lib/trainingos-agent-gateway/livekit-live-classroom-authorization.mjs
@@ -60,7 +59,7 @@ jobs:
         with: {python-version: '3.12'}
       - name: Install dependencies
         run: npm ci
-      - name: Exact repaired-head gates
+      - name: Exact reconciled-head gates
         shell: bash
         run: |
           set -euo pipefail
@@ -72,20 +71,12 @@ jobs:
           npm run typecheck
           npm run build
           npm run verify:build
-      - name: Integrate exact current main without commit
+      - name: Prove current-main containment and rerun gates
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name trainingos-public-ci
-          git config user.email trainingos-public-ci@users.noreply.github.com
-          git merge --no-commit --no-ff "$EXPECTED_MAIN"
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git rev-parse MERGE_HEAD)" = "$EXPECTED_MAIN"
-          test -z "$(git ls-files -u)"
-      - name: Integrated gates
-        shell: bash
-        run: |
-          set -euo pipefail
+          git merge-base --is-ancestor "$EXPECTED_MAIN" HEAD
           npm run validate:workspace-realtime-client
           npm run test:trainingos-workspace-realtime-leave-contract
           python -m unittest tests.test_trainingos_live_classroom_tencent_provider_v1 -v
@@ -95,7 +86,6 @@ jobs:
           npm run build
           npm run verify:build
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git rev-parse MERGE_HEAD)" = "$EXPECTED_MAIN"
-          test -z "$(git ls-files -u)"
+          test -z "$(git status --porcelain)"
           git diff --check
-          echo TRAININGOS_812_CURRENT_MAIN_REPAIR_INTEGRATION=PASS
+          echo TRAININGOS_812_CURRENT_MAIN_CONTAINED_VALIDATION=PASS
