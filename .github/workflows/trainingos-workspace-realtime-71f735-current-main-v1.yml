@@ -1,4 +1,4 @@
-name: TrainingOS Workspace Realtime current-head diagnostic
+name: TrainingOS Workspace Realtime fixed-head current-main CI
 
 on:
   push:
@@ -10,11 +10,12 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-exact-head:
+  exact-head-current-main:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       PRIVATE_SHA: 0b3b520e5fed462057e2b4d972a05c372e0358d2
+      CURRENT_MAIN_SHA: b5695921f9fba668b431b22cee454cc7d54537a6
       MERGE_BASE_SHA: b5f25d56ab8f69968e047c1323cdcc68d31d7c0f
     steps:
       - name: Check out exact private head
@@ -41,6 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
           actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
           expected=$'apps/training-web/src/lib/trainingos-live-classroom-tencent-provider.ts\napps/training-web/src/lib/trainingos-workspace-realtime-contribution-core.ts\napps/training-web/src/lib/trainingos-workspace-realtime-contribution.ts\napps/training-web/src/workspace-domain-contribution.ts\npackage.json\nscripts/run-trainingos-workspace-realtime-client-validation.ts\nvite.config.ts'
           test "$actual" = "$expected"
@@ -51,22 +53,49 @@ jobs:
         shell: bash
         run: npm ci >/dev/null 2>&1
 
-      - name: Focused validation
+      - name: Exact-head focused validation
         working-directory: private-repo
         shell: bash
         run: npm run validate:workspace-realtime-client
 
-      - name: Typecheck
+      - name: Exact-head typecheck
         working-directory: private-repo
         shell: bash
         run: npm run typecheck
 
-      - name: Production build
+      - name: Integrate current main without commit
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trainingos-public-ci
+          git config user.email trainingos-public-ci@users.noreply.github.com
+          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA"
+
+      - name: Integrated focused validation
+        working-directory: private-repo
+        shell: bash
+        run: npm run validate:workspace-realtime-client
+
+      - name: Integrated typecheck
+        working-directory: private-repo
+        shell: bash
+        run: npm run typecheck
+
+      - name: Integrated production build
         working-directory: private-repo
         shell: bash
         run: npm run build
 
-      - name: Verify build
+      - name: Integrated verify build
         working-directory: private-repo
         shell: bash
         run: npm run verify:build
+
+      - name: Prove immutable source head and expected merge state
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
