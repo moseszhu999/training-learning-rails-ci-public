@@ -1,0 +1,105 @@
+name: TrainingOS #815 current-main integration carrier
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/trainingos-815-current-main-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trainingos-815-current-main-integration-v1
+  cancel-in-progress: false
+
+jobs:
+  exact-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      EXPECTED_HEAD: b0b9e42442cf0f7ae079dabd33252f5fa796137e
+      EXPECTED_MAIN: a42c79a8330940a2a647cae27005adcdaff323c6
+    steps:
+      - name: Validate private read credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          test -n "$PRIVATE_TOKEN"
+
+      - name: Checkout exact TrainingOS head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.EXPECTED_HEAD }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact head and current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          mapfile -t files < <(git diff --name-only "$(git merge-base "$EXPECTED_HEAD" "$EXPECTED_MAIN")" "$EXPECTED_HEAD")
+          test "${#files[@]}" -eq 6
+          printf '%s\n' "${files[@]}" | sort > "$RUNNER_TEMP/actual-files.txt"
+          cat > "$RUNNER_TEMP/expected-files.txt" <<'EOF'
+          config/trainingos-live-classroom-tencent-e2e-targets-v1.json
+          docs/architecture/trainingos-live-classroom-tencent-e2e-target-gate-v1.md
+          lib/trainingos-agent-gateway/tencent-live-classroom-e2e-operator.mjs
+          lib/trainingos-agent-gateway/tencent-live-classroom-e2e-targets.mjs
+          prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-e2e-targets.test.mjs
+          scripts/trainingos-live-classroom-tencent-e2e-provision.mjs
+          EOF
+          sort -o "$RUNNER_TEMP/expected-files.txt" "$RUNNER_TEMP/expected-files.txt"
+          diff -u "$RUNNER_TEMP/expected-files.txt" "$RUNNER_TEMP/actual-files.txt"
+          if printf '%s\n' "${files[@]}" | grep -q '^supabase/migrations/'; then exit 7; fi
+
+      - name: Prove clean merge with current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'trainingos-public-ci'
+          git config user.email 'trainingos-public-ci@users.noreply.github.com'
+          git merge --no-commit --no-ff "$EXPECTED_MAIN" > "$RUNNER_TEMP/merge.log" 2>&1
+          test -z "$(git ls-files -u)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run focused Tencent E2E target contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test prototypes/trainingos-agent-mvp-v1/test/tencent-live-classroom-e2e-targets.test.mjs
+          node --check lib/trainingos-agent-gateway/tencent-live-classroom-e2e-operator.mjs
+          node --check lib/trainingos-agent-gateway/tencent-live-classroom-e2e-targets.mjs
+          node --check scripts/trainingos-live-classroom-tencent-e2e-provision.mjs
+
+      - name: Run repository typecheck and production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build
+          npm run verify:build
+
+      - name: Final immutable integration gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test -z "$(git ls-files -u)"
+          echo 'TRAININGOS_815_CURRENT_MAIN_INTEGRATION=PASS'
+          echo 'PROVIDER_EXECUTION=NO'
+          echo 'PRODUCTION_WRITE=NO'
+          echo 'PRODUCTION_DEPLOY=NO'
