@@ -46,7 +46,7 @@ jobs:
         with:
           repository: moseszhu999/dalian-aton-intelligent-review
           ref: ${{ inputs.privateExactSha }}
-          token: ${{ secrets.ATON_PRIVATE_REPO_READ_TOKEN }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
           path: private-aton
           persist-credentials: false
           fetch-depth: 1
