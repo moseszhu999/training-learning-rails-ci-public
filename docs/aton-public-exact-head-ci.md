@@ -8,7 +8,8 @@ cannot provide usable hosted evidence.
 
 - The workflow checks out one caller-supplied exact commit SHA only.
 - The repository name and validation profile are fixed in the workflow.
-- The read token is used only for a read-only private checkout.
+- The existing carrier read-only secret `PRIVATE_REPO_READ_TOKEN` is used only
+  for the private checkout.
 - The validator emits bounded counts and closed failure labels.
 - No private source, raw document, customer material, or log artifact is uploaded.
 - The private checkout is deleted in an `always()` cleanup step.
@@ -17,7 +18,7 @@ cannot provide usable hosted evidence.
 
 ## Run
 
-From the public repository Actions UI, run:
+After this PR is merged, use the public repository Actions UI:
 
 `.github/workflows/aton-public-exact-head.yml`
 
@@ -26,12 +27,9 @@ Inputs:
 - `privateExactSha`: exact 40-character SHA from the private repository.
 - `validationProfile`: fixed to `aton-requirements`.
 
-Required public-repository secret:
-
-`ATON_PRIVATE_REPO_READ_TOKEN`
-
-The secret must be a read-only token capable of reading the private AtoN
-repository. It must not be printed or copied into the repository.
+The existing public carrier secret `PRIVATE_REPO_READ_TOKEN` must have
+read-only access to the private AtoN repository. It must not be printed or
+copied into the repository.
 
 ## Verdict
 
