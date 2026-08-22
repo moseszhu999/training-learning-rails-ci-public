@@ -1,0 +1,78 @@
+name: AtoN public exact-head CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      privateExactSha:
+        description: Lowercase 40-character SHA from the private AtoN repository
+        required: true
+        type: string
+      validationProfile:
+        description: Fixed public-safe validation profile
+        required: true
+        default: aton-requirements
+        type: choice
+        options:
+          - aton-requirements
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aton-public-exact-head-${{ inputs.privateExactSha }}
+  cancel-in-progress: false
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out public CI controller
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validator dependency
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.2"
+
+      - name: Check out exact private AtoN commit
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/dalian-aton-intelligent-review
+          ref: ${{ inputs.privateExactSha }}
+          token: ${{ secrets.ATON_PRIVATE_REPO_READ_TOKEN }}
+          path: private-aton
+          persist-credentials: false
+          fetch-depth: 1
+          clean: true
+
+      - name: Run fixed AtoN requirements profile
+        env:
+          ATON_REPO_PATH: private-aton
+          ATON_EXPECTED_SHA: ${{ inputs.privateExactSha }}
+        run: python scripts/aton-requirements-validator.py
+
+      - name: Publish sanitized summary
+        if: always()
+        env:
+          EXACT_SHA: ${{ inputs.privateExactSha }}
+          PROFILE: ${{ inputs.validationProfile }}
+        run: |
+          {
+            echo "## AtoN public exact-head CI"
+            echo
+            echo "- Profile: **$PROFILE**"
+            echo "- Exact private SHA: \`$EXACT_SHA\`"
+            echo "- Private checkout and raw logs remain runner-local."
+            echo "- No artifact upload, deployment, or production write performed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove private checkout
+        if: always()
+        run: rm -rf private-aton
