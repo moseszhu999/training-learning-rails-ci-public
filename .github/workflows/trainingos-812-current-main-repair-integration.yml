@@ -1,5 +1,5 @@
 name: TrainingOS #812 reconciled-head current-main validation
-# Fresh binding: #812 2240e045 against current main fca327c4.
+# Fresh binding: #812 2240e045 against current main d4ea8575.
 
 on:
   pull_request:
@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 90
     env:
       EXPECTED_HEAD: 2240e0457d6bbac69c671c2a18a04b8feeb1e08d
-      EXPECTED_MAIN: fca327c4618a5f9023118bb994302b06e3764886
+      EXPECTED_MAIN: d4ea85759ac3746ddc6ad795b0671602219a2bea
     steps:
       - name: Validate private read credential
         env:
