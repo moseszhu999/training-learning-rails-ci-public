@@ -1,0 +1,113 @@
+name: TrainingOS Schedule hardening current-main proof
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/trainingos-schedule-hardening-current-main.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trainingos-schedule-hardening-a516e374-d4ea8575
+  cancel-in-progress: false
+
+jobs:
+  bounded-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PRIVATE_HEAD_SHA: a516e3745b1a67d8a310cd288abf0f081ed0950a
+      PRIVATE_BASE_SHA: 5e9ba8dfd2467da4341646476df7b85e44b15955
+      PRIVATE_MAIN_SHA: d4ea85759ac3746ddc6ad795b0671602219a2bea
+    steps:
+      - name: Check out public selector
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Check read-only credential
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+        run: |
+          test -n "$PRIVATE_TOKEN"
+
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_HEAD_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Verify immutable scope and current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_WORKSPACE/private-repo"
+          test "$(git -C "$repo" rev-parse HEAD)" = "$PRIVATE_HEAD_SHA"
+          git -C "$repo" cat-file -e "$PRIVATE_BASE_SHA^{commit}"
+          git -C "$repo" cat-file -e "$PRIVATE_MAIN_SHA^{commit}"
+          test "$(git -C "$repo" merge-base "$PRIVATE_BASE_SHA" "$PRIVATE_HEAD_SHA")" = "$PRIVATE_BASE_SHA"
+          mapfile -t files < <(git -C "$repo" diff --name-only "$PRIVATE_BASE_SHA" "$PRIVATE_HEAD_SHA" | sort)
+          expected=(
+            'docs/evidence/trainingos-schedule-main-hardening-v1.md'
+            'lib/trainingos-agent-gateway/schedule-ops.mjs'
+            'tests/test_trainingos_schedule_main_hardening_v1.py'
+          )
+          test "${#files[@]}" -eq "${#expected[@]}"
+          for i in "${!expected[@]}"; do test "${files[$i]}" = "${expected[$i]}"; done
+          if printf '%s\n' "${files[@]}" | grep -q '^supabase/migrations/'; then exit 31; fi
+          echo 'SCOPE_VERDICT=PASS'
+
+      - name: Run bounded merged-tree Schedule gate with sealed output
+        id: gate
+        shell: bash
+        run: |
+          set +e
+          repo="$GITHUB_WORKSPACE/private-repo"
+          worktree="$RUNNER_TEMP/trainingos-schedule-integrated"
+          log="$RUNNER_TEMP/trainingos-schedule-gate.log"
+          rm -rf "$worktree" "$log"
+          {
+            git -C "$repo" worktree add --detach "$worktree" "$PRIVATE_HEAD_SHA"
+            git -C "$worktree" -c user.name='TrainingOS Public CI' -c user.email='ci@invalid.local' merge --no-commit --no-ff "$PRIVATE_MAIN_SHA"
+            npm --prefix "$worktree" ci
+            node --check "$worktree/lib/trainingos-agent-gateway/schedule-ops.mjs"
+            cd "$worktree"
+            python -m unittest -v tests.test_trainingos_schedule_main_hardening_v1 tests.test_trainingos_schedule_mcp_gateway_contract
+            npm run typecheck
+            npx vite build --config vite.config.ts
+            node scripts/copy-trainingos-marketplace-web.mjs
+            npm run verify:build
+            test "$(git rev-parse HEAD)" = "$PRIVATE_HEAD_SHA"
+          } >"$log" 2>&1
+          code=$?
+          if [[ "$code" -eq 0 ]]; then
+            echo 'status=PASS' >> "$GITHUB_OUTPUT"
+            echo 'INTEGRATED_SCHEDULE_VERDICT=PASS'
+          else
+            echo 'status=FAIL' >> "$GITHUB_OUTPUT"
+            echo 'INTEGRATED_SCHEDULE_VERDICT=FAIL'
+          fi
+          git -C "$repo" worktree remove --force "$worktree" >/dev/null 2>&1 || true
+          rm -f "$log"
+          exit "$code"
+
+      - name: Enforce sanitized verdict
+        if: always()
+        shell: bash
+        run: |
+          test "${{ steps.gate.outputs.status }}" = 'PASS'
+
+      - name: Assert no production action
+        if: always()
+        shell: bash
+        run: |
+          echo 'Production deploy/migration/write=NO'
