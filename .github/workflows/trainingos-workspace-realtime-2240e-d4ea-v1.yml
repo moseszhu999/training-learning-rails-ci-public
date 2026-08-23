@@ -1,0 +1,117 @@
+name: TrainingOS Workspace Realtime 2240e current-main CI
+
+on:
+  push:
+    branches:
+      - ci/trainingos-workspace-realtime-2240e-d4ea-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-current-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PRIVATE_SHA: 2240e0457d6bbac69c671c2a18a04b8feeb1e08d
+      CURRENT_MAIN_SHA: d4ea85759ac3746ddc6ad795b0671602219a2bea
+      MERGE_BASE_SHA: 8e44d06a1ffe8a6f559dade1dcd8dbe0694924e5
+    steps:
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - name: Verify exact head and bounded scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
+          actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected=$'docs/architecture/trainingos-live-classroom-livekit-server-authorization-v1.md\nlib/trainingos-agent-gateway/livekit-live-classroom-authorization.mjs\nprototypes/trainingos-agent-mvp-v1/test/livekit-live-classroom-server-authorization.test.mjs\ntests/test_trainingos_live_classroom_livekit_server_authorization_v1.py'
+          test "$actual" = "$expected"
+          ! printf '%s\n' "$actual" | grep -q '^supabase/migrations/'
+          ! printf '%s\n' "$actual" | grep -q '^.github/workflows/'
+      - name: Reject production capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          env | cut -d= -f1 | grep -E '(^|_)(PRODUCTION|PROD|SERVICE_ROLE|BILLING|PAYMENT|STRIPE)(_|$)' && exit 1 || true
+      - name: Install dependencies
+        working-directory: private-repo
+        shell: bash
+        run: npm ci >/dev/null 2>&1
+      - name: Exact-head Workspace Realtime validation
+        working-directory: private-repo
+        shell: bash
+        run: npm run validate:workspace-realtime-client
+      - name: Exact-head leave contract
+        working-directory: private-repo
+        shell: bash
+        run: npm run test:trainingos-workspace-realtime-leave-contract
+      - name: Exact-head Tencent provider Python contract
+        working-directory: private-repo
+        shell: bash
+        run: python -m unittest tests.test_trainingos_live_classroom_tencent_provider_v1 -v
+      - name: Exact-head LiveKit authorization Node contract
+        working-directory: private-repo
+        shell: bash
+        run: node --test prototypes/trainingos-agent-mvp-v1/test/livekit-live-classroom-server-authorization.test.mjs
+      - name: Exact-head LiveKit authorization Python contract
+        working-directory: private-repo
+        shell: bash
+        run: python -m unittest tests.test_trainingos_live_classroom_livekit_server_authorization_v1 -v
+      - name: Exact-head repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build
+          npm run verify:build
+      - name: Integrate exact current main without commit
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trainingos-public-ci
+          git config user.email trainingos-public-ci@users.noreply.github.com
+          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
+          git diff --check
+      - name: Integrated focused contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run validate:workspace-realtime-client
+          npm run test:trainingos-workspace-realtime-leave-contract
+          python -m unittest tests.test_trainingos_live_classroom_tencent_provider_v1 -v
+          node --test prototypes/trainingos-agent-mvp-v1/test/livekit-live-classroom-server-authorization.test.mjs
+          python -m unittest tests.test_trainingos_live_classroom_livekit_server_authorization_v1 -v
+      - name: Integrated repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build
+          npm run verify:build
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
+          git diff --check
