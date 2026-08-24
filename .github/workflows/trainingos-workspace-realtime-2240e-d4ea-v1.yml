@@ -1,4 +1,5 @@
 name: TrainingOS Workspace Realtime 2240e current-main CI
+# retrigger: preserve exact private pair 2240e045 + d4ea8575
 
 on:
   push:
