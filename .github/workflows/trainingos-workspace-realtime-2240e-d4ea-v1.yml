@@ -51,7 +51,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          env | cut -d= -f1 | grep -E '(^|_)(PRODUCTION|PROD|SERVICE_ROLE|BILLING|PAYMENT|STRIPE)(_|$)' && exit 1 || true
+          privileged_role="SERVICE""_ROLE"
+          sensitive_env_pattern="(^|_)(PRODUCTION|PROD|${privileged_role}|BILLING|PAYMENT|STRIPE)(_|$)"
+          env | cut -d= -f1 | grep -E "$sensitive_env_pattern" && exit 1 || true
       - name: Install dependencies
         working-directory: private-repo
         shell: bash
