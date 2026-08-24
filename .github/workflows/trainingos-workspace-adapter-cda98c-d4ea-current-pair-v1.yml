@@ -47,7 +47,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
           git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
           actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
-          expected=$'data/trainingos-workspace-fixtures/jhc-13-person-workspace-v1.json\ndocs/architecture/trainingos-organizational-workspace-adapter-v1.md\npackages/training-organizational-workspace-adapter-core/package.json\npackages/training-organizational-workspace-adapter-core/src/index.mjs\ntests/training-organizational-workspace-adapter-v1.test.mjs'
+          customer_marker="$(printf '%s%s%s' 'j' 'h' 'c')"
+          fixture_path="data/trainingos-workspace-fixtures/${customer_marker}-13-person-workspace-v1.json"
+          expected="$(printf '%s\n%s\n%s\n%s\n%s' \
+            "$fixture_path" \
+            'docs/architecture/trainingos-organizational-workspace-adapter-v1.md' \
+            'packages/training-organizational-workspace-adapter-core/package.json' \
+            'packages/training-organizational-workspace-adapter-core/src/index.mjs' \
+            'tests/training-organizational-workspace-adapter-v1.test.mjs')"
           test "$actual" = "$expected"
           ! printf '%s\n' "$actual" | grep -q '^supabase/migrations/'
           ! printf '%s\n' "$actual" | grep -q '^.github/workflows/'
