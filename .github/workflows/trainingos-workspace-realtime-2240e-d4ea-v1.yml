@@ -5,6 +5,11 @@ on:
   push:
     branches:
       - ci/trainingos-workspace-realtime-2240e-d4ea-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/trainingos-workspace-realtime-2240e-d4ea-v1.yml
   workflow_dispatch:
 
 permissions:
