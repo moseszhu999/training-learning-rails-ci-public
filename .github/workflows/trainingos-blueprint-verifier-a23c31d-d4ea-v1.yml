@@ -1,0 +1,104 @@
+name: TrainingOS Blueprint verifier exact-current-pair
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  exact-current-pair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PRIVATE_HEAD: a23c31d97fae2533df7cac10d12fc991dce44092
+      PRIVATE_MAIN: d4ea85759ac3746ddc6ad795b0671602219a2bea
+
+    steps:
+      - name: Validate immutable coordinates
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRIVATE_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PRIVATE_MAIN" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out exact private head with full history
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_HEAD }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify exact checkout and exact scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$PRIVATE_HEAD" ]]
+          git cat-file -e "$PRIVATE_MAIN^{commit}"
+          mapfile -t changed < <(git diff --name-only "$PRIVATE_MAIN...$PRIVATE_HEAD" | sort)
+          expected=(
+            packages/training-industry-role-pack-core/src/training-blueprint-verifier.mjs
+            packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs
+          )
+          [[ "${#changed[@]}" -eq 2 ]]
+          [[ "${changed[0]}" == "${expected[0]}" ]]
+          [[ "${changed[1]}" == "${expected[1]}" ]]
+
+      - name: Run exact-head focused contracts and repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci >/dev/null
+          node --check packages/training-industry-role-pack-core/src/training-blueprint-verifier.mjs
+          node --test packages/training-industry-role-pack-core/test/training-blueprint.test.mjs packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs
+          npm run typecheck
+          npm run build
+          npm run verify:build
+
+      - name: Integrate exact current main without commit
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.email "ci@invalid.local"
+          git config user.name "TrainingOS Public CI"
+          git merge --no-commit --no-ff "$PRIVATE_MAIN"
+
+      - name: Run integrated focused contracts and repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check packages/training-industry-role-pack-core/src/training-blueprint-verifier.mjs
+          node --test packages/training-industry-role-pack-core/test/training-blueprint.test.mjs packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs
+          npm run typecheck
+          npm run build
+          npm run verify:build
+
+      - name: Publish sanitized evidence
+        if: always()
+        shell: bash
+        run: |
+          printf '%s\n' \
+            '## TrainingOS Blueprint verifier exact-current-pair' \
+            '' \
+            "- Private head: \`$PRIVATE_HEAD\`" \
+            "- Private main: \`$PRIVATE_MAIN\`" \
+            '- Exact scope: 2 files / 0 migrations' \
+            '- Private source/log output: sealed; not published' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup private checkout
+        if: always()
+        shell: bash
+        run: rm -rf private-repo
