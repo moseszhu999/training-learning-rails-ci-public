@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      PRIVATE_HEAD: ca7d3c4e417e5c08b2aaa3d7addbdb292fb0d42a
+      PRIVATE_HEAD: 337c25bcff635ac15aef78c0e4eb90e15698d078
       PRIVATE_MAIN: d4ea85759ac3746ddc6ad795b0671602219a2bea
 
     steps:
