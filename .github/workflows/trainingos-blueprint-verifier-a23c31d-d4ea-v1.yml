@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      PRIVATE_HEAD: 337c25bcff635ac15aef78c0e4eb90e15698d078
+      PRIVATE_HEAD: e6ffb80ceb0b8fd84fb1ca9bd0116ec0eb56a531
       PRIVATE_MAIN: d4ea85759ac3746ddc6ad795b0671602219a2bea
 
     steps:
@@ -48,11 +48,13 @@ jobs:
           mapfile -t changed < <(git diff --name-only "$PRIVATE_MAIN...$PRIVATE_HEAD" | sort)
           expected=(
             packages/training-industry-role-pack-core/src/training-blueprint-verifier.mjs
+            packages/training-industry-role-pack-core/test/training-blueprint-verifier-cycle.test.mjs
             packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs
           )
-          [[ "${#changed[@]}" -eq 2 ]]
-          [[ "${changed[0]}" == "${expected[0]}" ]]
-          [[ "${changed[1]}" == "${expected[1]}" ]]
+          [[ "${#changed[@]}" -eq 3 ]]
+          for index in "${!expected[@]}"; do
+            [[ "${changed[$index]}" == "${expected[$index]}" ]]
+          done
 
       - name: Run exact-head focused contracts and repository gates
         working-directory: private-repo
@@ -61,7 +63,10 @@ jobs:
           set -euo pipefail
           npm ci >/dev/null
           node --check packages/training-industry-role-pack-core/src/training-blueprint-verifier.mjs
-          node --test packages/training-industry-role-pack-core/test/training-blueprint.test.mjs packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs
+          node --test \
+            packages/training-industry-role-pack-core/test/training-blueprint.test.mjs \
+            packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs \
+            packages/training-industry-role-pack-core/test/training-blueprint-verifier-cycle.test.mjs
           npm run typecheck
           npm run build
           npm run verify:build
@@ -81,7 +86,10 @@ jobs:
         run: |
           set -euo pipefail
           node --check packages/training-industry-role-pack-core/src/training-blueprint-verifier.mjs
-          node --test packages/training-industry-role-pack-core/test/training-blueprint.test.mjs packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs
+          node --test \
+            packages/training-industry-role-pack-core/test/training-blueprint.test.mjs \
+            packages/training-industry-role-pack-core/test/training-blueprint-verifier.test.mjs \
+            packages/training-industry-role-pack-core/test/training-blueprint-verifier-cycle.test.mjs
           npm run typecheck
           npm run build
           npm run verify:build
@@ -95,7 +103,7 @@ jobs:
             '' \
             "- Private head: \`$PRIVATE_HEAD\`" \
             "- Private main: \`$PRIVATE_MAIN\`" \
-            '- Exact scope: 2 files / 0 migrations' \
+            '- Exact scope: 3 files / 0 migrations' \
             '- Private source/log output: sealed; not published' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cleanup private checkout
