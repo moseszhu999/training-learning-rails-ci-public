@@ -1,0 +1,94 @@
+name: TrainingOS Live Classroom snapshot 773481b current-main CI
+
+on:
+  push:
+    branches:
+      - ci/exact-head-request/live-classroom-snapshot-773481b-d4ea8575-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/trainingos-live-classroom-snapshot-773481b-d4ea-current-pair-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-current-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PRIVATE_SHA: 773481b97484a1ea60ed6b56c0a48f49d3ea3f93
+      CURRENT_MAIN_SHA: d4ea85759ac3746ddc6ad795b0671602219a2bea
+      MERGE_BASE_SHA: 0c887d57b11cca2cd637b72066868aad6e981d30
+    steps:
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+      - name: Verify exact head and bounded scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
+          actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected='docs/evidence/trainingos-live-classroom-current-runtime-snapshot-2026-08-17.md'
+          test "$actual" = "$expected"
+          ! printf '%s\n' "$actual" | grep -q '^supabase/migrations/'
+          ! printf '%s\n' "$actual" | grep -q '^.github/workflows/'
+      - name: Reject production capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          privileged_role="SERVICE""_ROLE"
+          sensitive_env_pattern="(^|_)(PRODUCTION|PROD|${privileged_role}|BILLING|PAYMENT|STRIPE)(_|$)"
+          env | cut -d= -f1 | grep -E "$sensitive_env_pattern" && exit 1 || true
+      - name: Install dependencies
+        working-directory: private-repo
+        shell: bash
+        run: npm ci >/dev/null 2>&1
+      - name: Exact-head repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build
+          npm run verify:build
+      - name: Integrate exact current main without commit
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trainingos-public-ci
+          git config user.email trainingos-public-ci@users.noreply.github.com
+          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
+          git diff --check
+      - name: Integrated repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build
+          npm run verify:build
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
+          git diff --check
