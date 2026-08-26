@@ -1,0 +1,133 @@
+name: TrainingOS Skill Library d0f26742 current-main CI
+
+on:
+  push:
+    branches:
+      - ci/exact-head-request/skill-library-d0f26742-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-head-current-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PRIVATE_SHA: d0f26742da38f2e4d9779a84263cb648b90c3388
+      CURRENT_MAIN_SHA: d4ea85759ac3746ddc6ad795b0671602219a2bea
+      MERGE_BASE_SHA: 32d4ebe8254c0eabd4671542e92aa43cebe1d849
+    steps:
+      - name: Check out exact private head
+        uses: actions/checkout@v4
+        with:
+          repository: moseszhu999/training-learning-rails
+          ref: ${{ env.PRIVATE_SHA }}
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: private-repo
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: private-repo/package-lock.json
+
+      - name: Verify exact head and bounded scope
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
+          actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
+          expected="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            'data/trainingos-skill-library/pilots/ai-video-formal-learning-readiness-v0.1.json' \
+            'data/trainingos-skill-library/pilots/ai-video-production-pilot-v0.1.json' \
+            'data/trainingos-skill-library/seed-skills-v0.1.json' \
+            'docs/product/previews/trainingos-ai-video-production-pilot-v1.html' \
+            'docs/product/previews/trainingos-skill-library-system-map-v1.html' \
+            'docs/product/trainingos-ai-video-production-end-to-end-pilot-v1.md' \
+            'docs/product/trainingos-skill-library-platform-integration-ux-v1.md' \
+            'docs/product/trainingos-skill-library-tutorial-ingestion-v1.md')"
+          test "$actual" = "$expected"
+          ! printf '%s\n' "$actual" | grep -q '^supabase/migrations/'
+          ! printf '%s\n' "$actual" | grep -q '^.github/workflows/'
+
+      - name: Reject production capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          privileged_role="SERVICE""_ROLE"
+          sensitive_env_pattern="(^|_)(PRODUCTION|PROD|${privileged_role}|BILLING|PAYMENT|STRIPE)(_|$)"
+          env | cut -d= -f1 | grep -E "$sensitive_env_pattern" && exit 1 || true
+
+      - name: Install dependencies
+        working-directory: private-repo
+        shell: bash
+        run: npm ci >/dev/null 2>&1
+
+      - name: Exact-head Skill Library contracts
+        working-directory: private-repo
+        shell: bash
+        env:
+          APP_ENV: test
+          DRY_RUN: '1'
+          MEDIA_RENDER_ADAPTER_MODE: fake
+          EXTERNAL_SEND_MODE: disabled
+          PAYMENT_MODE: disabled
+          SECRETS_MODE: fixture
+        run: |
+          set -euo pipefail
+          node -e 'const fs=require("node:fs"); for (const p of process.argv.slice(1)) JSON.parse(fs.readFileSync(p,"utf8"));' \
+            data/trainingos-skill-library/pilots/ai-video-formal-learning-readiness-v0.1.json \
+            data/trainingos-skill-library/pilots/ai-video-production-pilot-v0.1.json \
+            data/trainingos-skill-library/seed-skills-v0.1.json
+
+      - name: Exact-head repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npx vite build --config vite.config.ts
+          node scripts/copy-trainingos-marketplace-web.mjs
+          npm run verify:build
+
+      - name: Integrate exact current main without commit
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name trainingos-public-ci
+          git config user.email trainingos-public-ci@users.noreply.github.com
+          git merge --no-commit --no-ff "$CURRENT_MAIN_SHA"
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
+          git diff --check
+
+      - name: Integrated Skill Library contracts
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e 'const fs=require("node:fs"); for (const p of process.argv.slice(1)) JSON.parse(fs.readFileSync(p,"utf8"));' \
+            data/trainingos-skill-library/pilots/ai-video-formal-learning-readiness-v0.1.json \
+            data/trainingos-skill-library/pilots/ai-video-production-pilot-v0.1.json \
+            data/trainingos-skill-library/seed-skills-v0.1.json
+
+      - name: Integrated repository gates
+        working-directory: private-repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npx vite build --config vite.config.ts
+          node scripts/copy-trainingos-marketplace-web.mjs
+          npm run verify:build
+          test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
+          test "$(git rev-parse MERGE_HEAD)" = "$CURRENT_MAIN_SHA"
+          git diff --check
