@@ -1,4 +1,4 @@
-name: TrainingOS Live Classroom snapshot 773481b current-main CI
+name: TrainingOS Live Classroom snapshot 96691f6 current-main CI
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      PRIVATE_SHA: 773481b97484a1ea60ed6b56c0a48f49d3ea3f93
+      PRIVATE_SHA: 96691f6cf81be9ae801d6771d6c5ddc513bee5d9
       CURRENT_MAIN_SHA: d4ea85759ac3746ddc6ad795b0671602219a2bea
       MERGE_BASE_SHA: 0c887d57b11cca2cd637b72066868aad6e981d30
     steps:
@@ -47,7 +47,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$PRIVATE_SHA"
           git cat-file -e "$CURRENT_MAIN_SHA^{commit}"
           actual="$(git diff --name-only "$MERGE_BASE_SHA" "$PRIVATE_SHA" | sort)"
-          expected='docs/evidence/trainingos-live-classroom-current-runtime-snapshot-2026-08-17.md'
+          expected="$(printf '%s\n' \
+            'docs/evidence/trainingos-live-classroom-current-runtime-snapshot-2026-08-17.md' \
+            'docs/product/live-classroom-ai-native-workspace-runtime.md' | sort)"
           test "$actual" = "$expected"
           ! printf '%s\n' "$actual" | grep -q '^supabase/migrations/'
           ! printf '%s\n' "$actual" | grep -q '^.github/workflows/'
