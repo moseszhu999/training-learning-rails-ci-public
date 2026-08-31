@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto';
 
 const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
 const sha = (value) => `sha256:${createHash('sha256').update(JSON.stringify(value, Object.keys(value).sort())).digest('hex')}`;
+const CLAIM_KEYS = new Set(['status','workspaceId']);
 
 function validateVector(vector) {
   assert.equal(vector.runtime.privateExactHead, manifest.privateExactHead);
@@ -21,6 +22,7 @@ function validateVector(vector) {
   assert.equal(vector.outcome.outcome, 'success');
   assert.equal(vector.outcome.uncertainty, null);
   assert.equal(vector.outcome.retry.automaticRetryPerformed, false);
+  for (const key of Object.keys(vector.claim)) assert.ok(CLAIM_KEYS.has(key), `claim field ${key} is unsupported`);
   assert.equal(vector.claim.status, 'success');
   assert.equal(vector.claim.workspaceId, vector.capability.workspaceId);
   for (const [key, expected] of Object.entries(manifest.boundaries)) {
@@ -44,9 +46,9 @@ function validVector(text='Draft a bounded lesson outline.') {
   };
 }
 
-test('carrier is anchored to private PR 760 exact head and AIEXE P3.1 exact head', () => {
+test('carrier is anchored to private PR 760 repaired exact head and AIEXE P3.1 exact head', () => {
   assert.equal(manifest.privatePullRequest, 760);
-  assert.equal(manifest.privateExactHead, '1cdd2bbd0bfe48cba11931eeee5dc61aa1d571d1');
+  assert.equal(manifest.privateExactHead, '01e461ce0fa79af930ac47125a9dfc389bc64fbf');
   assert.equal(manifest.upstreamRuntimeExactHead, '28c7dd539a4a5f340a715a230bd05ce1c386d925');
   assert.equal(manifest.proofMode, 'PUBLIC_CONTRACT_CARRIER');
   assert.equal(manifest.privateSourcePublished, false);
@@ -76,6 +78,12 @@ test('uncertain provider outcome is not accepted as useful completed work eviden
 
 test('persistent claim must match TrainingOS capability workspace', () => {
   const v=validVector(); v.claim.workspaceId='workspace.other'; assert.throws(()=>validateVector(v));
+});
+
+test('persistent claim rejects authority HumanGate and external-action truth fields', () => {
+  for (const patch of [{authorityGrantCreated:true},{humanGateCreated:true},{externalActionPerformed:true}]) {
+    const v=validVector(); Object.assign(v.claim, patch); assert.throws(()=>validateVector(v), /claim field .* is unsupported/);
+  }
 });
 
 test('formal learning credential competency and authority truth remain false', () => {
