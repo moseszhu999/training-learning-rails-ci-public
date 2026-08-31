@@ -1,0 +1,32 @@
+name: TrainingOS AIEXE Runtime Work Evidence Public Carrier
+
+on:
+  pull_request:
+    paths:
+      - 'carriers/trainingos-aiexe-runtime-work-evidence-v1/**'
+      - '.github/workflows/trainingos-aiexe-runtime-work-evidence-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out carrier exact head
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: node --check carriers/trainingos-aiexe-runtime-work-evidence-v1/contract.test.mjs
+      - name: Run ten public contract vectors
+        run: node --test carriers/trainingos-aiexe-runtime-work-evidence-v1/contract.test.mjs
+      - name: Confirm no private source publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const m=require('./carriers/trainingos-aiexe-runtime-work-evidence-v1/manifest.json'); if(m.privateSourcePublished!==false || m.proofMode!=='PUBLIC_CONTRACT_CARRIER') process.exit(1)"
+          echo 'PUBLIC_CONTRACT_CARRIER boundary: PASS'
