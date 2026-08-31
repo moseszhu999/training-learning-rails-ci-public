@@ -4,7 +4,12 @@ import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 
 const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url), 'utf8'));
-const sha = (value) => `sha256:${createHash('sha256').update(JSON.stringify(value, Object.keys(value).sort())).digest('hex')}`;
+const canonicalize = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]));
+};
+const sha = (value) => `sha256:${createHash('sha256').update(JSON.stringify(canonicalize(value))).digest('hex')}`;
 const CLAIM_KEYS = new Set(['status','workspaceId']);
 
 function validateVector(vector) {
